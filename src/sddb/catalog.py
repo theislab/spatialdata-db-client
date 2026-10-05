@@ -13,7 +13,7 @@ import pyarrow.parquet as pq
 from rapidfuzz import fuzz
 
 from sddb import _catalog_schema as schema
-from sddb._cache import fetch_catalog
+from sddb._cache import _local_path, fetch_catalog
 from sddb.dataset import Results, Source
 
 if TYPE_CHECKING:
@@ -62,6 +62,9 @@ class Catalog:
             url = os.environ.get("SDDB_CATALOG_URL") or DEFAULT_CATALOG_URL
             if version is not None:
                 url = url.rsplit("/", 1)[0] + f"/catalog-{version}.parquet"
+        local = _local_path(url)
+        if local is not None and not url.startswith("file://"):
+            url = str(local.resolve())  # stable cache key regardless of cwd
         self.url = url
         self.version = version
         self._cache_dir = cache_dir
@@ -83,6 +86,19 @@ class Catalog:
         except schema.SchemaError as err:
             raise schema.SchemaError(f"catalog at {url} is invalid: {err}") from err
         self._df = df
+
+    @classmethod
+    def from_file(cls, path: str | Path, *, cache_dir: str | Path | None = None) -> Catalog:
+        """Load a catalog from a local ``catalog.parquet`` (absolute or relative path, or ``file://`` URL).
+
+        Parameters
+        ----------
+        path
+            Local parquet path; validated against the catalog schema like any other catalog.
+        cache_dir
+            Cache directory override.
+        """
+        return cls(str(path), cache_dir=cache_dir)
 
     @property
     def generated_at(self) -> str | None:

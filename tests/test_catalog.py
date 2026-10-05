@@ -163,3 +163,21 @@ def test_env_catalog_url(tmp_path, monkeypatch):
     assert len(Catalog(cache_dir=tmp_path / "c1")) == 5
     other = write_fixture_catalog(tmp_path / "other.parquet")
     assert Catalog(other.as_uri(), cache_dir=tmp_path / "c2").url == other.as_uri()  # explicit wins
+
+
+def test_from_file_abs_rel_and_url(tmp_path, monkeypatch):
+    p = write_fixture_catalog(tmp_path / "cat.parquet")
+    cache = tmp_path / "cache"
+    c = Catalog.from_file(p, cache_dir=cache)
+    assert len(c.query(organism="human")) == 3
+    assert len(Catalog(url=str(p), cache_dir=cache)) == 5
+    assert len(Catalog.from_file(p.as_uri(), cache_dir=cache)) == 5
+    monkeypatch.chdir(tmp_path)
+    rel = Catalog.from_file("cat.parquet", cache_dir=cache)
+    assert len(rel.query(organism="human")) == 3
+    assert rel.url == str(p.resolve())
+
+
+def test_from_file_missing(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        Catalog.from_file(tmp_path / "nope.parquet", cache_dir=tmp_path / "c")
