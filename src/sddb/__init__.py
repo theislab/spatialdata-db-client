@@ -7,4 +7,8 @@ try:
 except PackageNotFoundError:  # pragma: no cover
     __version__ = "0.0.0"
 
-__all__ = ["__version__"]
+from sddb.catalog import Catalog
+from sddb.dataset import Dataset, Results
+from sddb.remote import open_sdata
+
+__all__ = ["Catalog", "Dataset", "Results", "__version__", "open_sdata"]
