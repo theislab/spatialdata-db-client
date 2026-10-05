@@ -16,3 +16,4 @@ docs/_build/
 .ipynb_checkpoints/
 .DS_Store
 .superpowers/
+docs/jupyter_execute/

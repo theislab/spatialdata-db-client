@@ -15,4 +15,7 @@ cat = sddb.Catalog.from_file("catalog.parquet")  # local downloaded catalog
 
 ```{toctree}
 :maxdepth: 2
+
+tutorials/query_and_load
+tutorials/cohorts
 ```
