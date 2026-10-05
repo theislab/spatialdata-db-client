@@ -24,3 +24,15 @@ def test_results_citations(tmp_path):
     assert "Lee2022" not in text
     assert "Extra1999" not in text
     assert list(parse_bibtex(text)) == ["Smith2023"]
+
+
+def test_citations_warns_on_no_match(tmp_path):
+    import pytest
+
+    bib = tmp_path / "citations.bib"
+    bib.write_text(make_fixture_citations_bib())
+    df = make_fixture_catalog().iloc[:2].copy()
+    df["study_id"] = "NoSuchKey"
+    with pytest.warns(UserWarning, match="no cite-keys match"):
+        out = Results(df).citations(tmp_path / "refs.bib", bib_url=str(bib))
+    assert out.read_text() == ""

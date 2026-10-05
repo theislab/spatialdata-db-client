@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -50,7 +51,7 @@ def write_citations(results: Results, path: str | Path, *, bib_url: str | None =
     """Write the BibTeX entries whose cite-key is a ``study_id`` in ``results`` to ``path``.
 
     ``bib_url`` defaults to ``citations.bib`` next to the catalog. Studies without an entry are
-    skipped silently.
+    skipped; a warning is emitted if the catalog has no ``study_id`` or nothing matches.
     """
     df = results.to_df()
     ids = set(df["study_id"].dropna().astype(str)) if "study_id" in df.columns else set()
@@ -58,6 +59,11 @@ def write_citations(results: Results, path: str | Path, *, bib_url: str | None =
     url = bib_url or (sibling_url(src.url, "citations.bib") if src.url else DEFAULT_BIB_URL)
     text = fetch_catalog(url, cache_dir=src.cache_dir).read_text(encoding="utf-8")
     entries = parse_bibtex(text)
+    keys = [k for k in sorted(ids) if k in entries]
+    if "study_id" not in df.columns:
+        warnings.warn("catalog has no 'study_id' column; writing an empty citations file", stacklevel=2)
+    elif not keys:
+        warnings.warn("no cite-keys match the cohort's study_id values; writing an empty citations file", stacklevel=2)
     out = Path(path)
-    out.write_text("".join(entries[k] + "\n\n" for k in sorted(ids) if k in entries), encoding="utf-8")
+    out.write_text("".join(entries[k] + "\n\n" for k in keys), encoding="utf-8")
     return out
