@@ -19,8 +19,35 @@ def test_elements(tmp_path):
     out = elements(str(make_tiny_sdata_zarr(tmp_path)))
     assert out["images/img"]["shape"] == (3, 8, 8)
     assert out["images/img"]["dtype"] == "uint8"
+    assert out["images/img"]["type"] == "images"
+    assert out["tables/table"]["type"] == "tables"
     assert out["tables/table"]["shape"] == (4, 3)
     assert out["tables/table"]["dtype"] == "float32"
+
+
+def test_elements_sparse_table_dtype(tmp_path):
+    import anndata as ad
+    import numpy as np
+    import scipy.sparse as sp
+    from spatialdata import SpatialData
+
+    table = ad.AnnData(X=sp.csr_matrix(np.eye(4, 3, dtype="float32")))
+    path = tmp_path / "sparse.zarr"
+    SpatialData(tables={"t": table}).write(path)
+    out = elements(str(path))["tables/t"]
+    assert out["shape"] == (4, 3)
+    assert out["dtype"] == "float32"
+
+
+def test_describe_multiscale_unknown_scale_keys():
+    import zarr
+
+    from sddb.remote import _describe
+
+    g = zarr.open_group(store=zarr.storage.MemoryStore(), mode="w")
+    g.create_array("b", shape=(2, 4, 4), dtype="uint16")
+    g.create_array("a", shape=(2, 8, 8), dtype="uint16")
+    assert _describe(g, "images") == {"type": "images", "shape": (2, 8, 8), "dtype": "uint16"}
 
 
 def test_open_lazy(tmp_path):

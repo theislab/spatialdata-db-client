@@ -98,20 +98,26 @@ def _copy_to_cache(zarr_url: str, dest_root: Path) -> Path:
     return dest
 
 
-def _describe(node: zarr.Array[Any] | zarr.Group) -> dict[str, Any]:
-    """Describe one zarr node from metadata only (no chunk reads)."""
+def _describe(node: zarr.Array[Any] | zarr.Group, kind: str) -> dict[str, Any]:
+    """Describe one zarr node from metadata only (no chunk reads); ``type`` is the element kind."""
     if isinstance(node, zarr.Array):
-        return {"type": "array", "shape": tuple(node.shape), "dtype": str(node.dtype)}
+        return {"type": kind, "shape": tuple(node.shape), "dtype": str(node.dtype)}
     # multiscale image/label: full-resolution array is scale "s0" (zarr v3 format) or "0" (older)
     for key in ("s0", "0", "X"):
         if key in node:
             child = node[key]
             if isinstance(child, zarr.Array):
-                return {"type": "group", "shape": tuple(child.shape), "dtype": str(child.dtype)}
+                return {"type": kind, "shape": tuple(child.shape), "dtype": str(child.dtype)}
             shape = child.attrs.get("shape")
-            if shape is not None:  # sparse anndata X
-                return {"type": "group", "shape": tuple(cast("list[int]", shape)), "dtype": None}
-    return {"type": "group", "shape": None, "dtype": None}
+            if shape is not None:  # sparse anndata X: dtype from the cheap X/data array metadata
+                data = child["data"] if "data" in child else None
+                dtype = str(data.dtype) if isinstance(data, zarr.Array) else None
+                return {"type": kind, "shape": tuple(cast("list[int]", shape)), "dtype": dtype}
+    # multiscale with non-standard scale keys: first array child (sorted)
+    for _, child in sorted(node.members(), key=lambda kv: kv[0]):
+        if isinstance(child, zarr.Array):
+            return {"type": kind, "shape": tuple(child.shape), "dtype": str(child.dtype)}
+    return {"type": kind, "shape": None, "dtype": None}
 
 
 def elements(zarr_url: str) -> dict[str, dict[str, Any]]:
@@ -124,7 +130,7 @@ def elements(zarr_url: str) -> dict[str, dict[str, Any]]:
 
     Returns
     -------
-    Mapping ``"<kind>/<name>"`` to ``{"type", "shape", "dtype"}``; shape/dtype are read from zarr
+    Mapping ``"<kind>/<name>"`` to ``{"type", "shape", "dtype"}`` where ``type`` is the element kind (``images``/``labels``/``points``/``shapes``/``tables``); shape/dtype are read from zarr
     metadata only and may be ``None`` when not cheaply available.
 
     Raises
@@ -144,5 +150,5 @@ def elements(zarr_url: str) -> dict[str, dict[str, Any]]:
         if not isinstance(group, zarr.Group):
             continue
         for name, node in group.members():
-            out[f"{kind}/{name}"] = _describe(node)
+            out[f"{kind}/{name}"] = _describe(node, kind)
     return out
