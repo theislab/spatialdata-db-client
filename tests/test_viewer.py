@@ -13,6 +13,13 @@ def test_viewer_url():
     )
 
 
+def test_viewer_url_ready_link_unchanged():
+    df = make_fixture_catalog().iloc[:1].copy()
+    ready = "https://vitessce.io#?edit=false&url=data:,%7B%22version%22%3A%221.0.16%22%7D"
+    df["vitessce_url"] = ready
+    assert Results(df)[0].viewer_url() == ready
+
+
 def test_viewer_missing(monkeypatch):
     df = make_fixture_catalog().iloc[:1].copy()
     df["vitessce_url"] = None

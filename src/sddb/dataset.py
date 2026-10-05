@@ -94,7 +94,8 @@ class Dataset:
     def viewer_url(self) -> str:
         """Build a vitessce.io viewer link from this row's ``vitessce_url`` (pure string transform).
 
-        An ``s3://bucket/key`` config URL is rewritten to the LaminHub CORS proxy
+        If ``vitessce_url`` is already a vitessce.io viewer link (as in the published catalog) it is
+        returned unchanged. Otherwise it is treated as a config-sidecar URL: an ``s3://bucket/key`` URL is rewritten to the LaminHub CORS proxy
         ``https://lamin.ai/storage/s3/bucket/key`` and wrapped as ``https://vitessce.io/?url=<proxied>``.
 
         Raises
@@ -105,6 +106,8 @@ class Dataset:
         url: str | None = self.vitessce_url
         if not url:
             raise ValueError(f"dataset {self.uid} has no vitessce_url")
+        if url.startswith("https://vitessce.io"):
+            return url
         return _VITESSCE + remote.proxy_url(url)
 
     def view(self) -> None:
