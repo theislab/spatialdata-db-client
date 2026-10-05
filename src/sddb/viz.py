@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 from pathlib import Path
+from urllib.parse import unquote
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -24,6 +25,24 @@ def _require(mod: str) -> Any:
         return importlib.import_module(mod)
     except ImportError as err:
         raise ImportError(f"{mod!r} is missing: install spatialdata-db[viz] for interactive viz") from err
+
+
+_INLINE = "url=data:,"
+
+
+def config_from_vitessce_url(url: str) -> dict[str, Any] | None:
+    """Decode the Vitessce config inlined in a ``vitessce.io#?...&url=data:,<payload>`` viewer link.
+
+    The payload is the config JSON, URL-encoded twice. Returns ``None`` if ``url`` is not such a link
+    (e.g. a plain config ``.json`` / ``s3://`` URL).
+    """
+    if "vitessce.io" not in url or _INLINE not in url:
+        return None
+    payload = url.split(_INLINE, 1)[1].split("&", 1)[0]
+    config = json.loads(unquote(unquote(payload)))
+    if not isinstance(config, dict):
+        raise ValueError("inlined Vitessce config is not a JSON object")
+    return config
 
 
 def render_config(config: dict[str, Any] | str | Path) -> Any:

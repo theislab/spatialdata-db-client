@@ -129,7 +129,8 @@ class Dataset:
         url: str | None = self.vitessce_url
         if not url:
             raise ValueError(f"dataset {self.uid} has no vitessce_url")
-        return viz.render_config(remote.proxy_url(url))
+        inlined = viz.config_from_vitessce_url(url)
+        return viz.render_config(inlined if inlined is not None else remote.proxy_url(url))
 
     def __repr__(self) -> str:
         return f"<Dataset {self.uid} technology={self.technology} organism={self.organism}>"
