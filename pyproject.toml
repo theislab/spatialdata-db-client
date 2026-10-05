@@ -58,11 +58,11 @@ lint.per-file-ignores."tests/*" = [ "D" ]
 lint.pydocstyle.convention = "numpy"
 
 [tool.mypy]
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
+strict = true
 
 [tool.pytest.ini_options]
 addopts = [ "--import-mode=importlib" ]
+pythonpath = [ "." ]
 testpaths = [ "tests" ]
 markers = [ "network: tests that require network/S3 access (deselected by default)" ]
 
