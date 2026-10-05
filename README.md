@@ -21,8 +21,8 @@ import sddb
 Either way you get a `Catalog` you can `query()`:
 
 ```python
-# (a) Default: the central published catalog (DEFAULT_CATALOG_URL, or $SDDB_CATALOG_URL).
-#     Note: the central URL is a placeholder and not live yet.
+# (a) Default: the published catalog (DEFAULT_CATALOG_URL, or $SDDB_CATALOG_URL),
+#     served from this repo's latest GitHub release — live, anonymous, no account.
 cat = sddb.Catalog()
 
 # (b) Local: download catalog.parquet, then point the client at it.
