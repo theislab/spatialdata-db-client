@@ -95,3 +95,18 @@ def write_fixture_catalog(path: str | Path) -> Path:
     p = Path(path)
     make_fixture_catalog().to_parquet(p)
     return p
+
+
+def make_tiny_sdata_zarr(tmp_path: Path) -> Path:
+    """Write a tiny SpatialData (3x8x8 image + 4x3 table) to ``tmp_path/tiny.zarr``."""
+    import anndata as ad
+    import numpy as np
+    from spatialdata import SpatialData
+    from spatialdata.models import Image2DModel
+
+    image = Image2DModel.parse(np.zeros((3, 8, 8), dtype="uint8"), dims=("c", "y", "x"))
+    table = ad.AnnData(X=np.ones((4, 3), dtype="float32"))
+    sdata = SpatialData(images={"img": image}, tables={"table": table})
+    path = tmp_path / "tiny.zarr"
+    sdata.write(path)
+    return path
