@@ -25,6 +25,13 @@ def test_query_tool(cat_url):
     assert json.loads(json.dumps(rows)) == rows
 
 
+def test_query_tool_validation(cat_url):
+    assert "uid0004" not in {r["uid"] for r in tools.query_tool(cat_url)}
+    rows = tools.query_tool(cat_url, validation="all")
+    assert "uid0004" in {r["uid"] for r in rows}
+    assert {r["uid"] for r in tools.query_tool(cat_url, validation="fail")} == {"uid0004"}
+
+
 def test_query_tool_truncates(cat_url, monkeypatch):
     monkeypatch.setattr(tools, "MAX_ROWS", 2)
     rows = tools.query_tool(cat_url)

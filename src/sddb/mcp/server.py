@@ -30,10 +30,11 @@ def build_server() -> Any:
         technology: str | None = None,
         assay: str | None = None,
         tier: str | None = None,
+        validation: str = "pass",
     ) -> list[dict[str, Any]]:
         facets = {"organism": organism, "tissue": tissue, "disease": disease}
         facets |= {"technology": technology, "assay": assay, "tier": tier}
-        return tools.query_tool(**{k: v for k, v in facets.items() if v is not None})
+        return tools.query_tool(validation=validation, **{k: v for k, v in facets.items() if v is not None})
 
     server.tool(name="query", description="Filter datasets by facets (organism, tissue, technology, ...).")(query)
 
