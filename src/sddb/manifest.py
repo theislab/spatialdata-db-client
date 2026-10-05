@@ -34,7 +34,7 @@ class ManifestEntry:
 
 @dataclass
 class Manifest:
-    """What was downloaded, where, and from which catalog."""
+    """What was downloaded, where, and from which catalog (``catalog_version`` is None when not pinned)."""
 
     generated_at: str
     catalog_version: str | None
@@ -45,6 +45,16 @@ class Manifest:
         """Read a manifest written by :meth:`write`."""
         raw = json.loads(Path(path).read_text())
         return cls(raw["generated_at"], raw.get("catalog_version"), [ManifestEntry(**e) for e in raw["entries"]])
+
+    def refetch(self, dest: str | Path, *, workers: int = 4) -> Manifest:
+        """Re-download exactly the stores recorded in this manifest to ``dest`` (reproducible re-fetch).
+
+        Uses the recorded ``zarr_url`` of each entry, not the current catalog, and keeps the recorded
+        ``catalog_version``. Completed stores already in ``dest`` are skipped. Only URLs are replayed:
+        a store republished at the same URL is not detected.
+        """
+        pairs = [(e.uid, e.zarr_url) for e in self.entries]
+        return _fetch_all(pairs, Path(dest), self.catalog_version, workers)
 
     def write(self, path: str | Path) -> Path:
         """Write the manifest as JSON and return the path."""
@@ -72,28 +82,23 @@ def _digest(store: Path) -> tuple[int, str]:
     return total, h.hexdigest()
 
 
-def download(results: Results, dest: str | Path, *, workers: int = 4, pin_versions: bool = False) -> Manifest:
-    """Download every dataset's store to ``dest/<uid>.zarr`` and write ``dest/manifest.json``.
+class ManifestVersionMismatch(ValueError):
+    """The catalog version differs from the one recorded in an existing manifest."""
 
-    Resumable: entries already ``complete`` in an existing manifest (with the store present) are
-    skipped; failed/partial ones are re-fetched. Stores are copied to ``<uid>.zarr.part`` and
-    renamed on success. ``pin_versions`` records the catalog version in the manifest (per-dataset
-    pinning across republishes is not available yet). The sha256 covers store file paths and sizes,
-    not contents.
-    """
-    root = Path(dest)
+
+def _fetch_all(pairs: list[tuple[str, str]], root: Path, catalog_version: str | None, workers: int) -> Manifest:
+    """Copy each ``(uid, zarr_url)`` to ``root/<uid>.zarr`` (skipping completed ones) and write the manifest."""
     root.mkdir(parents=True, exist_ok=True)
     mpath = root / "manifest.json"
     done: dict[str, ManifestEntry] = {}
     if mpath.exists():
         done = {e.uid: e for e in Manifest.read(mpath).entries if e.status == "complete"}
-    manifest = Manifest(datetime.now(UTC).isoformat(), results._source.version if pin_versions else None, [])
+    manifest = Manifest(datetime.now(UTC).isoformat(), catalog_version, [])
     lock = threading.Lock()
     by_uid: dict[str, ManifestEntry] = {}
 
     def save() -> None:
-        order = [d.uid for d in results]
-        manifest.entries = [by_uid[u] for u in order if u in by_uid]
+        manifest.entries = [by_uid[u] for u, _ in pairs if u in by_uid]
         manifest.write(mpath)
 
     def fetch(uid: str, url: str) -> None:
@@ -119,6 +124,43 @@ def download(results: Results, dest: str | Path, *, workers: int = 4, pin_versio
             save()
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        list(pool.map(lambda d: fetch(str(d.uid), str(d.zarr_url)), list(results)))
+        list(pool.map(lambda p: fetch(*p), pairs))
     save()
     return manifest
+
+
+def download(
+    results: Results,
+    dest: str | Path,
+    *,
+    workers: int = 4,
+    pin_versions: bool = False,
+    allow_version_change: bool = False,
+) -> Manifest:
+    """Download every dataset's store to ``dest/<uid>.zarr`` and write ``dest/manifest.json``.
+
+    Resumable: entries already ``complete`` in an existing manifest (with the store present) are
+    skipped; failed/partial ones are re-fetched. Stores are copied to ``<uid>.zarr.part`` and
+    renamed on success. ``pin_versions`` records the catalog version in the manifest; an existing
+    manifest pinned to a different catalog version raises :class:`ManifestVersionMismatch` unless
+    ``allow_version_change`` is True (then it is overwritten). Only the catalog version is pinned:
+    per-dataset byte-level pinning across republishes is not implemented. The sha256 covers store
+    file paths and sizes, not contents.
+    """
+    root = Path(dest)
+    current = results._source.version
+    mpath = root / "manifest.json"
+    pinned = pin_versions
+    if mpath.exists():
+        recorded = Manifest.read(mpath).catalog_version
+        if recorded is not None and recorded != current:
+            if not allow_version_change:
+                raise ManifestVersionMismatch(
+                    f"manifest at {mpath} is pinned to catalog version {recorded!r}, "
+                    f"but the current catalog version is {current!r}; "
+                    "pass allow_version_change=True to overwrite"
+                )
+        elif recorded is not None:
+            pinned = True
+    pairs = [(str(d.uid), str(d.zarr_url)) for d in results]
+    return _fetch_all(pairs, root, current if pinned else None, workers)

@@ -62,3 +62,13 @@ def test_server_registers_tools():
 
     names = {t.name for t in asyncio.run(build_server().list_tools())}
     assert names == {"query", "describe", "genes"}
+
+
+def test_server_tools_hide_catalog_url():
+    pytest.importorskip("mcp")
+    import asyncio
+
+    from sddb.mcp.server import build_server
+
+    for t in asyncio.run(build_server().list_tools()):
+        assert "catalog_url" not in t.input_schema["properties"]

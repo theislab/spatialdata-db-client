@@ -5,7 +5,7 @@ import shutil
 import pytest
 from tests._fixtures import make_fixture_catalog, make_tiny_sdata_zarr
 
-from sddb import Manifest, manifest
+from sddb import Manifest, ManifestVersionMismatch, manifest
 from sddb.dataset import Results, Source
 
 
@@ -44,6 +44,25 @@ def test_failed_entry_refetched(tmp_path, cohort):
     m = Results(df).download(tmp_path / "out")
     assert [e.status for e in m.entries] == ["complete", "failed"]
     assert not list((tmp_path / "out").glob("*.part"))
+
+
+def test_version_mismatch_and_allow(tmp_path, cohort):
+    dest = tmp_path / "out"
+    cohort.download(dest, pin_versions=True)  # pinned to "v1"
+    other = Results(cohort.to_df(), source=Source(version="B"))
+    with pytest.raises(ManifestVersionMismatch, match="'v1'.*'B'"):
+        other.download(dest)
+    m = other.download(dest, allow_version_change=True, pin_versions=True)
+    assert m.catalog_version == "B"
+    assert Manifest.read(dest / "manifest.json").catalog_version == "B"
+
+
+def test_refetch_reproduces_stores(tmp_path, cohort):
+    m = cohort.download(tmp_path / "a", pin_versions=True)
+    again = Manifest.read(tmp_path / "a" / "manifest.json").refetch(tmp_path / "b")
+    assert again.catalog_version == "v1"
+    assert [(e.uid, e.zarr_url, e.sha256) for e in again.entries] == [(e.uid, e.zarr_url, e.sha256) for e in m.entries]
+    assert (tmp_path / "b" / "uid0002.zarr").is_dir()
 
 
 @pytest.mark.network

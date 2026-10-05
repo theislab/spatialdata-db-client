@@ -36,8 +36,15 @@ def build_server() -> Any:
         return tools.query_tool(**{k: v for k, v in facets.items() if v is not None})
 
     server.tool(name="query", description="Filter datasets by facets (organism, tissue, technology, ...).")(query)
-    server.tool(name="describe", description="Catalog row and element shapes for one dataset uid.")(tools.describe_tool)
-    server.tool(name="genes", description="Datasets whose gene index contains a gene symbol.")(tools.genes_tool)
+
+    def describe(uid: str) -> dict[str, Any]:
+        return tools.describe_tool(uid)
+
+    def genes(symbol: str) -> list[dict[str, Any]]:
+        return tools.genes_tool(symbol)
+
+    server.tool(name="describe", description="Catalog row and element shapes for one dataset uid.")(describe)
+    server.tool(name="genes", description="Datasets whose gene index contains a gene symbol.")(genes)
     return server
 
 
