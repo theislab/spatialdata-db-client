@@ -42,7 +42,8 @@ class GeneIndex:
             raise schema.SchemaError(f"gene index at {self.url} is invalid: {err}") from err
         self._df = df
 
-    def datasets_with(self, symbol: str, *, min_fraction: float | None = None, validation: str | None = "pass"
+    def datasets_with(
+        self, symbol: str, *, min_fraction: float | None = None, validation: str | None = "pass"
     ) -> Results:
         """Catalog datasets whose gene index has ``symbol`` (case-insensitive).
 
