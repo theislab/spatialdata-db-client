@@ -50,9 +50,11 @@ exclude = [ "/docs", "/tests" ]
 line-length = 120
 src = [ "src" ]
 extend-include = [ "*.ipynb" ]
+extend-exclude = [ "docs/design" ]
 format.docstring-code-format = true
 lint.select = [ "B","C4","D","E","F","I","NPY","PT","RET","RUF100","TID","UP","W" ]
 lint.ignore = [ "B008","D100","D104","D105","D107","D203","D213","D400","D401","E501","E731","E741" ]
+lint.per-file-ignores."tests/*" = [ "D" ]
 lint.pydocstyle.convention = "numpy"
 
 [tool.mypy]
