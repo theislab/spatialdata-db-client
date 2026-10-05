@@ -1,0 +1,69 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatchling", "hatch-vcs" ]
+
+[project]
+name = "spatialdata-db"
+description = "Lean read client for the spatialdata-db spatial-omics collection."
+readme = "README.md"
+license = "BSD-3-Clause"
+requires-python = ">=3.12"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
+dynamic = [ "version" ]
+dependencies = [
+  "spatialdata",
+  "pandas>=2.2",
+  "pyarrow",
+  "fsspec",
+  "s3fs",
+  "rapidfuzz",
+]
+
+[project.optional-dependencies]
+viz = [ "vitessce", "easy_vitessce" ]
+mcp = [ "mcp" ]
+llm = [ ]
+
+[project.scripts]
+sddb = "sddb.cli:app"
+
+[dependency-groups]
+test = [ "pytest", "coverage", "pytest-cov" ]
+typecheck = [ "mypy", "pandas-stubs" ]
+doc = [ "sphinx>=8.1", "sphinx-book-theme", "myst-nb>=1.1", "scanpydoc" ]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = [ "src/sddb" ]
+
+[tool.hatch.build.targets.sdist]
+exclude = [ "/docs", "/tests" ]
+
+[tool.ruff]
+line-length = 120
+src = [ "src" ]
+extend-include = [ "*.ipynb" ]
+format.docstring-code-format = true
+lint.select = [ "B","C4","D","E","F","I","NPY","PT","RET","RUF100","TID","UP","W" ]
+lint.ignore = [ "B008","D100","D104","D105","D107","D203","D213","D400","D401","E501","E731","E741" ]
+lint.pydocstyle.convention = "numpy"
+
+[tool.mypy]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[tool.pytest.ini_options]
+addopts = [ "--import-mode=importlib" ]
+testpaths = [ "tests" ]
+markers = [ "network: tests that require network/S3 access (deselected by default)" ]
+
+[tool.coverage.run]
+source = [ "sddb" ]
+omit = [ "**/test_*.py" ]
