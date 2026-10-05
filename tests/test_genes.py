@@ -32,3 +32,21 @@ def test_datasets_with_validation(tmp_path):
     cat = Catalog(cat_p.as_uri(), cache_dir=tmp_path / "cache")
     assert [d.uid for d in cat.genes.datasets_with("Alb")] == ["uid0003"]
     assert sorted(d.uid for d in cat.genes.datasets_with("Alb", validation=None)) == ["uid0003", "uid0004"]
+
+
+def test_refresh_passed_to_sidecar(tmp_path, monkeypatch):
+    import sddb.genes as genes_mod
+
+    cat_p = write_fixture_catalog(tmp_path / "catalog.parquet")
+    write_fixture_gene_index(tmp_path / "gene_index.parquet")
+    cat = Catalog(cat_p.as_uri(), cache_dir=tmp_path / "cache", refresh=True)
+    seen = []
+    real = genes_mod.fetch_catalog
+
+    def spy(url, **kw):
+        seen.append(kw.get("refresh"))
+        return real(url, **kw)
+
+    monkeypatch.setattr(genes_mod, "fetch_catalog", spy)
+    cat.genes  # noqa: B018
+    assert seen == [True]

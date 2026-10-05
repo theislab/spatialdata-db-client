@@ -57,7 +57,7 @@ def write_citations(results: Results, path: str | Path, *, bib_url: str | None =
     ids = set(df["study_id"].dropna().astype(str)) if "study_id" in df.columns else set()
     src = results._source
     url = bib_url or (sibling_url(src.url, "citations.bib") if src.url else DEFAULT_BIB_URL)
-    text = fetch_catalog(url, cache_dir=src.cache_dir).read_text(encoding="utf-8")
+    text = fetch_catalog(url, cache_dir=src.cache_dir, refresh=src.refresh).read_text(encoding="utf-8")
     entries = parse_bibtex(text)
     keys = [k for k in sorted(ids) if k in entries]
     if "study_id" not in df.columns:

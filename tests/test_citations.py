@@ -36,3 +36,16 @@ def test_citations_warns_on_no_match(tmp_path):
     with pytest.warns(UserWarning, match="no cite-keys match"):
         out = Results(df).citations(tmp_path / "refs.bib", bib_url=str(bib))
     assert out.read_text() == ""
+
+
+def test_citations_refresh_passed(tmp_path, monkeypatch):
+    import sddb.citations as cit
+    from sddb.dataset import Source
+
+    bib = tmp_path / "citations.bib"
+    bib.write_text(make_fixture_citations_bib())
+    seen = []
+    real = cit.fetch_catalog
+    monkeypatch.setattr(cit, "fetch_catalog", lambda url, **kw: (seen.append(kw.get("refresh")), real(url, **kw))[1])
+    Results(make_fixture_catalog().iloc[:2], source=Source(refresh=True)).citations(tmp_path / "r.bib", bib_url=str(bib))
+    assert seen == [True]

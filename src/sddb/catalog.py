@@ -65,6 +65,7 @@ class Catalog:
         self.url = url
         self.version = version
         self._cache_dir = cache_dir
+        self._refresh = refresh
         self._genes: GeneIndex | None = None
         self._path = fetch_catalog(url, cache_dir=cache_dir, refresh=refresh)
         try:
@@ -91,7 +92,7 @@ class Catalog:
         return value.decode() if value else None
 
     def _source(self) -> Source:
-        return Source(self.url, self._cache_dir, self.version)
+        return Source(self.url, self._cache_dir, self.version, self._refresh)
 
     @property
     def genes(self) -> GeneIndex:

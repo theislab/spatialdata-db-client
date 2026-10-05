@@ -28,6 +28,7 @@ class Source:
     url: str | None = None
     cache_dir: str | Path | None = None
     version: str | None = None
+    refresh: bool = False
 
 
 _ATTRS = (

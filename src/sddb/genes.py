@@ -25,7 +25,7 @@ class GeneIndex:
     def __init__(self, catalog: Catalog, url: str | None = None) -> None:
         self._catalog = catalog
         self.url = url or sibling_url(catalog.url, "gene_index.parquet")
-        path = fetch_catalog(self.url, cache_dir=catalog._cache_dir)
+        path = fetch_catalog(self.url, cache_dir=catalog._cache_dir, refresh=catalog._refresh)
         try:
             df = pd.read_parquet(path)
         except Exception as err:
