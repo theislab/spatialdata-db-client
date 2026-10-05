@@ -42,7 +42,8 @@ class GeneIndex:
             raise schema.SchemaError(f"gene index at {self.url} is invalid: {err}") from err
         self._df = df
 
-    def datasets_with(self, symbol: str, *, min_fraction: float | None = None) -> Results:
+    def datasets_with(self, symbol: str, *, min_fraction: float | None = None, validation: str | None = "pass"
+    ) -> Results:
         """Catalog datasets whose gene index has ``symbol`` (case-insensitive).
 
         Parameters
@@ -51,6 +52,8 @@ class GeneIndex:
             Gene symbol.
         min_fraction
             Keep only datasets where ``fraction_obs_detected >= min_fraction``.
+        validation
+            Keep datasets with this ``validation_status`` (default ``"pass"``, as in ``Catalog.query``); ``None`` disables.
         """
         df = self._df
         mask = df["symbol"].str.casefold() == symbol.casefold()
@@ -58,4 +61,6 @@ class GeneIndex:
             mask &= df["fraction_obs_detected"] >= min_fraction
         uids = set(df.loc[mask.fillna(False).astype(bool), "uid"].dropna())
         cat = self._catalog.to_df()
+        if validation is not None:
+            cat = cat[cat["validation_status"] == validation]
         return Results(cat[cat["uid"].isin(uids)], source=self._catalog._source())

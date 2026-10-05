@@ -18,3 +18,17 @@ def test_datasets_with(tmp_path):
     assert len(cat.genes.datasets_with("NOPE")) == 0
     assert [d.uid for d in cat.genes.datasets_with("EPCAM", min_fraction=0.3)] == ["uid0001", "uid0002"]
     assert cat.genes is cat.genes
+
+
+def test_datasets_with_validation(tmp_path):
+    import pandas as pd
+    from tests._fixtures import make_fixture_gene_index
+
+    cat_p = write_fixture_catalog(tmp_path / "catalog.parquet")
+    gi = make_fixture_gene_index()
+    extra = gi.iloc[[6]].copy()  # Alb in uid0004 (validation fail); add it to pass uid0003 too
+    extra["uid"] = "uid0003"
+    pd.concat([gi, extra], ignore_index=True).to_parquet(tmp_path / "gene_index.parquet")
+    cat = Catalog(cat_p.as_uri(), cache_dir=tmp_path / "cache")
+    assert [d.uid for d in cat.genes.datasets_with("Alb")] == ["uid0003"]
+    assert sorted(d.uid for d in cat.genes.datasets_with("Alb", validation=None)) == ["uid0003", "uid0004"]
