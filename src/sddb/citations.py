@@ -1,0 +1,63 @@
+"""Cohort citations: filter a published citations.bib to the studies in a Results."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from sddb._cache import fetch_catalog
+from sddb.genes import sibling_url
+
+if TYPE_CHECKING:
+    from sddb.dataset import Results
+
+DEFAULT_BIB_URL = "https://spatialdata-db.com/citations.bib"
+
+
+def parse_bibtex(text: str) -> dict[str, str]:
+    """Split BibTeX text into ``{cite_key: raw_entry}`` with a brace-matching scan.
+
+    Entries start at an ``@`` outside any braces; ``@comment``/``@string``/``@preamble`` are skipped.
+    """
+    out: dict[str, str] = {}
+    i, n = 0, len(text)
+    while i < n:
+        at = text.find("@", i)
+        if at < 0:
+            break
+        brace = text.find("{", at)
+        if brace < 0:
+            break
+        depth, j = 0, brace
+        while j < n:
+            if text[j] == "{":
+                depth += 1
+            elif text[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        kind = text[at + 1 : brace].strip().lower()
+        body = text[brace + 1 : j]
+        key = body.split(",", 1)[0].strip()
+        if kind not in {"comment", "string", "preamble"} and key:
+            out[key] = text[at : j + 1]
+        i = j + 1
+    return out
+
+
+def write_citations(results: Results, path: str | Path, *, bib_url: str | None = None) -> Path:
+    """Write the BibTeX entries whose cite-key is a ``study_id`` in ``results`` to ``path``.
+
+    ``bib_url`` defaults to ``citations.bib`` next to the catalog. Studies without an entry are
+    skipped silently.
+    """
+    df = results.to_df()
+    ids = set(df["study_id"].dropna().astype(str)) if "study_id" in df.columns else set()
+    src = results._source
+    url = bib_url or (sibling_url(src.url, "citations.bib") if src.url else DEFAULT_BIB_URL)
+    text = fetch_catalog(url, cache_dir=src.cache_dir).read_text(encoding="utf-8")
+    entries = parse_bibtex(text)
+    out = Path(path)
+    out.write_text("".join(entries[k] + "\n\n" for k in sorted(ids) if k in entries), encoding="utf-8")
+    return out

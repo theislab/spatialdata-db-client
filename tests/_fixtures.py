@@ -59,6 +59,8 @@ def make_fixture_catalog() -> pd.DataFrame:
             "zarr_url": [_URL.format(r[0]) for r in _ROWS],
             "license_unknown": [False, False, False, True, False],
             "total_counts": [float(r[8]) * 100 for r in _ROWS],
+            "study_id": ["Smith2023", "Smith2023", "Lee2022", "Lee2022", "Wong2021"],
+            "vitessce_url": [f"s3://scverse-spatial-eu-central-1/.lamindb/{r[0]}_vitessce.json" for r in _ROWS],
             "flag_foo": [True] * n,  # unknown extra column
         }
     )
@@ -87,6 +89,25 @@ def make_fixture_gene_index() -> pd.DataFrame:
             "total_counts": "Float64",
             "fraction_obs_detected": "Float64",
         }
+    )
+
+
+def write_fixture_gene_index(path: str | Path) -> Path:
+    """Write the fixture gene index to parquet and return its path."""
+    p = Path(path)
+    make_fixture_gene_index().to_parquet(p)
+    return p
+
+
+def make_fixture_citations_bib() -> str:
+    """BibTeX keyed by the fixture study_ids, with nested braces and one extra study."""
+    return (
+        "@comment{ignored}\n\n"
+        "@article{Smith2023,\n  title = {Spatial {EpCAM} atlas},\n  author = {Smith, A. and {The Consortium}},\n"
+        "  year = {2023}\n}\n\n"
+        "@article{Lee2022,\n  title = {Brain {Visium} {{nested}}},\n  year = {2022}\n}\n\n"
+        "@article{Wong2021,\n  title = {Colon},\n  year = {2021}\n}\n\n"
+        "@article{Extra1999,\n  title = {Not in cohort},\n  year = {1999}\n}\n"
     )
 
 

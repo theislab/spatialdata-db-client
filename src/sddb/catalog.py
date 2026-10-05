@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import warnings
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pandas as pd
 import pyarrow.parquet as pq
@@ -12,7 +13,10 @@ from rapidfuzz import fuzz
 
 from sddb import _catalog_schema as schema
 from sddb._cache import fetch_catalog
-from sddb.dataset import Results
+from sddb.dataset import Results, Source
+
+if TYPE_CHECKING:
+    from sddb.genes import GeneIndex
 
 DEFAULT_CATALOG_URL = "https://spatialdata-db.com/catalog.parquet"  # placeholder; finalized in WP5
 _FUZZY_CUTOFF = 88
@@ -59,6 +63,8 @@ class Catalog:
                 url = url.rsplit("/", 1)[0] + f"/catalog-{version}.parquet"
         self.url = url
         self.version = version
+        self._cache_dir = cache_dir
+        self._genes: GeneIndex | None = None
         self._path = fetch_catalog(url, cache_dir=cache_dir, refresh=refresh)
         try:
             df = pd.read_parquet(self._path)
@@ -82,6 +88,18 @@ class Catalog:
         meta = pq.read_schema(self._path).metadata or {}
         value = meta.get(b"generated_at")
         return value.decode() if value else None
+
+    def _source(self) -> Source:
+        return Source(self.url, self._cache_dir, self.version)
+
+    @property
+    def genes(self) -> GeneIndex:
+        """Cross-dataset gene index bound to this catalog (loaded lazily)."""
+        if self._genes is None:
+            from sddb.genes import GeneIndex
+
+            self._genes = GeneIndex(self)
+        return self._genes
 
     def to_df(self) -> pd.DataFrame:
         """Return the full catalog as a DataFrame copy."""
@@ -123,7 +141,7 @@ class Catalog:
             mask &= df["license_unknown"].fillna(True) == False  # noqa: E712
         for col, val in facets.items():
             mask &= df[col].isin(val if isinstance(val, list) else [val])
-        return Results(df[mask.fillna(False).astype(bool)])
+        return Results(df[mask.fillna(False).astype(bool)], source=self._source())
 
     def search(self, text: str) -> Results:
         """Deterministic text search over facet values.
@@ -143,10 +161,10 @@ class Catalog:
                 matched[col] = hits
         if not matched:
             warnings.warn(f"nothing matched {text!r}", stacklevel=2)
-            return Results(self._df.iloc[0:0])
+            return Results(self._df.iloc[0:0], source=self._source())
         mask = pd.Series(True, index=self._df.index)
         for col, hits in matched.items():
             mask &= self._df[col].isin(hits)
         if "validation_status" not in matched:
             mask &= self._df["validation_status"] == "pass"
-        return Results(self._df[mask.fillna(False).astype(bool)], matched=matched)
+        return Results(self._df[mask.fillna(False).astype(bool)], matched=matched, source=self._source())

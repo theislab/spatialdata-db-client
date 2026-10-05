@@ -9,6 +9,7 @@ except PackageNotFoundError:  # pragma: no cover
 
 from sddb.catalog import Catalog
 from sddb.dataset import Dataset, Results
+from sddb.manifest import Manifest
 from sddb.remote import open_sdata
 
-__all__ = ["Catalog", "Dataset", "Results", "__version__", "open_sdata"]
+__all__ = ["Catalog", "Dataset", "Manifest", "Results", "__version__", "open_sdata"]
