@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-viz = [ "vitessce", "easy_vitessce" ]
+viz = [ "vitessce", "easy_vitessce", "spatialdata-plot", "anndata<0.13" ]
 mcp = [ "mcp" ]
 llm = [ ]
 
