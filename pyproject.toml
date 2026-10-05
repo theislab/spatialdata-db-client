@@ -34,7 +34,7 @@ mcp = [ "mcp" ]
 llm = [ ]
 
 [project.scripts]
-sddb = "sddb.cli:app"
+sddb-cli = "sddb.cli:app"
 sddb-mcp = "sddb.mcp.server:main"
 
 [dependency-groups]

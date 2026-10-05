@@ -167,7 +167,7 @@ src/sddb/
   citations.py         # filter published citations.bib to a cohort
   _catalog_schema.py   # THE shared column contract (also imported by the engine's inventory gen)
   _cache.py            # cache dir resolution + conditional HTTP fetch + offline fallback
-  cli.py               # thin CLI (base): sddb query / download / viewer-url
+  cli.py               # thin CLI (base): sddb-cli query / download / viewer-url
   mcp/                 # [mcp] extra: MCP server exposing query/open/describe/genes as tools
   viz.py               # [viz] extra: in-notebook interactive via shipped config + easy_vitessce
 ```
@@ -189,9 +189,9 @@ the catalog producer against the shared `_catalog_schema.py`.
 
 ## 9. Interfaces
 
-- **CLI (base):** `sddb query`, `sddb download`, `sddb viewer-url` (typer; no heavy deps). Note the
-  **brand overlap with the engine's existing `sddb` CLI** — resolved by D62 renaming the engine's
-  console script so the public `sddb` command belongs to the client.
+- **CLI (base):** `sddb-cli query`, `sddb-cli download`, `sddb-cli viewer-url` (typer; no heavy deps). The
+  console script is `sddb-cli` so it can't collide with the engine's `sddb` command when both are
+  installed in one env.
 - **MCP server (`[mcp]` extra, v1):** exposes `catalog.query`, `open`, `describe`, `genes` as tools.
   User brings their own model; we ship the tool, not a model. Serves the #1 audience and our own
   sessions from day one.
