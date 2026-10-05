@@ -6,6 +6,8 @@ from tests._fixtures import make_tiny_sdata_zarr
 from sddb._cache import cache_dir
 from sddb.remote import elements, open_sdata, storage_options
 
+PUBLIC_URL = "s3://scverse-spatial-eu-central-1/.lamindb/0EQmsj25jtIQuFUT.zarr"
+
 
 def test_storage_options():
     assert storage_options("s3://b/k") == {"anon": True}
@@ -50,7 +52,18 @@ def test_bogus_url_names_url(fn, tmp_path):
 
 
 @pytest.mark.network
-def test_open_real_public_dataset_anonymously():
-    """Deferred until disk/scratch available. Proves anon elements() + lazy load on a real public
-    dataset transfer well under the full store (API-02). Uses a known public zarr_url."""
-    pytest.skip("networked integration deferred: disk-constrained; see SDD ledger Ruling 3")
+def test_elements_real_public_dataset_anonymously():
+    els = elements(PUBLIC_URL)
+    assert els
+    assert any(k.startswith("tables/") for k in els)
+
+
+@pytest.mark.network
+@pytest.mark.xfail(
+    strict=True,
+    reason="spatialdata 0.8.0 read_zarr cannot open remote stores: _resolve_zarr_store isinstance(StoreLike) "
+    "TypeError, Group branch FsspecStore(fs=) TypeError, and element readers use Path(store)",
+)
+def test_open_lazy_real_public_dataset_anonymously():
+    sdata = open_sdata(PUBLIC_URL, lazy=True)
+    assert len(sdata.tables) > 0

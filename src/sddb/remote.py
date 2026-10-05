@@ -61,12 +61,18 @@ def open_sdata(zarr_url: str, *, lazy: bool = True, cache_dir: str | Path | None
             local = _copy_to_cache(zarr_url, _cache_dir(cache_dir))
             return read_zarr(local)
         if "://" in zarr_url:
+            # NOTE: spatialdata 0.8.0 cannot read remote stores at all (see tests/test_remote.py xfail)
             return read_zarr(UPath(zarr_url, **storage_options(zarr_url)))
         return read_zarr(Path(zarr_url))
     except FileNotFoundError:
         raise
     except Exception as e:
         raise FileNotFoundError(f"Cannot open SpatialData zarr at {zarr_url!r}: {e}") from e
+
+
+def _open_group(zarr_url: str) -> zarr.Group:
+    """Open a store read-only as a ``zarr.Group`` (anonymous for S3)."""
+    return zarr.open_group(zarr_url, mode="r", storage_options=storage_options(zarr_url) or None)
 
 
 def _copy_to_cache(zarr_url: str, dest_root: Path) -> Path:
@@ -118,7 +124,7 @@ def elements(zarr_url: str) -> dict[str, dict[str, Any]]:
         If the store cannot be opened; the message names ``zarr_url``.
     """
     try:
-        root = zarr.open_group(zarr_url, mode="r", storage_options=storage_options(zarr_url) or None)
+        root = _open_group(zarr_url)
     except Exception as e:
         raise FileNotFoundError(f"Cannot open SpatialData zarr at {zarr_url!r}: {e}") from e
     out: dict[str, dict[str, Any]] = {}
