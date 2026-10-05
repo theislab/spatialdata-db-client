@@ -1,9 +1,9 @@
-from importlib.metadata import version
+from importlib.metadata import version as _version
 
 project = "spatialdata-db"
 author = "Tim Treis and the spatialdata-db authors"
 copyright = "2026, Tim Treis and the spatialdata-db authors"
-release = version("spatialdata-db")
+release = _version("spatialdata-db")
 
 extensions = [
     "myst_nb",

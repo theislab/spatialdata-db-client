@@ -22,15 +22,20 @@ dependencies = [
   "fsspec",
   "s3fs",
   "rapidfuzz",
+  "zarr>=3",
+  "platformdirs",
+  "universal-pathlib",
+  "typer",
 ]
 
 [project.optional-dependencies]
-viz = [ "vitessce", "easy_vitessce" ]
+viz = [ "vitessce", "easy_vitessce", "spatialdata-plot", "anndata<0.13" ]
 mcp = [ "mcp" ]
 llm = [ ]
 
 [project.scripts]
-sddb = "sddb.cli:app"
+sddb-cli = "sddb.cli:app"
+sddb-mcp = "sddb.mcp.server:main"
 
 [dependency-groups]
 test = [ "pytest", "coverage", "pytest-cov" ]
@@ -50,17 +55,23 @@ exclude = [ "/docs", "/tests" ]
 line-length = 120
 src = [ "src" ]
 extend-include = [ "*.ipynb" ]
+extend-exclude = [ "docs/design" ]
 format.docstring-code-format = true
 lint.select = [ "B","C4","D","E","F","I","NPY","PT","RET","RUF100","TID","UP","W" ]
 lint.ignore = [ "B008","D100","D104","D105","D107","D203","D213","D400","D401","E501","E731","E741" ]
+lint.per-file-ignores."tests/*" = [ "D" ]
 lint.pydocstyle.convention = "numpy"
 
 [tool.mypy]
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
+strict = true
+
+[[tool.mypy.overrides]]
+module = [ "mcp.*", "fsspec.*", "pyarrow.*", "spatialdata.*", "upath.*" ]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = [ "--import-mode=importlib" ]
+pythonpath = [ "." ]
 testpaths = [ "tests" ]
 markers = [ "network: tests that require network/S3 access (deselected by default)" ]
 
