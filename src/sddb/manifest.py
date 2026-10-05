@@ -30,6 +30,7 @@ class ManifestEntry:
     size_bytes: int | None
     status: str  # "complete" | "failed"
     sha256: str | None
+    error: str | None = None  # why a failed download failed ("<ExceptionType>: <message>")
 
 
 @dataclass
@@ -116,9 +117,9 @@ def _fetch_all(pairs: list[tuple[str, str]], root: Path, catalog_version: str | 
                 size, sha = _digest(part)
                 part.rename(final)
                 entry = ManifestEntry(uid, url, str(final), size, "complete", sha)
-            except Exception:
+            except Exception as err:
                 shutil.rmtree(part, ignore_errors=True)
-                entry = ManifestEntry(uid, url, str(final), None, "failed", None)
+                entry = ManifestEntry(uid, url, str(final), None, "failed", None, f"{type(err).__name__}: {err}")
         with lock:
             by_uid[uid] = entry
             save()

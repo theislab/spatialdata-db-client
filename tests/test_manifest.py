@@ -73,3 +73,20 @@ def test_real_s3_cohort_download(tmp_path):
     res = Catalog().query(technology="Visium")[:1]
     m = res.download(tmp_path)
     assert m.entries[0].status == "complete"
+
+
+def test_failed_entry_records_error(tmp_path, cohort, monkeypatch):
+    real = manifest._copy_store
+
+    def flaky(url, dest):
+        if dest.name.startswith("uid0002"):
+            raise OSError("boom")
+        real(url, dest)
+
+    monkeypatch.setattr(manifest, "_copy_store", flaky)
+    m = cohort.download(tmp_path / "out")
+    ok, bad = m.entries
+    assert (ok.status, ok.error) == ("complete", None)
+    assert bad.status == "failed"
+    assert bad.error == "OSError: boom"
+    assert Manifest.read(tmp_path / "out" / "manifest.json") == m
