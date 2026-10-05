@@ -19,7 +19,7 @@ from sddb.dataset import Results, Source
 if TYPE_CHECKING:
     from sddb.genes import GeneIndex
 
-DEFAULT_CATALOG_URL = "https://spatialdata-db.com/catalog.parquet"  # placeholder; finalized in WP5
+DEFAULT_CATALOG_URL = "https://github.com/theislab/spatialdata-db-client/releases/latest/download/catalog.parquet"
 _FUZZY_CUTOFF = 88
 
 
