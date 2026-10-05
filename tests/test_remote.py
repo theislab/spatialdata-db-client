@@ -58,12 +58,22 @@ def test_elements_real_public_dataset_anonymously():
     assert any(k.startswith("tables/") for k in els)
 
 
+def test_open_remote_lazy_raises_clear_error():
+    # short-circuits before any network access
+    with pytest.raises(NotImplementedError, match="lazy=False"):
+        open_sdata("s3://bucket/some.zarr", lazy=True)
+
+
 @pytest.mark.network
 @pytest.mark.xfail(
     strict=True,
-    reason="spatialdata 0.8.0 read_zarr cannot open remote stores: _resolve_zarr_store isinstance(StoreLike) "
-    "TypeError, Group branch FsspecStore(fs=) TypeError, and element readers use Path(store)",
+    reason="spatialdata 0.8.0 read_zarr cannot open remote stores (upstream)",
 )
-def test_open_lazy_real_public_dataset_anonymously():
-    sdata = open_sdata(PUBLIC_URL, lazy=True)
+def test_canary_spatialdata_remote_read_zarr():
+    # CANARY: when upstream fixes remote read_zarr this xfail flips to a failure (strict) --
+    # that is the signal to re-enable remote lazy open in sddb.remote.open_sdata.
+    from spatialdata import read_zarr
+    from upath import UPath
+
+    sdata = read_zarr(UPath(PUBLIC_URL, **storage_options(PUBLIC_URL)))
     assert len(sdata.tables) > 0

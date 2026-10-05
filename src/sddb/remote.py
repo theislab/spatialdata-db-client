@@ -31,6 +31,10 @@ def storage_options(url: str) -> dict[str, Any]:
     return {"anon": True} if url.startswith("s3://") else {}
 
 
+def _is_remote(url: str) -> bool:
+    return url.startswith(("s3://", "http://", "https://"))
+
+
 def open_sdata(zarr_url: str, *, lazy: bool = True, cache_dir: str | Path | None = None) -> SpatialData:
     """Open a SpatialData zarr from a URL or local path, anonymously.
 
@@ -39,8 +43,9 @@ def open_sdata(zarr_url: str, *, lazy: bool = True, cache_dir: str | Path | None
     zarr_url
         Store URL or local path.
     lazy
-        If True, open in place (dask-backed, no bulk download). If False, copy the store into
-        the cache directory first and open the local copy.
+        If True, open a *local* store in place (dask-backed). Not supported for remote URLs
+        (``s3://``, ``http(s)://``): spatialdata's remote ``read_zarr`` is broken upstream. If False,
+        copy the store (remote or local) into the cache directory and open the local copy.
     cache_dir
         Cache directory override (only used when ``lazy=False``).
 
@@ -50,19 +55,23 @@ def open_sdata(zarr_url: str, *, lazy: bool = True, cache_dir: str | Path | None
 
     Raises
     ------
+    NotImplementedError
+        If ``zarr_url`` is remote and ``lazy=True``.
     FileNotFoundError
         If the store cannot be opened; the message names ``zarr_url``.
     """
     from spatialdata import read_zarr
-    from upath import UPath
 
+    if lazy and _is_remote(zarr_url):
+        raise NotImplementedError(
+            f"Remote lazy/partial open is not supported ({zarr_url!r}): blocked by a spatialdata upstream "
+            "limitation in remote read_zarr. Use lazy=False to download the store to the cache and open it, "
+            "or elements() to inspect it without downloading."
+        )
     try:
         if not lazy:
             local = _copy_to_cache(zarr_url, _cache_dir(cache_dir))
             return read_zarr(local)
-        if "://" in zarr_url:
-            # NOTE: spatialdata 0.8.0 cannot read remote stores at all (see tests/test_remote.py xfail)
-            return read_zarr(UPath(zarr_url, **storage_options(zarr_url)))
         return read_zarr(Path(zarr_url))
     except FileNotFoundError:
         raise

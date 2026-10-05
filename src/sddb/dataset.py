@@ -72,9 +72,16 @@ class Dataset:
         Parameters
         ----------
         lazy
-            Open in place (dask-backed) instead of copying the store to the cache.
+            Open a local store in place (dask-backed). Remote stores cannot be opened lazily yet
+            (spatialdata upstream limitation); for a remote dataset pass ``lazy=False`` to copy the
+            store to the cache and open it, or use :meth:`elements` to inspect without downloading.
         version
             Reserved; version pinning is not implemented yet.
+
+        Raises
+        ------
+        NotImplementedError
+            If the dataset is remote and ``lazy=True`` (the default).
         """
         if version is not None:
             raise NotImplementedError("version pinning is not implemented yet")

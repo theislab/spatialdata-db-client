@@ -68,7 +68,7 @@ nightly inventory job                       spatialdata-db  (import sddb)
                                        uid -> direct s3:// zarr URL (from catalog)
                                                    │
                                                    ▼
-                              spatialdata.read_zarr(url)  (anon S3 via fsspec/s3fs; lazy by default)
+                              spatialdata.read_zarr(local)  (remote: anon S3 copy to cache, then open; local: lazy or eager)
 ```
 
 Dependency direction is strictly **engine → client**. The client is the base read SDK; the engine
@@ -98,8 +98,8 @@ res = cat.search("human breast cancer xenium")  # fuzzy/synonym over enumerated 
 d = res[0]
 d.uid, d.assay, d.organism, d.zarr_url, d.size_bytes
 d.elements()                                    # remote introspection, no full download
-sdata = d.load()                                # lazy by default (dask-backed over S3)
-sdata = d.load(lazy=False)                       # cache + full load
+sdata = d.load(lazy=False)                      # remote: copy to cache + full load (anon S3)
+sdata = d.load()                                # lazy default: local stores only; remote raises NotImplementedError
 sdata = d.load(version="...")                    # pin a specific dataset version (default: latest)
 url = d.viewer_url()                            # vitessce.io link (reuses our shipped config)
 d.view()                                        # open that link in a browser (stdlib)
@@ -238,15 +238,20 @@ Extras: `[viz]` (`vitessce`, `easy_vitessce`), `[mcp]` (MCP SDK), `[llm]` (later
 - **Unit** over a committed **fixture catalog** (synthetic rows): query, search, manifest, schema,
   offline cache, citations. No network; the bulk of the suite.
 - **Integration (opt-in, `@pytest.mark.network`):** against real public S3 + a real catalog on the
-  smallest dataset — prove anon `elements()` + lazy `load()` transfer well under the full store
-  (API-02: < 5% for one table) and that a resumable download resumes without re-fetch (API-03).
+  smallest dataset — prove anon `elements()` transfers well under the full store
+  (API-02: < 5% for one table); a strict-xfail canary tracks upstream remote `read_zarr` and that a resumable download resumes without re-fetch (API-03).
 - **Contract test:** engine inventory generator + client both import `_catalog_schema.py`; assert a
   generated catalog validates against it (prevents drift).
 - **Tutorials** (myst-nb) double as end-to-end checks on public data.
 
 ## 13. v1 scope vs later
 
-**v1:** `Catalog.query` + deterministic `search`, `open_sdata` lazy/full, remote `elements()`,
+**Remote story (honest):** remote = catalog query + anon `elements()` + full load via `lazy=False`
+(copy to cache, open locally). Local = full lazy/eager. Remote lazy/partial open is deferred: spatialdata
+0.8.0 `read_zarr` cannot open remote stores (upstream); `lazy=True` on a remote URL raises
+`NotImplementedError`. Re-enable when the canary test in `tests/test_remote.py` flips.
+
+**v1:** `Catalog.query` + deterministic `search`, `open_sdata` (local lazy/eager; remote full via `lazy=False`), remote `elements()`,
 `Manifest` + resumable `download`, `citations`, `viewer_url` + `view`, gene index, thin CLI,
 `[mcp]` extra, `[viz]` extra, dated catalog snapshots + version pinning.
 

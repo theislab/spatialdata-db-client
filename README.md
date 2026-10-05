@@ -17,3 +17,5 @@ import sddb
 ```
 
 Usage examples will land with the first functional release.
+
+Remote datasets: query the catalog, inspect with `elements()` (no download), or load fully with `load(lazy=False)` (copies the store to the cache). Lazy/partial remote open is not supported yet (spatialdata upstream limitation); local stores open lazily.
