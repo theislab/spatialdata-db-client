@@ -31,6 +31,14 @@ def storage_options(url: str) -> dict[str, Any]:
     return {"anon": True} if url.startswith("s3://") else {}
 
 
+_PROXY = "https://lamin.ai/storage/s3/"
+
+
+def proxy_url(url: str) -> str:
+    """Rewrite ``s3://bucket/key`` to the LaminHub CORS proxy URL; other URLs pass through."""
+    return _PROXY + url[len("s3://") :] if url.startswith("s3://") else url
+
+
 def _is_remote(url: str) -> bool:
     return url.startswith(("s3://", "http://", "https://"))
 

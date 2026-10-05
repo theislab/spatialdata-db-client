@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 
     from sddb.manifest import Manifest
 
-_PROXY = "https://lamin.ai/storage/s3/"
 _VITESSCE = "https://vitessce.io/?url="
 
 
@@ -105,9 +104,7 @@ class Dataset:
         url: str | None = self.vitessce_url
         if not url:
             raise ValueError(f"dataset {self.uid} has no vitessce_url")
-        if url.startswith("s3://"):
-            url = _PROXY + url[len("s3://") :]
-        return _VITESSCE + url
+        return _VITESSCE + remote.proxy_url(url)
 
     def view(self) -> None:
         """Open :meth:`viewer_url` in the default browser."""
@@ -128,9 +125,7 @@ class Dataset:
         url: str | None = self.vitessce_url
         if not url:
             raise ValueError(f"dataset {self.uid} has no vitessce_url")
-        if url.startswith("s3://"):
-            url = _PROXY + url[len("s3://") :]
-        return viz.render_config(url)
+        return viz.render_config(remote.proxy_url(url))
 
     def __repr__(self) -> str:
         return f"<Dataset {self.uid} technology={self.technology} organism={self.organism}>"
