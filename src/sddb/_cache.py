@@ -68,11 +68,15 @@ def _http_fetch(url: str, dest: Path, etag_file: Path, *, refresh: bool) -> None
     The sidecar records which validator was stored (``etag`` or ``last_modified``) so the matching
     conditional header (``If-None-Match`` / ``If-Modified-Since``) is sent next time.
     """
-    headers = {}
+    from sddb import __version__
+
+    headers = {"User-Agent": f"spatialdata-db-client/{__version__}"}
     if not refresh and dest.exists() and etag_file.exists():
         try:
             stored = json.loads(etag_file.read_text())
         except ValueError:
+            stored = {}
+        if not isinstance(stored, dict):
             stored = {}
         if stored.get("etag"):
             headers["If-None-Match"] = stored["etag"]
@@ -120,6 +124,11 @@ def fetch_catalog(url: str, *, cache_dir: str | Path | None = None, refresh: boo
     -------
     Path of the cached parquet.
     """
+    scheme = urllib.parse.urlparse(url).scheme
+    if "://" in url and scheme not in {"http", "https", "file"}:
+        raise ValueError(
+            f"unsupported catalog URL scheme {scheme!r} in {url!r}; use http(s)://, file:// or a local path"
+        )
     dest = catalog_cache_path(url, cache_dir=cache_dir)
     etag_file = dest.with_suffix(dest.suffix + ".etag")
     try:

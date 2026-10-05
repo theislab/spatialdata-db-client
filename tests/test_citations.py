@@ -47,5 +47,7 @@ def test_citations_refresh_passed(tmp_path, monkeypatch):
     seen = []
     real = cit.fetch_catalog
     monkeypatch.setattr(cit, "fetch_catalog", lambda url, **kw: (seen.append(kw.get("refresh")), real(url, **kw))[1])
-    Results(make_fixture_catalog().iloc[:2], source=Source(refresh=True)).citations(tmp_path / "r.bib", bib_url=str(bib))
+    Results(make_fixture_catalog().iloc[:2], source=Source(refresh=True)).citations(
+        tmp_path / "r.bib", bib_url=str(bib)
+    )
     assert seen == [True]
