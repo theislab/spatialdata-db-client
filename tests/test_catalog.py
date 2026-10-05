@@ -178,6 +178,18 @@ def test_from_file_abs_rel_and_url(tmp_path, monkeypatch):
     assert rel.url == str(p.resolve())
 
 
+@pytest.mark.network
+def test_default_catalog_loads_from_published_release(tmp_path):
+    """A bare Catalog() fetches the published release asset anonymously (no account, no token)."""
+    from sddb.catalog import DEFAULT_CATALOG_URL
+
+    assert DEFAULT_CATALOG_URL.startswith("https://github.com/theislab/spatialdata-db-client/releases/")
+    df = Catalog(cache_dir=tmp_path / "cache", refresh=True).to_df()
+    assert len(df) > 0
+    assert df["zarr_url"].notna().all()
+    assert set(df["validation_status"]) <= {"pass", "fail"}
+
+
 def test_from_file_missing(tmp_path):
     with pytest.raises(FileNotFoundError):
         Catalog.from_file(tmp_path / "nope.parquet", cache_dir=tmp_path / "c")
