@@ -31,6 +31,21 @@ def test_query_table(cat_url):
     assert r.output.splitlines()[0].split() == ["uid", "technology", "organism", "tissue", "n_obs"]
 
 
+def test_query_table_renders_na(tmp_path):
+    # a pass row with a missing value in a displayed column must render "-" , not crash:
+    # pandas pd.NA has an ambiguous truth value, which the real catalog exposes.
+    import pandas as pd
+
+    df = make_fixture_catalog()
+    df.loc[df["uid"] == "uid0001", "n_obs"] = pd.NA
+    p = tmp_path / "na.parquet"
+    df.to_parquet(p)
+    r = runner.invoke(app, ["query", "--catalog", p.as_uri(), "--organism", "human"])
+    assert r.exit_code == 0, r.output
+    assert "uid0001" in r.output
+    assert " -" in r.output
+
+
 def test_query_json_and_validation_all(cat_url):
     r = runner.invoke(app, ["query", "--catalog", cat_url, "--json"])
     assert {d["uid"] for d in json.loads(r.output)} == {"uid0001", "uid0002", "uid0003", "uid0005"}

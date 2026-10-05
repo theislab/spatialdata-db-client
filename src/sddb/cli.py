@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Any
 
+import pandas as pd
 import typer
 
 from sddb.catalog import Catalog
@@ -48,7 +49,7 @@ def query(
         typer.echo(df.to_json(orient="records", indent=2))
         return
     cols = [c for c in _COLS if c in df.columns]
-    rows = [[str(v) if v is not None and v == v else "-" for v in r] for r in df[cols].itertuples(index=False)]
+    rows = [["-" if pd.isna(v) else str(v) for v in r] for r in df[cols].itertuples(index=False)]
     widths = [max(len(c), *(len(r[i]) for r in rows)) if rows else len(c) for i, c in enumerate(cols)]
     for r in [cols, *rows]:
         typer.echo("  ".join(v.ljust(w) for v, w in zip(r, widths, strict=True)).rstrip())
