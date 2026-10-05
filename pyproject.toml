@@ -70,7 +70,7 @@ module = [ "mcp.*", "fsspec.*", "pyarrow.*", "spatialdata.*", "upath.*" ]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-addopts = [ "--import-mode=importlib" ]
+addopts = [ "--import-mode=importlib", "-m", "not network" ]
 pythonpath = [ "." ]
 testpaths = [ "tests" ]
 markers = [ "network: tests that require network/S3 access (deselected by default)" ]
