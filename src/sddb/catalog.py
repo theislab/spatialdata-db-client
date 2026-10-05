@@ -113,7 +113,11 @@ class Catalog:
         return f"<Catalog: {len(self)} datasets>"
 
     def query(
-        self, *, validation: str | None = "pass", license_set: bool | None = None, **facets: str | list[str]
+        self,
+        *,
+        validation: str | None = "pass",
+        license_set: bool | None = None,
+        **facets: str | list[str] | tuple[str, ...] | set[str],
     ) -> Results:
         """Filter the catalog.
 
@@ -124,12 +128,12 @@ class Catalog:
         license_set
             If True, keep only rows with a known license (``license_unknown`` is False); False behaves like None.
         **facets
-            Facet column -> value (equality) or list of values (isin).
+            Facet column -> value (equality) or list/tuple/set of values (isin).
 
         Raises
         ------
         ValueError
-            If a keyword is not a facet column.
+            If a keyword is not a facet column, or a facet column is absent from the loaded catalog.
         """
         bad = [k for k in facets if k not in schema.FACETS]
         if bad:
@@ -141,7 +145,9 @@ class Catalog:
         if license_set and "license_unknown" in df.columns:
             mask &= df["license_unknown"].fillna(True) == False  # noqa: E712
         for col, val in facets.items():
-            mask &= df[col].isin(val if isinstance(val, list) else [val])
+            if col not in df.columns:
+                raise ValueError(f"facet column {col!r} is not present in this catalog (columns: {list(df.columns)})")
+            mask &= df[col].isin(list(val) if isinstance(val, (list, tuple, set)) else [val])
         return Results(df[mask.fillna(False).astype(bool)], source=self._source())
 
     def search(self, text: str) -> Results:

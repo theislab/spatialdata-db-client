@@ -36,6 +36,17 @@ def test_query_isin_assay_license(cat):
     assert len(cat.query(validation=None, license_set=True)) == 4
 
 
+def test_query_tuple_and_set_values(cat):
+    assert len(cat.query(organism=("human", "mouse"))) == 4
+    assert len(cat.query(organism={"human"})) == 3
+
+
+def test_query_facet_missing_from_catalog(cat):
+    cat._df = cat._df.drop(columns=["tissue"])
+    with pytest.raises(ValueError, match="tissue"):
+        cat.query(tissue="lung")
+
+
 def test_query_bad_facet(cat):
     with pytest.raises(ValueError, match="organism"):
         cat.query(not_a_facet="x")
