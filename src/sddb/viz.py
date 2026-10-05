@@ -5,8 +5,8 @@ from __future__ import annotations
 import importlib
 import json
 from pathlib import Path
-from urllib.parse import unquote
 from typing import TYPE_CHECKING, Any
+from urllib.parse import unquote
 
 if TYPE_CHECKING:
     from spatialdata import SpatialData
