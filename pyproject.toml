@@ -25,6 +25,7 @@ dependencies = [
   "zarr>=3",
   "platformdirs",
   "universal-pathlib",
+  "typer",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +35,7 @@ llm = [ ]
 
 [project.scripts]
 sddb = "sddb.cli:app"
+sddb-mcp = "sddb.mcp.server:main"
 
 [dependency-groups]
 test = [ "pytest", "coverage", "pytest-cov" ]
@@ -64,7 +66,7 @@ lint.pydocstyle.convention = "numpy"
 strict = true
 
 [[tool.mypy.overrides]]
-module = [ "fsspec.*", "pyarrow.*", "spatialdata.*", "upath.*" ]
+module = [ "mcp.*", "fsspec.*", "pyarrow.*", "spatialdata.*", "upath.*" ]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

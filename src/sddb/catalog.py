@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import warnings
 from pathlib import Path
@@ -49,7 +50,7 @@ class Catalog:
         Parameters
         ----------
         url
-            Catalog parquet URL or path; defaults to ``DEFAULT_CATALOG_URL``.
+            Catalog parquet URL or path; falls back to the ``SDDB_CATALOG_URL`` env var, then ``DEFAULT_CATALOG_URL``.
         cache_dir
             Cache directory override.
         version
@@ -58,7 +59,7 @@ class Catalog:
             Bypass the cache and re-download.
         """
         if url is None:
-            url = DEFAULT_CATALOG_URL
+            url = os.environ.get("SDDB_CATALOG_URL") or DEFAULT_CATALOG_URL
             if version is not None:
                 url = url.rsplit("/", 1)[0] + f"/catalog-{version}.parquet"
         self.url = url

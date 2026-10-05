@@ -144,3 +144,11 @@ def test_fetch_unreachable(tmp_path):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         assert len(Catalog(url, cache_dir=cache).to_df()) == 5
+
+
+def test_env_catalog_url(tmp_path, monkeypatch):
+    p = write_fixture_catalog(tmp_path / "env.parquet")
+    monkeypatch.setenv("SDDB_CATALOG_URL", p.as_uri())
+    assert len(Catalog(cache_dir=tmp_path / "c1")) == 5
+    other = write_fixture_catalog(tmp_path / "other.parquet")
+    assert Catalog(other.as_uri(), cache_dir=tmp_path / "c2").url == other.as_uri()  # explicit wins
