@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING, Any, overload
 
+import numpy as np
 import pandas as pd
 
 from sddb import remote
@@ -27,7 +28,9 @@ _ATTRS = (
 
 
 def _clean(value: Any) -> Any:
-    return None if value is pd.NA or (not isinstance(value, (list, tuple, dict)) and pd.isna(value)) else value
+    if isinstance(value, (list, tuple, dict, np.ndarray)):
+        return value  # container cell: present value, never scalar-isna
+    return None if value is pd.NA or pd.isna(value) else value
 
 
 class Dataset:

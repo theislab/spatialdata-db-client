@@ -65,9 +65,71 @@ def test_fetch_cache(tmp_path):
     cache = tmp_path / "cache"
     p1 = fetch_catalog(src.as_uri(), cache_dir=cache)
     assert cache in p1.parents
-    m = p1.stat().st_mtime_ns
+    p1.write_bytes(b"sentinel")
+    p1.touch()
+    # no-refresh keeps the cached (sentinel) file; mtimes differ from source so allow either, pin via refresh below
+    import os
+
+    os.utime(p1, ns=(src.stat().st_mtime_ns, src.stat().st_mtime_ns))
     assert fetch_catalog(src.as_uri(), cache_dir=cache) == p1
-    assert p1.stat().st_mtime_ns == m
+    assert p1.read_bytes() == b"sentinel"
+    fetch_catalog(src.as_uri(), cache_dir=cache, refresh=True)
+    assert p1.read_bytes() == src.read_bytes()
+
+
+def test_http_last_modified_conditional(tmp_path):
+    import http.server
+    import threading
+
+    src = write_fixture_catalog(tmp_path / "cat.parquet")
+    body = src.read_bytes()
+    seen: list[dict[str, str | None]] = []
+    stamp = "Wed, 01 Jan 2025 00:00:00 GMT"
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append({"ims": self.headers.get("If-Modified-Since"), "inm": self.headers.get("If-None-Match")})
+            if self.headers.get("If-Modified-Since") == stamp:
+                self.send_response(304)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Last-Modified", stamp)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/catalog.parquet"
+        cache = tmp_path / "cache"
+        p = fetch_catalog(url, cache_dir=cache)
+        p.write_bytes(b"sentinel")
+        assert fetch_catalog(url, cache_dir=cache) == p
+        assert p.read_bytes() == b"sentinel"  # 304: not re-downloaded
+        assert seen[1] == {"ims": stamp, "inm": None}
+        fetch_catalog(url, cache_dir=cache, refresh=True)
+        assert p.read_bytes() == body
+        assert seen[2] == {"ims": None, "inm": None}
+    finally:
+        server.shutdown()
+
+
+def test_search_word_boundary(cat):
+    import pandas as pd
+
+    df = cat._df.copy()
+    df.loc[0, "tissue"] = "keratinocyte"
+    df.loc[1, "organism"] = "rat"
+    cat._df = df
+    res = cat.search("rat")
+    assert res.matched == {"organism": ["rat"]}
+    assert "keratinocyte" not in res.matched.get("tissue", [])
+    assert isinstance(res.to_df(), pd.DataFrame)
 
 
 def test_fetch_unreachable(tmp_path):

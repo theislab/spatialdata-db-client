@@ -19,11 +19,14 @@ _FUZZY_CUTOFF = 88
 
 
 def _token_matches(token: str, value: str) -> bool:
-    """Substring or close fuzzy match of a lowercase token against a facet value."""
+    """Match a lowercase token against a facet value: whole word first, fuzzy/substring for longer tokens."""
     low = value.lower()
-    if token == low or (len(token) >= 3 and token in low):
+    words = re.findall(r"\w+", low)
+    if token == low or token in words:
         return True
-    return len(token) >= 4 and any(fuzz.ratio(token, w) >= _FUZZY_CUTOFF for w in re.split(r"[\s_\-/]+", low) if w)
+    if len(token) >= 5 and token in low:
+        return True
+    return len(token) >= 4 and any(fuzz.ratio(token, w) >= _FUZZY_CUTOFF for w in words)
 
 
 class Catalog:
@@ -46,7 +49,7 @@ class Catalog:
         cache_dir
             Cache directory override.
         version
-            Dated snapshot; with the default url, selects ``catalog-<version>.parquet``.
+            Dated snapshot; only used when ``url`` is None (ignored if an explicit url is given), selects ``catalog-<version>.parquet``.
         refresh
             Bypass the cache and re-download.
         """
@@ -100,7 +103,7 @@ class Catalog:
         validation
             Keep rows with this ``validation_status`` (default ``"pass"``); ``None`` disables.
         license_set
-            If True, keep only rows with a known license (``license_unknown`` is False).
+            If True, keep only rows with a known license (``license_unknown`` is False); False behaves like None.
         **facets
             Facet column -> value (equality) or list of values (isin).
 

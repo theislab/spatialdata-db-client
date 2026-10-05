@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import time
@@ -62,10 +63,21 @@ def _age(path: Path) -> str:
 
 
 def _http_fetch(url: str, dest: Path, etag_file: Path, *, refresh: bool) -> None:
-    """Conditional GET ``url`` into ``dest``; a 304 leaves the cached file untouched."""
+    """Conditional GET ``url`` into ``dest``; a 304 leaves the cached file untouched.
+
+    The sidecar records which validator was stored (``etag`` or ``last_modified``) so the matching
+    conditional header (``If-None-Match`` / ``If-Modified-Since``) is sent next time.
+    """
     headers = {}
     if not refresh and dest.exists() and etag_file.exists():
-        headers["If-None-Match"] = etag_file.read_text().strip()
+        try:
+            stored = json.loads(etag_file.read_text())
+        except ValueError:
+            stored = {}
+        if stored.get("etag"):
+            headers["If-None-Match"] = stored["etag"]
+        elif stored.get("last_modified"):
+            headers["If-Modified-Since"] = stored["last_modified"]
     req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
@@ -73,9 +85,13 @@ def _http_fetch(url: str, dest: Path, etag_file: Path, *, refresh: bool) -> None
             with tmp.open("wb") as fh:
                 shutil.copyfileobj(resp, fh)
             tmp.replace(dest)
-            tag = resp.headers.get("ETag") or resp.headers.get("Last-Modified")
-            if tag:
-                etag_file.write_text(tag)
+            validator = {}
+            if resp.headers.get("ETag"):
+                validator["etag"] = resp.headers["ETag"]
+            elif resp.headers.get("Last-Modified"):
+                validator["last_modified"] = resp.headers["Last-Modified"]
+            if validator:
+                etag_file.write_text(json.dumps(validator))
             else:
                 etag_file.unlink(missing_ok=True)
     except urllib.error.HTTPError as err:

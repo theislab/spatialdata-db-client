@@ -41,3 +41,12 @@ def test_load_and_elements(tmp_path):
     assert d.elements()["images/img"]["shape"] == (3, 8, 8)
     with pytest.raises(NotImplementedError):
         d.load(version="x")
+
+
+def test_ndarray_cell():
+    import numpy as np
+
+    df = make_fixture_catalog().iloc[:1].copy()
+    df["tags"] = pd.Series([np.array(["a", "b"])], index=df.index, dtype=object)
+    d = Results(df)[0]
+    assert list(d.tags) == ["a", "b"]
