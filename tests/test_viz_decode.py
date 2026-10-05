@@ -17,7 +17,8 @@ def _real_url() -> str:
 def test_decode_real_url():
     cfg = viz.config_from_vitessce_url(_real_url())
     assert isinstance(cfg, dict)
-    assert "version" in cfg and "datasets" in cfg
+    assert "version" in cfg
+    assert "datasets" in cfg
 
 
 def test_decode_roundtrip():
