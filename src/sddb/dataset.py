@@ -106,6 +106,25 @@ class Dataset:
         """Open :meth:`viewer_url` in the default browser."""
         webbrowser.open(self.viewer_url())
 
+    def view_interactive(self, *, mode: str = "config") -> Any:
+        """In-notebook interactive view; requires the ``[viz]`` extra.
+
+        ``mode="config"`` renders the published Vitessce config (``vitessce_url``); ``mode="sdata"``
+        loads the store and renders it via easy_vitessce.
+        """
+        from sddb import viz
+
+        if mode == "sdata":
+            return viz.render_sdata(self.load())
+        if mode != "config":
+            raise ValueError(f"mode must be 'config' or 'sdata', got {mode!r}")
+        url: str | None = self.vitessce_url
+        if not url:
+            raise ValueError(f"dataset {self.uid} has no vitessce_url")
+        if url.startswith("s3://"):
+            url = _PROXY + url[len("s3://") :]
+        return viz.render_config(url)
+
     def __repr__(self) -> str:
         return f"<Dataset {self.uid} technology={self.technology} organism={self.organism}>"
 
