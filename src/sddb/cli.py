@@ -137,3 +137,27 @@ def viewer_url(uid: str, catalog: _CatalogOpt = None) -> None:
         typer.echo(_resolve(Catalog(catalog), [uid])[0].viewer_url())
     except Exception as err:
         raise _fail(err) from err
+
+
+@app.command()
+def genes(
+    symbol: Annotated[str, typer.Argument(help="Gene symbol (case-insensitive).")],
+    limit: Annotated[int, typer.Option(help="Max datasets to list.")] = 20,
+    catalog: _CatalogOpt = None,
+) -> None:
+    """List datasets expressing SYMBOL, ranked by fraction of observations detected.
+
+    The first call downloads the cross-dataset gene index (~105 MB, one-time; cached afterwards).
+    """
+    try:
+        df = Catalog(catalog).genes.ranked(symbol).head(limit)
+    except Exception as err:
+        raise _fail(RuntimeError(f"could not load the gene index: {err}")) from err
+    if df.empty:
+        typer.echo(f"no datasets express {symbol!r}", err=True)
+        return
+    rows = [["-" if pd.isna(v) else f"{v:.4g}" if isinstance(v, float) else str(v) for v in r] for r in df.itertuples(index=False)]
+    cols = list(df.columns)
+    widths = [max(len(c), *(len(r[i]) for r in rows)) for i, c in enumerate(cols)]
+    for r in [cols, *rows]:
+        typer.echo("  ".join(v.ljust(w) for v, w in zip(r, widths, strict=True)).rstrip())
