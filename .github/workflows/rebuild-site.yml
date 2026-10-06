@@ -1,0 +1,24 @@
+# When a new catalog release is published, trigger a Cloudflare Pages rebuild so the
+# website's prebuild re-fetches the release and flips to the new data.
+# Setup: create a Cloudflare Pages Deploy Hook and add it as the repo secret
+#   CLOUDFLARE_DEPLOY_HOOK  (Settings -> Secrets and variables -> Actions).
+# Until the secret is set this no-ops. Same-day asset re-uploads don't fire a release
+# event -> use the "Run workflow" button (workflow_dispatch) to rebuild manually.
+name: Rebuild website on catalog release
+on:
+  release:
+    types: [published, released]
+  workflow_dispatch:
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Cloudflare deploy hook
+        env:
+          HOOK: ${{ secrets.CLOUDFLARE_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "CLOUDFLARE_DEPLOY_HOOK secret not set; skipping."
+            exit 0
+          fi
+          curl -fsS -X POST "$HOOK" && echo "triggered website rebuild"
