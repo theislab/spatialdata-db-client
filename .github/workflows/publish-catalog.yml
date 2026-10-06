@@ -1,0 +1,63 @@
+name: publish-catalog
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sundays at midnight UTC
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pyarrow requests
+
+      - name: Download and check catalog staleness
+        run: |
+          import os
+          import sys
+          from datetime import datetime, timedelta
+          import requests
+          import pyarrow.parquet as pq
+
+          # Download the latest catalog.parquet
+          url = "https://github.com/theislab/spatialdata-db-client/releases/latest/download/catalog.parquet"
+          response = requests.get(url, allow_redirects=True)
+          response.raise_for_status()
+
+          with open("catalog.parquet", "wb") as f:
+              f.write(response.content)
+
+          # Read the sddb_generated_at metadata
+          parquet_file = pq.ParquetFile("catalog.parquet")
+          metadata = parquet_file.metadata.metadata
+
+          if metadata is None or b"sddb_generated_at" not in metadata:
+              print("ERROR: sddb_generated_at metadata not found in catalog.parquet")
+              sys.exit(1)
+
+          sddb_generated_at_str = metadata[b"sddb_generated_at"].decode("utf-8")
+          print(f"Catalog generated at: {sddb_generated_at_str}")
+
+          # Parse the ISO format date
+          generated_date = datetime.fromisoformat(sddb_generated_at_str)
+          now = datetime.now(generated_date.tzinfo) if generated_date.tzinfo else datetime.now()
+
+          # Check staleness (30 days)
+          age = now - generated_date
+          max_age = timedelta(days=30)
+
+          if age > max_age:
+              print(f"ERROR: Catalog is stale! Generated {age.days} days ago (max: 30 days)")
+              sys.exit(1)
+
+          print(f"Catalog is fresh (age: {age.days} days)")
+        shell: python
