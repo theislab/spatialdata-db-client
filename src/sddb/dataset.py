@@ -85,7 +85,16 @@ class Dataset:
         """
         if version is not None:
             raise NotImplementedError("version pinning is not implemented yet")
-        return remote.open_sdata(self.zarr_url, lazy=lazy)
+        try:
+            return remote.open_sdata(self.zarr_url, lazy=lazy)
+        except NotImplementedError as e:
+            if "remote" in str(e).lower() and "lazy" in str(e).lower():
+                raise NotImplementedError(
+                    "Remote lazy open isn't supported upstream (spatialdata). "
+                    "Download first: `Results.download(dest)` then open the local store, "
+                    "or use `load(lazy=False)` to materialise."
+                ) from e
+            raise
 
     def elements(self) -> dict[str, dict[str, Any]]:
         """Return element shapes/dtypes without loading data."""
