@@ -169,7 +169,9 @@ class Catalog:
             "exclude NonCommercial" filter; if True, keep only NonCommercial data; ``None`` disables.
         search
             Free text, as in :meth:`search`; the result is intersected with the other filters and
-            carries the ``matched`` facet values.
+            carries the ``matched`` facet values. With ``validation=None`` (or ``"all"``), ``search``
+            still imposes its own ``validation_status == "pass"`` filter unless ``validation_status``
+            was itself matched, so failed rows do not survive a ``search``.
         expressing
             Gene symbol; keep datasets where it is expressed (see ``genes.ranked``). The first use
             downloads the gene index (~142 MB, cached).
@@ -194,9 +196,12 @@ class Catalog:
         if bad:
             raise ValueError(f"unknown facet(s) {bad}; valid facets: {list(schema.FACETS)}")
         df = self._df
-        bad_range = [c for c, _, _ in ranges if c not in schema.RANGE_COLUMNS or c not in df.columns]
-        if bad_range:
-            raise ValueError(f"unknown range column(s) {bad_range}; valid: {list(schema.RANGE_COLUMNS)}")
+        unknown_range = [c for c, _, _ in ranges if c not in schema.RANGE_COLUMNS]
+        if unknown_range:
+            raise ValueError(f"unknown range column(s) {unknown_range}; valid: {list(schema.RANGE_COLUMNS)}")
+        absent_range = [c for c, _, _ in ranges if c not in df.columns]
+        if absent_range:
+            raise ValueError(f"range column(s) {absent_range} not present in this catalog")
         mask = pd.Series(True, index=df.index)
         if validation is not None:
             mask &= df["validation_status"] == validation
@@ -209,6 +214,8 @@ class Catalog:
                 raise ValueError(f"facet column {col!r} is not present in this catalog (columns: {list(df.columns)})")
             mask &= df[col].isin(list(val) if isinstance(val, (list, tuple, set)) else [val])
         for col, op, val in ranges:
+            if isinstance(val, (list, tuple, set)):
+                raise ValueError(f"range value for {col}__{op} must be a scalar number, got {val!r}")
             try:
                 cmp = _RANGE_OPS[op](df[col], val)
             except TypeError as err:
@@ -222,7 +229,7 @@ class Catalog:
             keep = set(hits.to_df()["uid"])
             rdf = result.to_df()
             result = Results(rdf[rdf["uid"].isin(keep)], matched=matched, source=self._source())
-        if expressing is not None:
+        if expressing is not None and len(result):  # skip the ~142 MB gene index when nothing is left to filter
             ranked = self.genes.ranked(expressing, min_fraction=min_fraction, validation=validation)
             keep = set(ranked["uid"])
             rdf = result.to_df()

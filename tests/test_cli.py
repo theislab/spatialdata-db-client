@@ -96,3 +96,13 @@ def test_query_expressing_and_range_flags(tmp_path):
     assert r.exit_code == 0, r.output
     assert "uid0001" in r.output
     assert "uid0002" not in r.output  # excluded by search=lung
+
+
+def test_query_min_obs_excludes_smaller(cat_url):
+    r = runner.invoke(app, ["query", "--catalog", cat_url, "--organism", "human"])
+    assert "uid0005" in r.output  # n_obs=4200, present without the flag
+    r = runner.invoke(app, ["query", "--catalog", cat_url, "--organism", "human", "--min-obs", "90000"])
+    assert r.exit_code == 0, r.output
+    assert "uid0001" in r.output
+    assert "uid0002" not in r.output
+    assert "uid0005" not in r.output

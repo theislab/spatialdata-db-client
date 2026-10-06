@@ -84,3 +84,13 @@ def test_server_tools_hide_catalog_url():
 def test_query_tool_expressing_and_range(cat_url):
     rows = tools.query_tool(cat_url, expressing="EPCAM", n_obs__gte=50_000)
     assert {r["uid"] for r in rows} == {"uid0001", "uid0002"}
+
+
+def test_query_tool_search(cat_url):
+    rows = tools.query_tool(cat_url, organism="human", search="lung")
+    assert {r["uid"] for r in rows} == {"uid0001"}
+
+
+def test_query_tool_expressing_min_fraction(cat_url):
+    assert {r["uid"] for r in tools.query_tool(cat_url, expressing="EPCAM")} == {"uid0001", "uid0002", "uid0005"}
+    assert {r["uid"] for r in tools.query_tool(cat_url, expressing="EPCAM", min_fraction=0.35)} == {"uid0001"}
