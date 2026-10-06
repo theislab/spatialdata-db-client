@@ -110,7 +110,7 @@ res.citations("refs.bib")                       # filter published citations.bib
 m = sddb.Manifest.read("./data/manifest.json")  # .refetch(dest): re-download exactly the recorded stores
 
 # ---- cross-dataset gene search ----
-hits = cat.genes.datasets_with("EPCAM")         # from gene_index.parquet -> Results
+hits = cat.genes.where_expressed("EPCAM")       # from gene_index.parquet -> Results (alias: datasets_with)
 ```
 
 Notes:

@@ -50,3 +50,11 @@ def test_refresh_passed_to_sidecar(tmp_path, monkeypatch):
     monkeypatch.setattr(genes_mod, "fetch_catalog", spy)
     cat.genes  # noqa: B018
     assert seen == [True]
+
+
+def test_where_expressed_is_datasets_with(tmp_path):
+    cat = _cat(tmp_path)
+    a = cat.genes.where_expressed("EPCAM").to_df()
+    b = cat.genes.datasets_with("EPCAM").to_df()
+    assert list(a["uid"]) == list(b["uid"])
+    assert [d.uid for d in cat.genes.where_expressed("EPCAM", min_fraction=0.3)] == ["uid0001", "uid0002"]

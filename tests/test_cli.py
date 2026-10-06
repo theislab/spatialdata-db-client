@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 
 import pytest
-from tests._fixtures import make_fixture_catalog, make_tiny_sdata_zarr
+from tests._fixtures import (
+    make_fixture_catalog,
+    make_tiny_sdata_zarr,
+    write_fixture_catalog,
+    write_fixture_gene_index,
+)
 from typer.testing import CliRunner
 
 from sddb.cli import app
@@ -79,3 +84,25 @@ def test_download(tmp_path):
     m = json.loads((dest / "manifest.json").read_text())
     assert [e["status"] for e in m["entries"]] == ["complete", "complete"]
     assert (dest / "uid0001.zarr").is_dir()
+
+
+def test_query_expressing_and_range_flags(tmp_path):
+    cat = write_fixture_catalog(tmp_path / "catalog.parquet")
+    write_fixture_gene_index(tmp_path / "gene_index.parquet")
+    r = runner.invoke(
+        app,
+        ["query", "--catalog", cat.as_uri(), "--expressing", "EPCAM", "--min-obs", "50000", "--search", "lung"],
+    )
+    assert r.exit_code == 0, r.output
+    assert "uid0001" in r.output
+    assert "uid0002" not in r.output  # excluded by search=lung
+
+
+def test_query_min_obs_excludes_smaller(cat_url):
+    r = runner.invoke(app, ["query", "--catalog", cat_url, "--organism", "human"])
+    assert "uid0005" in r.output  # n_obs=4200, present without the flag
+    r = runner.invoke(app, ["query", "--catalog", cat_url, "--organism", "human", "--min-obs", "90000"])
+    assert r.exit_code == 0, r.output
+    assert "uid0001" in r.output
+    assert "uid0002" not in r.output
+    assert "uid0005" not in r.output

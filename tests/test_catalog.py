@@ -3,7 +3,7 @@ from __future__ import annotations
 import warnings
 
 import pytest
-from tests._fixtures import write_fixture_catalog
+from tests._fixtures import make_fixture_catalog, write_fixture_catalog, write_fixture_gene_index
 
 from sddb._cache import catalog_cache_path, fetch_catalog
 from sddb.catalog import Catalog
@@ -203,3 +203,103 @@ def test_default_catalog_loads_from_published_release(tmp_path):
 def test_from_file_missing(tmp_path):
     with pytest.raises(FileNotFoundError):
         Catalog.from_file(tmp_path / "nope.parquet", cache_dir=tmp_path / "c")
+
+
+def test_query_range_gte(cat):
+    assert sorted(d.uid for d in cat.query(n_obs__gte=50_000)) == ["uid0001", "uid0002"]
+
+
+def test_query_range_gt_excludes_boundary(cat):
+    # uid0003=4000 excluded by gt; uid0004 fails validation
+    assert sorted(d.uid for d in cat.query(n_obs__gt=4_000)) == ["uid0001", "uid0002", "uid0005"]
+
+
+def test_query_range_lte_and_lt(cat):
+    assert sorted(d.uid for d in cat.query(n_features__lte=5_000)) == ["uid0001", "uid0002"]
+    assert sorted(d.uid for d in cat.query(total_counts__lt=500_000)) == ["uid0003", "uid0005"]
+
+
+def test_query_facet_and_range(cat):
+    assert sorted(d.uid for d in cat.query(organism="human", n_obs__gte=50_000)) == ["uid0001", "uid0002"]
+
+
+def test_query_range_unknown_column_errors(cat):
+    with pytest.raises(ValueError, match="range column"):
+        cat.query(organism__gte=1)
+
+
+def test_query_range_nonnumeric_value_errors(cat):
+    with pytest.raises(ValueError, match="numeric"):
+        cat.query(n_obs__gte="big")
+
+
+def _cat_genes(tmp_path):
+    p = write_fixture_catalog(tmp_path / "catalog.parquet")
+    write_fixture_gene_index(tmp_path / "gene_index.parquet")
+    return Catalog(p.as_uri(), cache_dir=tmp_path / "cache")
+
+
+def test_query_search_intersects(tmp_path):
+    cat = _cat_genes(tmp_path)
+    res = cat.query(organism="human", search="lung")
+    assert [d.uid for d in res] == ["uid0001"]
+    assert res.matched  # search's matched dict is carried through
+
+
+def test_query_expressing(tmp_path):
+    cat = _cat_genes(tmp_path)
+    assert sorted(d.uid for d in cat.query(organism="human", expressing="EPCAM")) == ["uid0001", "uid0002", "uid0005"]
+
+
+def test_query_expressing_min_fraction(tmp_path):
+    cat = _cat_genes(tmp_path)
+    assert [d.uid for d in cat.query(expressing="EPCAM", min_fraction=0.35)] == ["uid0001"]
+
+
+def test_query_all_combined(tmp_path):
+    cat = _cat_genes(tmp_path)
+    res = cat.query(organism="human", n_obs__gte=50_000, expressing="EPCAM", search="lung")
+    assert [d.uid for d in res] == ["uid0001"]
+
+
+def test_query_min_fraction_without_expressing_errors(tmp_path):
+    cat = _cat_genes(tmp_path)
+    with pytest.raises(ValueError, match="min_fraction requires expressing"):
+        cat.query(min_fraction=0.5)
+
+
+def test_query_expressing_absent_symbol_empty(tmp_path):
+    cat = _cat_genes(tmp_path)
+    assert len(cat.query(expressing="NOPE")) == 0
+
+
+def test_query_search_nothing_empty(tmp_path):
+    cat = _cat_genes(tmp_path)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert len(cat.query(organism="human", search="zzzznotathing")) == 0
+
+
+def test_query_expressing_keeps_matched(tmp_path):
+    cat = _cat_genes(tmp_path)
+    assert cat.query(organism="human", expressing="EPCAM", search="lung").matched
+
+
+def test_query_expressing_empty_skips_gene_index(tmp_path):
+    p = write_fixture_catalog(tmp_path / "catalog.parquet")  # deliberately no gene_index.parquet
+    cat = Catalog(p.as_uri(), cache_dir=tmp_path / "cache")
+    assert len(cat.query(organism="nonexistent_xyz", expressing="EPCAM")) == 0
+
+
+@pytest.mark.parametrize("val", [[1, 2], (1, 2), {1}])
+def test_query_range_nonscalar_value_errors(cat, val):
+    with pytest.raises(ValueError, match="scalar"):
+        cat.query(n_obs__gte=val)
+
+
+def test_query_range_column_absent_from_catalog(tmp_path):
+    df = make_fixture_catalog().drop(columns=["total_counts"])
+    p = tmp_path / "c.parquet"
+    df.to_parquet(p)
+    with pytest.raises(ValueError, match="not present in this catalog"):
+        Catalog(p.as_uri(), cache_dir=tmp_path / "cache").query(total_counts__gte=1)

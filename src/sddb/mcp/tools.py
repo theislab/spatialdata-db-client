@@ -18,12 +18,28 @@ def _records(df: pd.DataFrame) -> list[dict[str, Any]]:
     return out
 
 
-def query_tool(catalog_url: str | None = None, validation: str = "pass", **facets: Any) -> list[dict[str, Any]]:
+def query_tool(
+    catalog_url: str | None = None,
+    validation: str = "pass",
+    expressing: str | None = None,
+    min_fraction: float | None = None,
+    search: str | None = None,
+    **facets: Any,
+) -> list[dict[str, Any]]:
     """Query the catalog by facets; at most ``MAX_ROWS`` rows (a trailing ``{"note": ...}`` marks truncation).
 
     ``validation`` filters ``validation_status`` (default ``"pass"``; ``"all"`` includes every row).
+    ``**facets`` accepts equality, lists (isin) and ``col__gte``/``gt``/``lte``/``lt`` ranges. ``expressing``
+    (+ optional ``min_fraction``) and ``search`` compose as in :meth:`Catalog.query`.
     """
-    df = Catalog(catalog_url).query(validation=None if validation == "all" else validation, **facets).to_df()
+    res = Catalog(catalog_url).query(
+        validation=None if validation == "all" else validation,
+        expressing=expressing,
+        min_fraction=min_fraction,
+        search=search,
+        **facets,
+    )
+    df = res.to_df()
     rows = _records(df.head(MAX_ROWS))
     if len(df) > MAX_ROWS:
         rows.append({"note": f"truncated: showing {MAX_ROWS} of {len(df)} rows; narrow the query"})

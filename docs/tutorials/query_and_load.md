@@ -82,6 +82,6 @@ sdata
 ```
 
 ```{note}
-Gene search (`cat.genes.datasets_with(...)`) needs the published `gene_index.parquet`, which has not
+Gene search (`cat.genes.where_expressed(...)`) needs the published `gene_index.parquet`, which has not
 been generated yet, so it is omitted for now.
 ```

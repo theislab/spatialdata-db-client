@@ -32,7 +32,7 @@ def build_server() -> Any:
         tier: str | None = None,
         validation: str = "pass",
     ) -> list[dict[str, Any]]:
-        facets = {"organism": organism, "tissue": tissue, "disease": disease}
+        facets: dict[str, Any] = {"organism": organism, "tissue": tissue, "disease": disease}
         facets |= {"technology": technology, "assay": assay, "tier": tier}
         return tools.query_tool(validation=validation, **{k: v for k, v in facets.items() if v is not None})
 
