@@ -32,17 +32,14 @@ def query_tool(
     ``**facets`` accepts equality, lists (isin) and ``col__gte``/``gt``/``lte``/``lt`` ranges. ``expressing``
     (+ optional ``min_fraction``) and ``search`` compose as in :meth:`Catalog.query`.
     """
-    df = (
-        Catalog(catalog_url)
-        .query(
-            validation=None if validation == "all" else validation,
-            expressing=expressing,
-            min_fraction=min_fraction,
-            search=search,
-            **facets,
-        )
-        .to_df()
+    res = Catalog(catalog_url).query(
+        validation=None if validation == "all" else validation,
+        expressing=expressing,
+        min_fraction=min_fraction,
+        search=search,
+        **facets,
     )
+    df = res.to_df()
     rows = _records(df.head(MAX_ROWS))
     if len(df) > MAX_ROWS:
         rows.append({"note": f"truncated: showing {MAX_ROWS} of {len(df)} rows; narrow the query"})

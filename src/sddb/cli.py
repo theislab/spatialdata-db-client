@@ -67,9 +67,7 @@ def query(
     """List datasets matching the given facets."""
     val = _validation(validation)
     facets = _facets(organism=organism, assay=assay, tissue=tissue, disease=disease, technology=technology, tier=tier)
-    ranges: dict[str, Any] = {
-        k: v for k, v in {"n_obs__gte": min_obs, "n_features__gte": min_features}.items() if v is not None
-    }
+    ranges = _facets(n_obs__gte=min_obs, n_features__gte=min_features)
     try:
         cat = Catalog(catalog)
         res = cat.query(

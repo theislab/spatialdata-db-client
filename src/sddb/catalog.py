@@ -217,24 +217,20 @@ class Catalog:
             if isinstance(val, (list, tuple, set)):
                 raise ValueError(f"range value for {col}__{op} must be a scalar number, got {val!r}")
             try:
-                cmp = _RANGE_OPS[op](df[col], val)
+                mask &= _RANGE_OPS[op](df[col], val)
             except TypeError as err:
                 raise ValueError(f"range value for {col}__{op} must be numeric, got {val!r}") from err
-            mask &= cmp.fillna(False).astype(bool)
-        result = Results(df[mask.fillna(False).astype(bool)], source=self._source())
+        keep = mask.fillna(False).astype(bool)
+        # search and expressing each constrain the surviving uids; intersect into one mask, build Results once.
         matched: dict[str, list[str]] | None = None
-        if search is not None:
+        if search is not None and keep.any():
             hits = self.search(search)
             matched = hits.matched or None
-            keep = set(hits.to_df()["uid"])
-            rdf = result.to_df()
-            result = Results(rdf[rdf["uid"].isin(keep)], matched=matched, source=self._source())
-        if expressing is not None and len(result):  # skip the ~142 MB gene index when nothing is left to filter
+            keep &= df["uid"].isin(hits.to_df()["uid"])
+        if expressing is not None and keep.any():  # skip the ~142 MB gene index when nothing is left to filter
             ranked = self.genes.ranked(expressing, min_fraction=min_fraction, validation=validation)
-            keep = set(ranked["uid"])
-            rdf = result.to_df()
-            result = Results(rdf[rdf["uid"].isin(keep)], matched=matched, source=self._source())
-        return result
+            keep &= df["uid"].isin(ranked["uid"])
+        return Results(df[keep], matched=matched, source=self._source())
 
     def search(self, text: str) -> Results:
         """Deterministic text search over facet values.

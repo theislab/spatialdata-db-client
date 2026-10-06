@@ -64,9 +64,9 @@ FACETS: tuple[str, ...] = (
     "license_noncommercial",
 )
 
-# numeric columns that accept range operators (col__gte / __gt / __lte / __lt) in Catalog.query;
-# exactly the CATALOG_COLUMNS entries whose dtype is Int64/Float64.
-RANGE_COLUMNS: tuple[str, ...] = ("panel_size", "n_obs", "n_features", "total_counts", "size_bytes")
+# numeric columns that accept range operators (col__gte / __gt / __lte / __lt) in Catalog.query:
+# exactly the CATALOG_COLUMNS entries whose dtype is Int64/Float64 (derived, so the two stay in sync).
+RANGE_COLUMNS: tuple[str, ...] = tuple(c for c, t in CATALOG_COLUMNS.items() if t in ("Int64", "Float64"))
 
 GENE_INDEX_COLUMNS: dict[str, str] = {
     "symbol": "string",
