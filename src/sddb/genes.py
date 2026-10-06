@@ -56,12 +56,27 @@ class GeneIndex:
         validation
             Keep datasets with this ``validation_status`` (default ``"pass"``, as in ``Catalog.query``); ``None`` disables.
         """
+        uids = set(self.ranked(symbol, min_fraction=min_fraction, validation=validation)["uid"])
+        cat = self._catalog_df(validation)
+        return Results(cat[cat["uid"].isin(uids)], source=self._catalog._source())
+
+    def _catalog_df(self, validation: str | None) -> pd.DataFrame:
+        cat = self._catalog.to_df()
+        return cat if validation is None else cat[cat["validation_status"] == validation]
+
+    def ranked(
+        self, symbol: str, *, min_fraction: float | None = None, validation: str | None = "pass"
+    ) -> pd.DataFrame:
+        """Per-dataset ``uid``, ``fraction_obs_detected``, ``total_counts`` for ``symbol``, best detection first.
+
+        Filters as in :meth:`datasets_with`; one row per catalog dataset (max over matching features).
+        """
         df = self._df
         mask = df["symbol"].str.casefold() == symbol.casefold()
         if min_fraction is not None:
             mask &= df["fraction_obs_detected"] >= min_fraction
-        uids = set(df.loc[mask.fillna(False).astype(bool), "uid"].dropna())
-        cat = self._catalog.to_df()
-        if validation is not None:
-            cat = cat[cat["validation_status"] == validation]
-        return Results(cat[cat["uid"].isin(uids)], source=self._catalog._source())
+        cols = ["uid", "fraction_obs_detected", "total_counts"]
+        hit = df.loc[mask.fillna(False).astype(bool), cols].dropna(subset=["uid"])
+        hit = hit[hit["uid"].isin(set(self._catalog_df(validation)["uid"]))].groupby("uid", as_index=False).max()
+        by = ["fraction_obs_detected", "total_counts"]
+        return hit.sort_values(by, ascending=False, kind="stable").reset_index(drop=True)

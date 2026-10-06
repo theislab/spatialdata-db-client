@@ -1,0 +1,37 @@
+name: publish-catalog
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sundays at midnight UTC
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install client
+        run: pip install .
+
+      - name: Check catalog staleness
+        run: |
+          python -c "
+          import sys
+          from datetime import datetime, timezone
+          from sddb import Catalog
+          g = Catalog().generated_at
+          if not g:
+              sys.exit('ERROR: catalog has no generated_at')
+          d = datetime.fromisoformat(g)
+          age = datetime.now(d.tzinfo or timezone.utc) - d
+          print(f'Catalog generated {g} ({age.days} days ago)')
+          if age.days > 30:
+              sys.exit('ERROR: catalog is stale (max 30 days)')
+          "

@@ -103,8 +103,8 @@ class Catalog:
     @property
     def generated_at(self) -> str | None:
         """Generation timestamp from the parquet metadata, if present."""
-        meta = pq.read_schema(self._path).metadata or {}
-        value = meta.get(b"generated_at")
+        meta = pq.read_metadata(self._path).metadata or {}
+        value = meta.get(b"sddb_generated_at")
         return value.decode() if value else None
 
     def _source(self) -> Source:
