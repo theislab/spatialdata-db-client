@@ -68,7 +68,7 @@ def test_server_registers_tools():
     from sddb.mcp.server import build_server
 
     names = {t.name for t in asyncio.run(build_server().list_tools())}
-    assert names == {"query", "describe", "genes"}
+    assert names == {"query", "describe", "genes", "facets", "cite", "download"}
 
 
 def test_server_tools_hide_catalog_url():
@@ -94,3 +94,106 @@ def test_query_tool_search(cat_url):
 def test_query_tool_expressing_min_fraction(cat_url):
     assert {r["uid"] for r in tools.query_tool(cat_url, expressing="EPCAM")} == {"uid0001", "uid0002", "uid0005"}
     assert {r["uid"] for r in tools.query_tool(cat_url, expressing="EPCAM", min_fraction=0.35)} == {"uid0001"}
+
+
+def test__query_helper_filters(tmp_path):
+    from tests._fixtures import write_fixture_catalog
+    from sddb.mcp.tools import _query
+
+    cat = write_fixture_catalog(tmp_path / "catalog.parquet")
+    res = _query(cat.as_uri(), organism="human")
+    assert sorted(d.uid for d in res) == ["uid0001", "uid0002", "uid0005"]
+
+
+def test_facets_tool(tmp_path):
+    from tests._fixtures import write_fixture_catalog
+    from sddb.mcp.tools import facets_tool
+    import pytest
+
+    cat = write_fixture_catalog(tmp_path / "catalog.parquet")
+    cols = facets_tool(catalog_url=cat.as_uri())
+    assert "organism" in cols and "technology" in cols
+    assert facets_tool("organism", catalog_url=cat.as_uri()) == ["human", "mouse"]
+    with pytest.raises(ValueError, match="unknown facet"):
+        facets_tool("not_a_facet", catalog_url=cat.as_uri())
+
+
+def test_cite_tool(tmp_path):
+    from tests._fixtures import write_fixture_catalog, make_fixture_citations_bib
+    from sddb.mcp.tools import cite_tool
+
+    cat = write_fixture_catalog(tmp_path / "catalog.parquet")
+    (tmp_path / "citations.bib").write_text(make_fixture_citations_bib(), encoding="utf-8")
+    out = cite_tool(catalog_url=cat.as_uri(), organism="human")
+    assert out["n"] >= 1
+    assert "@" in out["bibtex"] and "Smith2023" in out["bibtex"]
+    empty = cite_tool(catalog_url=cat.as_uri(), organism="nonexistent_xyz")
+    assert empty == {"bibtex": "", "n": 0}
+
+
+def test_download_tool_plan_no_copy(tmp_path, monkeypatch):
+    from tests._fixtures import write_fixture_catalog
+    import sddb.mcp.tools as t
+
+    cat = write_fixture_catalog(tmp_path / "catalog.parquet")
+    monkeypatch.setattr(t, "plan_sizes", lambda res: [(d.uid, 1000) for d in res])
+    called = {"download": False}
+    monkeypatch.setattr(
+        "sddb.dataset.Results.download",
+        lambda self, *a, **k: called.__setitem__("download", True),
+    )
+    out = t.download_tool(catalog_url=cat.as_uri(), organism="human")
+    assert called["download"] is False  # plan mode copies nothing
+    assert out["datasets"] == 3 and out["total_bytes"] == 3000
+    assert {p["uid"] for p in out["per_store"]} == {"uid0001", "uid0002", "uid0005"}
+
+
+def test_download_tool_fetch_sandbox(tmp_path, monkeypatch):
+    from tests._fixtures import write_fixture_catalog
+    from sddb.manifest import Manifest, ManifestEntry
+    import sddb.mcp.tools as t
+
+    cat = write_fixture_catalog(tmp_path / "catalog.parquet")
+    sandbox = tmp_path / "dl"
+    monkeypatch.setenv("SDDB_MCP_DOWNLOAD_DIR", str(sandbox))
+    seen = {}
+
+    def fake_download(self, dest, *, workers=4, **k):
+        seen["dest"] = str(dest)
+        return Manifest("now", None, [ManifestEntry("uid0001", "s3://x", str(dest), 5, "complete", None)])
+
+    monkeypatch.setattr("sddb.dataset.Results.download", fake_download)
+    out = t.download_tool(catalog_url=cat.as_uri(), organism="human", download=True)
+    assert seen["dest"] == str(sandbox)  # fetched only into the sandbox
+    assert out["dest"] == str(sandbox)
+    assert out["entries"] == [{"uid": "uid0001", "size_bytes": 5, "status": "complete"}]
+    assert "manifest_path" in out
+
+
+def test_server_query_forwards_new_params(monkeypatch):
+    import sddb.mcp.server as server
+    import sddb.mcp.tools as tools
+
+    seen = {}
+    monkeypatch.setattr(tools, "query_tool", lambda **kw: seen.update(kw) or [])
+    registered = {}
+
+    class FakeServer:
+        def __init__(self, name): ...
+        def tool(self, name, description=""):
+            def deco(fn):
+                registered[name] = fn
+                return fn
+            return deco
+        def run(self): ...
+
+    monkeypatch.setattr(server, "_server_class", lambda: FakeServer)
+    server.build_server()
+    assert {"query", "describe", "genes", "facets", "cite", "download"} <= set(registered)
+    registered["query"](organism="human", expressing="EPCAM", search="liver", min_obs=1000)
+    assert seen["expressing"] == "EPCAM"
+    assert seen["search"] == "liver"
+    assert seen["n_obs__gte"] == 1000
+    assert seen["organism"] == "human"
+    assert "min_obs" not in seen
+    assert "n_features__gte" not in seen

@@ -130,6 +130,15 @@ def _fetch_all(pairs: list[tuple[str, str]], root: Path, catalog_version: str | 
     return manifest
 
 
+def plan_sizes(results: Results) -> list[tuple[str, int]]:
+    """Per-store ``(uid, total bytes)`` from a LIST/``du`` on each store — no data is copied."""
+    out: list[tuple[str, int]] = []
+    for ds in results:
+        fs, root = fsspec.core.url_to_fs(ds.zarr_url, **storage_options(ds.zarr_url))
+        out.append((ds.uid, int(fs.du(root))))
+    return out
+
+
 def download(
     results: Results,
     dest: str | Path,

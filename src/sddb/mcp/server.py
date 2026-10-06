@@ -31,12 +31,27 @@ def build_server() -> Any:
         assay: str | None = None,
         tier: str | None = None,
         validation: str = "pass",
+        expressing: str | None = None,
+        min_fraction: float | None = None,
+        search: str | None = None,
+        min_obs: int | None = None,
+        min_features: int | None = None,
     ) -> list[dict[str, Any]]:
         facets: dict[str, Any] = {"organism": organism, "tissue": tissue, "disease": disease}
         facets |= {"technology": technology, "assay": assay, "tier": tier}
-        return tools.query_tool(validation=validation, **{k: v for k, v in facets.items() if v is not None})
+        facets |= {"n_obs__gte": min_obs, "n_features__gte": min_features}
+        return tools.query_tool(
+            validation=validation,
+            expressing=expressing,
+            min_fraction=min_fraction,
+            search=search,
+            **{k: v for k, v in facets.items() if v is not None},
+        )
 
-    server.tool(name="query", description="Filter datasets by facets (organism, tissue, technology, ...).")(query)
+    server.tool(
+        name="query",
+        description="Filter datasets by facets, ranges (min_obs/min_features), gene (expressing) and free-text search.",
+    )(query)
 
     def describe(uid: str) -> dict[str, Any]:
         return tools.describe_tool(uid)
@@ -44,8 +59,60 @@ def build_server() -> Any:
     def genes(symbol: str) -> list[dict[str, Any]]:
         return tools.genes_tool(symbol)
 
+    def facets(field: str | None = None) -> list[str]:
+        return tools.facets_tool(field)
+
+    def cite(
+        organism: str | None = None,
+        tissue: str | None = None,
+        disease: str | None = None,
+        technology: str | None = None,
+        assay: str | None = None,
+        tier: str | None = None,
+        search: str | None = None,
+        expressing: str | None = None,
+        min_fraction: float | None = None,
+        validation: str = "pass",
+    ) -> dict[str, Any]:
+        facets: dict[str, Any] = {"organism": organism, "tissue": tissue, "disease": disease}
+        facets |= {"technology": technology, "assay": assay, "tier": tier}
+        return tools.cite_tool(
+            validation=validation,
+            search=search,
+            expressing=expressing,
+            min_fraction=min_fraction,
+            **{k: v for k, v in facets.items() if v is not None},
+        )
+
+    def download(
+        organism: str | None = None,
+        tissue: str | None = None,
+        disease: str | None = None,
+        technology: str | None = None,
+        assay: str | None = None,
+        tier: str | None = None,
+        search: str | None = None,
+        expressing: str | None = None,
+        min_fraction: float | None = None,
+        validation: str = "pass",
+        download: bool = False,
+    ) -> dict[str, Any]:
+        facets: dict[str, Any] = {"organism": organism, "tissue": tissue, "disease": disease}
+        facets |= {"technology": technology, "assay": assay, "tier": tier}
+        return tools.download_tool(
+            validation=validation,
+            search=search,
+            expressing=expressing,
+            min_fraction=min_fraction,
+            download=download,
+            **{k: v for k, v in facets.items() if v is not None},
+        )
+
     server.tool(name="describe", description="Catalog row and element shapes for one dataset uid.")(describe)
     server.tool(name="genes", description="Datasets whose gene index contains a gene symbol.")(genes)
+    server.tool(name="facets", description="List facet columns, or the distinct values of a facet field.")(facets)
+    server.tool(name="cite", description="BibTeX for the studies of a filtered cohort.")(cite)
+    server.tool(name="download", description="Plan (sizes) or fetch a filtered cohort to the server download dir.")(download)
     return server
 
 
