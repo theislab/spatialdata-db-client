@@ -37,9 +37,11 @@ def test_facets_unknown_field(fixture_catalog_env):
 
 def test_query_zero_match_suggests(fixture_catalog_env):
     r = runner.invoke(app, ["query", "--technology", "Visium HD"])
+    assert r.exit_code == 0, r.output
     assert "did you mean" in r.output.lower() and "VisiumHD" in r.output
 
 
 def test_query_match_no_suggestion(fixture_catalog_env):
     r = runner.invoke(app, ["query", "--technology", "Xenium"])
+    assert r.exit_code == 0, r.output
     assert "did you mean" not in r.output.lower()
