@@ -79,3 +79,8 @@ def test_server_tools_hide_catalog_url():
 
     for t in asyncio.run(build_server().list_tools()):
         assert "catalog_url" not in t.input_schema["properties"]
+
+
+def test_query_tool_expressing_and_range(cat_url):
+    rows = tools.query_tool(cat_url, expressing="EPCAM", n_obs__gte=50_000)
+    assert {r["uid"] for r in rows} == {"uid0001", "uid0002"}
