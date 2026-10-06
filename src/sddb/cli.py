@@ -7,7 +7,9 @@ from typing import Annotated, Any
 
 import pandas as pd
 import typer
+from rapidfuzz import fuzz, process
 
+from sddb import _catalog_schema as schema
 from sddb.catalog import Catalog
 from sddb.dataset import Results
 
@@ -47,6 +49,8 @@ def query(
         raise _fail(err) from err
 
     df = res.to_df()
+    if df.empty:
+        _suggest(cat, facets)
     if as_json:
         typer.echo(df.to_json(orient="records", indent=2))
         return
@@ -60,6 +64,43 @@ def query(
     widths = [max(len(c), *(len(r[i]) for r in rows)) if rows else len(c) for i, c in enumerate(cols)]
     for r in [cols, *rows]:
         typer.echo("  ".join(v.ljust(w) for v, w in zip(r, widths, strict=True)).rstrip())
+
+
+def _norm(v: str) -> str:
+    return "".join(str(v).lower().split())
+
+
+def _suggest(cat: Catalog, facets: dict[str, Any]) -> None:
+    """Hint the closest known value for each facet value that matches nothing (exact-match query)."""
+    df = cat.to_df()
+    for col, val in facets.items():
+        if col not in df.columns or isinstance(val, (list, tuple, set)):
+            continue
+        known = sorted(str(v) for v in df[col].dropna().unique())
+        if str(val) in known:
+            continue
+        best = process.extractOne(_norm(val), {k: _norm(k) for k in known}, scorer=fuzz.ratio, score_cutoff=70)
+        if best:
+            typer.echo(f"no match for --{col} {val!r}; did you mean '{best[2]}'?", err=True)
+
+
+@app.command()
+def facets(
+    field: Annotated[str | None, typer.Argument(help="Facet column; omit to list columns.")] = None,
+    catalog: _CatalogOpt = None,
+) -> None:
+    """List facet columns, or the distinct values of FIELD."""
+    try:
+        df = Catalog(catalog).to_df()
+        if field is None:
+            cols = [c for c in schema.FACETS if c in df.columns]
+        elif field not in schema.FACETS or field not in df.columns:
+            raise ValueError(f"unknown facet {field!r}; valid facets: {list(schema.FACETS)}")
+        else:
+            cols = sorted(str(v) for v in df[field].dropna().unique())
+    except Exception as err:
+        raise _fail(err) from err
+    typer.echo("\n".join(cols))
 
 
 def _resolve(cat: Catalog, uids: list[str]) -> Results:
