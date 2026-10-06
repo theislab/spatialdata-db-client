@@ -37,27 +37,12 @@ def test_publish_catalog_workflow_has_triggers():
 
 
 def test_publish_catalog_workflow_has_canary_step():
-    """Test that the workflow has a step downloading catalog.parquet and reading sddb_generated_at."""
+    """Test that the workflow reads Catalog().generated_at and checks staleness."""
     workflow_file = Path(__file__).parent.parent / ".github" / "workflows" / "publish-catalog.yml"
     with open(workflow_file) as f:
         workflow = yaml.safe_load(f)
 
-    assert "jobs" in workflow, "Workflow is missing 'jobs' key"
-    jobs = workflow["jobs"]
-    assert len(jobs) > 0, "Workflow has no jobs"
-
-    # Find a job with a step referencing catalog.parquet
-    found_download = False
-    found_sddb_generated_at = False
-
-    for _job_name, job in jobs.items():
-        if "steps" in job:
-            for step in job["steps"]:
-                step_str = str(step)
-                if "catalog.parquet" in step_str:
-                    found_download = True
-                if "sddb_generated_at" in step_str:
-                    found_sddb_generated_at = True
-
-    assert found_download, "Workflow does not have a step referencing 'catalog.parquet'"
-    assert found_sddb_generated_at, "Workflow does not have a step referencing 'sddb_generated_at'"
+    steps = [step for job in workflow["jobs"].values() for step in job.get("steps", [])]
+    text = "\n".join(str(step.get("run", "")) for step in steps)
+    assert "Catalog().generated_at" in text, "Workflow does not read Catalog().generated_at"
+    assert "stale" in text, "Workflow does not check staleness"

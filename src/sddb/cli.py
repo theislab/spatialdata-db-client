@@ -25,6 +25,26 @@ def _fail(err: Exception) -> typer.Exit:
     return typer.Exit(1)
 
 
+def _fmt(v: Any) -> str:
+    return "-" if pd.isna(v) else f"{v:.4g}" if isinstance(v, float) else str(v)
+
+
+def _print_table(cols: list[str], rows: list[list[str]]) -> None:
+    widths = [max([len(c), *(len(r[i]) for r in rows)]) for i, c in enumerate(cols)]
+    for r in [cols, *rows]:
+        typer.echo("  ".join(v.ljust(w) for v, w in zip(r, widths, strict=True)).rstrip())
+
+
+def _facets(**opts: Any) -> dict[str, Any]:
+    return {k: v for k, v in opts.items() if v is not None}
+
+
+def _validation(v: str) -> str | None:
+    if v not in ("pass", "all"):
+        raise typer.BadParameter("must be 'pass' or 'all'", param_hint="--validation")
+    return None if v == "all" else "pass"
+
+
 @app.command()
 def query(
     organism: str | None = None,
@@ -38,14 +58,11 @@ def query(
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON records.")] = False,
 ) -> None:
     """List datasets matching the given facets."""
-    if validation not in ("pass", "all"):
-        raise typer.BadParameter("must be 'pass' or 'all'", param_hint="--validation")
-    given = {"organism": organism, "assay": assay, "tissue": tissue, "disease": disease}
-    given |= {"technology": technology, "tier": tier}
-    facets: dict[str, Any] = {k: v for k, v in given.items() if v is not None}
+    val = _validation(validation)
+    facets = _facets(organism=organism, assay=assay, tissue=tissue, disease=disease, technology=technology, tier=tier)
     try:
         cat = Catalog(catalog)
-        res = cat.query(validation=None if validation == "all" else "pass", **facets)
+        res = cat.query(validation=val, **facets)
     except Exception as err:
         raise _fail(err) from err
 
@@ -57,14 +74,12 @@ def query(
         return
 
     # Print catalog metadata header for table output
-    date_str = f" {cat.generated_at}" if cat.generated_at else ""
+    generated_at = cat.generated_at
+    date_str = f" {generated_at}" if generated_at else ""
     typer.echo(f"# catalog{date_str} · {len(cat)} datasets", err=True)
 
     cols = [c for c in _COLS if c in df.columns]
-    rows = [["-" if pd.isna(v) else str(v) for v in r] for r in df[cols].itertuples(index=False)]
-    widths = [max(len(c), *(len(r[i]) for r in rows)) if rows else len(c) for i, c in enumerate(cols)]
-    for r in [cols, *rows]:
-        typer.echo("  ".join(v.ljust(w) for v, w in zip(r, widths, strict=True)).rstrip())
+    _print_table(cols, [[_fmt(v) for v in r] for r in df[cols].itertuples(index=False)])
 
 
 def _norm(v: str) -> str:
@@ -77,12 +92,12 @@ def _suggest(cat: Catalog, facets: dict[str, Any]) -> None:
     for col, val in facets.items():
         if col not in df.columns or isinstance(val, (list, tuple, set)):
             continue
-        known = sorted(str(v) for v in df[col].dropna().unique())
+        known = {str(v) for v in df[col].dropna().unique()}
         if str(val) in known:
             continue
-        best = process.extractOne(_norm(val), {k: _norm(k) for k in known}, scorer=fuzz.ratio, score_cutoff=70)
+        best = process.extractOne(val, list(known), processor=_norm, scorer=fuzz.ratio, score_cutoff=70)
         if best:
-            typer.echo(f"no match for --{col} {val!r}; did you mean '{best[2]}'?", err=True)
+            typer.echo(f"no match for --{col} {val!r}; did you mean '{best[0]}'?", err=True)
 
 
 @app.command()
@@ -93,14 +108,14 @@ def facets(
     """List facet columns, or the distinct values of FIELD."""
     try:
         df = Catalog(catalog).to_df()
-        if field is None:
-            cols = [c for c in schema.FACETS if c in df.columns]
-        elif field not in schema.FACETS or field not in df.columns:
-            raise ValueError(f"unknown facet {field!r}; valid facets: {list(schema.FACETS)}")
-        else:
-            cols = sorted(str(v) for v in df[field].dropna().unique())
     except Exception as err:
         raise _fail(err) from err
+    if field is None:
+        cols = [c for c in schema.FACETS if c in df.columns]
+    elif field not in schema.FACETS or field not in df.columns:
+        raise _fail(ValueError(f"unknown facet {field!r}; valid facets: {list(schema.FACETS)}"))
+    else:
+        cols = sorted(str(v) for v in df[field].dropna().unique())
     typer.echo("\n".join(cols))
 
 
@@ -157,14 +172,7 @@ def genes(
     if df.empty:
         typer.echo(f"no datasets express {symbol!r}", err=True)
         return
-    rows = [
-        ["-" if pd.isna(v) else f"{v:.4g}" if isinstance(v, float) else str(v) for v in r]
-        for r in df.itertuples(index=False)
-    ]
-    cols = list(df.columns)
-    widths = [max(len(c), *(len(r[i]) for r in rows)) for i, c in enumerate(cols)]
-    for r in [cols, *rows]:
-        typer.echo("  ".join(v.ljust(w) for v, w in zip(r, widths, strict=True)).rstrip())
+    _print_table(list(df.columns), [[_fmt(v) for v in r] for r in df.itertuples(index=False)])
 
 
 @app.command()
@@ -182,24 +190,22 @@ def cite(
     catalog: _CatalogOpt = None,
 ) -> None:
     """Write BibTeX for the studies of the datasets matching the given facets/search."""
-    if validation not in ("pass", "all"):
-        raise typer.BadParameter("must be 'pass' or 'all'", param_hint="--validation")
-    given = {"organism": organism, "assay": assay, "tissue": tissue, "disease": disease}
-    given |= {"technology": technology, "tier": tier}
-    facets: dict[str, Any] = {k: v for k, v in given.items() if v is not None}
+    val = _validation(validation)
+    facets = _facets(organism=organism, assay=assay, tissue=tissue, disease=disease, technology=technology, tier=tier)
     try:
         cat = Catalog(catalog)
-        res = cat.query(validation=None if validation == "all" else "pass", **facets)
+        res = cat.query(validation=val, **facets)
         if search is not None:
             keep = set(cat.search(search).to_df()["uid"])
             df = res.to_df()
             res = Results(df[df["uid"].isin(keep)], source=cat._source())
-        if len(res) == 0:
-            typer.echo("error: no datasets matched", err=True)
-            raise typer.Exit(1)
+    except Exception as err:
+        raise _fail(err) from err
+    if len(res) == 0:
+        typer.echo("error: no datasets matched", err=True)
+        raise typer.Exit(1)
+    try:
         res.citations(output, bib_url=bib_url)
-    except typer.Exit:
-        raise
     except Exception as err:
         raise _fail(err) from err
     n = len(parse_bibtex(output.read_text(encoding="utf-8")))
