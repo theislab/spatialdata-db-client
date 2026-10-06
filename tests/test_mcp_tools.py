@@ -129,3 +129,42 @@ def test_cite_tool(tmp_path):
     assert "@" in out["bibtex"] and "Smith2023" in out["bibtex"]
     empty = cite_tool(catalog_url=cat.as_uri(), organism="nonexistent_xyz")
     assert empty == {"bibtex": "", "n": 0}
+
+
+def test_download_tool_plan_no_copy(tmp_path, monkeypatch):
+    from tests._fixtures import write_fixture_catalog
+    import sddb.mcp.tools as t
+
+    cat = write_fixture_catalog(tmp_path / "catalog.parquet")
+    monkeypatch.setattr(t, "plan_sizes", lambda res: [(d.uid, 1000) for d in res])
+    called = {"download": False}
+    monkeypatch.setattr(
+        "sddb.dataset.Results.download",
+        lambda self, *a, **k: called.__setitem__("download", True),
+    )
+    out = t.download_tool(catalog_url=cat.as_uri(), organism="human")
+    assert called["download"] is False  # plan mode copies nothing
+    assert out["datasets"] == 3 and out["total_bytes"] == 3000
+    assert {p["uid"] for p in out["per_store"]} == {"uid0001", "uid0002", "uid0005"}
+
+
+def test_download_tool_fetch_sandbox(tmp_path, monkeypatch):
+    from tests._fixtures import write_fixture_catalog
+    from sddb.manifest import Manifest, ManifestEntry
+    import sddb.mcp.tools as t
+
+    cat = write_fixture_catalog(tmp_path / "catalog.parquet")
+    sandbox = tmp_path / "dl"
+    monkeypatch.setenv("SDDB_MCP_DOWNLOAD_DIR", str(sandbox))
+    seen = {}
+
+    def fake_download(self, dest, *, workers=4, **k):
+        seen["dest"] = str(dest)
+        return Manifest("now", None, [ManifestEntry("uid0001", "s3://x", str(dest), 5, "complete", None)])
+
+    monkeypatch.setattr("sddb.dataset.Results.download", fake_download)
+    out = t.download_tool(catalog_url=cat.as_uri(), organism="human", download=True)
+    assert seen["dest"] == str(sandbox)  # fetched only into the sandbox
+    assert out["dest"] == str(sandbox)
+    assert out["entries"] == [{"uid": "uid0001", "size_bytes": 5, "status": "complete"}]
+    assert "manifest_path" in out

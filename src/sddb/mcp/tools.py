@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import platformdirs
 
 from sddb import _catalog_schema as schema
 from sddb.catalog import Catalog
 from sddb.citations import parse_bibtex
 from sddb.dataset import Dataset, Results
+from sddb.manifest import plan_sizes
 
 MAX_ROWS = 200
 
@@ -117,3 +120,48 @@ def cite_tool(
         path = res.citations(Path(d) / "c.bib", bib_url=bib_url)
         text = path.read_text(encoding="utf-8")
     return {"bibtex": text, "n": len(parse_bibtex(text))}
+
+
+def _download_dir() -> Path:
+    """Server-controlled download sandbox: $SDDB_MCP_DOWNLOAD_DIR or a platformdirs cache subdir."""
+    env = os.environ.get("SDDB_MCP_DOWNLOAD_DIR")
+    d = Path(env) if env else Path(platformdirs.user_cache_dir("sddb")) / "mcp-downloads"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def download_tool(
+    catalog_url: str | None = None,
+    *,
+    download: bool = False,
+    workers: int = 4,
+    validation: str = "pass",
+    expressing: str | None = None,
+    min_fraction: float | None = None,
+    search: str | None = None,
+    **facets: Any,
+) -> dict[str, Any]:
+    """Plan (default) or fetch a filtered cohort.
+
+    ``download=False`` returns per-store + total sizes and copies nothing. ``download=True`` fetches
+    into the server download dir and returns the manifest path.
+    """
+    res = _query(
+        catalog_url, validation=validation, expressing=expressing,
+        min_fraction=min_fraction, search=search, **facets,
+    )
+    if not download:
+        sizes = plan_sizes(res)
+        return {
+            "datasets": len(sizes),
+            "total_bytes": sum(b for _, b in sizes),
+            "per_store": [{"uid": u, "bytes": b} for u, b in sizes],
+            "note": "pass download=true to fetch into the server download dir",
+        }
+    dest = _download_dir()
+    manifest = res.download(dest, workers=workers)
+    return {
+        "manifest_path": str(dest / "manifest.json"),
+        "dest": str(dest),
+        "entries": [{"uid": e.uid, "size_bytes": e.size_bytes, "status": e.status} for e in manifest.entries],
+    }

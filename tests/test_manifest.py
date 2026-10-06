@@ -90,3 +90,15 @@ def test_failed_entry_records_error(tmp_path, cohort, monkeypatch):
     assert bad.status == "failed"
     assert bad.error == "OSError: boom"
     assert Manifest.read(tmp_path / "out" / "manifest.json") == m
+
+
+def test_plan_sizes_local_store(tmp_path):
+    import pandas as pd
+    from sddb.dataset import Results
+    from sddb.manifest import plan_sizes
+    from tests._fixtures import make_tiny_sdata_zarr
+
+    store = make_tiny_sdata_zarr(tmp_path)
+    res = Results(pd.DataFrame({"uid": ["uidX"], "zarr_url": [store.as_uri()]}))
+    sizes = plan_sizes(res)
+    assert len(sizes) == 1 and sizes[0][0] == "uidX" and sizes[0][1] > 0
