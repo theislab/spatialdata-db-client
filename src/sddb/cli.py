@@ -157,7 +157,10 @@ def genes(
     if df.empty:
         typer.echo(f"no datasets express {symbol!r}", err=True)
         return
-    rows = [["-" if pd.isna(v) else f"{v:.4g}" if isinstance(v, float) else str(v) for v in r] for r in df.itertuples(index=False)]
+    rows = [
+        ["-" if pd.isna(v) else f"{v:.4g}" if isinstance(v, float) else str(v) for v in r]
+        for r in df.itertuples(index=False)
+    ]
     cols = list(df.columns)
     widths = [max(len(c), *(len(r[i]) for r in rows)) for i, c in enumerate(cols)]
     for r in [cols, *rows]:

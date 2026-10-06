@@ -62,7 +62,9 @@ class GeneIndex:
             cat = cat[cat["validation_status"] == validation]
         return Results(cat[cat["uid"].isin(uids)], source=self._catalog._source())
 
-    def ranked(self, symbol: str, *, min_fraction: float | None = None, validation: str | None = "pass") -> pd.DataFrame:
+    def ranked(
+        self, symbol: str, *, min_fraction: float | None = None, validation: str | None = "pass"
+    ) -> pd.DataFrame:
         """Per-dataset ``uid``, ``fraction_obs_detected``, ``total_counts`` for ``symbol``, best detection first.
 
         Filters as in :meth:`datasets_with`; one row per catalog dataset (max over matching features).

@@ -10,14 +10,16 @@ from sddb import Catalog
 
 def _write(path, meta):
     """Write a minimal parquet with given metadata."""
-    t = pa.table({
-        "uid": ["a"],
-        "technology": ["Xenium"],
-        "assay": ["FISH"],
-        "organism": ["human"],
-        "validation_status": ["pass"],
-        "zarr_url": ["s3://example/a.zarr"],
-    }).replace_schema_metadata(meta)
+    t = pa.table(
+        {
+            "uid": ["a"],
+            "technology": ["Xenium"],
+            "assay": ["FISH"],
+            "organism": ["human"],
+            "validation_status": ["pass"],
+            "zarr_url": ["s3://example/a.zarr"],
+        }
+    ).replace_schema_metadata(meta)
     pq.write_table(t, path)
 
 

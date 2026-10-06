@@ -14,7 +14,11 @@ runner = CliRunner()
 class _FakeIndex:
     def ranked(self, symbol):
         return pd.DataFrame(
-            {"uid": ["uid0002", "uid0001", "uid0003"], "fraction_obs_detected": [0.9, 0.5, 0.1], "total_counts": [10.0, 5.0, 1.0]}
+            {
+                "uid": ["uid0002", "uid0001", "uid0003"],
+                "fraction_obs_detected": [0.9, 0.5, 0.1],
+                "total_counts": [10.0, 5.0, 1.0],
+            }
         )
 
 

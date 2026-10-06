@@ -1,7 +1,8 @@
 """Test publish-catalog staleness canary workflow."""
 
-import yaml
 from pathlib import Path
+
+import yaml
 
 
 def test_publish_catalog_workflow_exists():
@@ -29,9 +30,7 @@ def test_publish_catalog_workflow_has_triggers():
     on = workflow[True]
 
     # Check for workflow_dispatch trigger
-    assert (
-        "workflow_dispatch" in on
-    ), "Workflow is missing 'workflow_dispatch' trigger"
+    assert "workflow_dispatch" in on, "Workflow is missing 'workflow_dispatch' trigger"
 
     # Check for schedule trigger
     assert "schedule" in on, "Workflow is missing 'schedule' trigger"
@@ -51,7 +50,7 @@ def test_publish_catalog_workflow_has_canary_step():
     found_download = False
     found_sddb_generated_at = False
 
-    for job_name, job in jobs.items():
+    for _job_name, job in jobs.items():
         if "steps" in job:
             for step in job["steps"]:
                 step_str = str(step)
@@ -60,9 +59,5 @@ def test_publish_catalog_workflow_has_canary_step():
                 if "sddb_generated_at" in step_str:
                     found_sddb_generated_at = True
 
-    assert found_download, (
-        "Workflow does not have a step referencing 'catalog.parquet'"
-    )
-    assert found_sddb_generated_at, (
-        "Workflow does not have a step referencing 'sddb_generated_at'"
-    )
+    assert found_download, "Workflow does not have a step referencing 'catalog.parquet'"
+    assert found_sddb_generated_at, "Workflow does not have a step referencing 'sddb_generated_at'"

@@ -28,7 +28,8 @@ def test_facets_lists_columns(fixture_catalog_env):
 def test_facets_lists_values(fixture_catalog_env):
     r = runner.invoke(app, ["facets", "technology"])
     assert r.exit_code == 0, r.output
-    assert "VisiumHD" in r.output and "Xenium" in r.output
+    assert "VisiumHD" in r.output
+    assert "Xenium" in r.output
 
 
 def test_facets_unknown_field(fixture_catalog_env):
@@ -38,7 +39,8 @@ def test_facets_unknown_field(fixture_catalog_env):
 def test_query_zero_match_suggests(fixture_catalog_env):
     r = runner.invoke(app, ["query", "--technology", "Visium HD"])
     assert r.exit_code == 0, r.output
-    assert "did you mean" in r.output.lower() and "VisiumHD" in r.output
+    assert "did you mean" in r.output.lower()
+    assert "VisiumHD" in r.output
 
 
 def test_query_match_no_suggestion(fixture_catalog_env):
