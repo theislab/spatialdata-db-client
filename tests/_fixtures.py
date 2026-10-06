@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from sddb._catalog_schema import CATALOG_COLUMNS
+from sddb._catalog_schema import CATALOG_COLUMNS, COLLECTION_COLUMNS
 
 _URL = "s3://scverse-spatial-eu-central-1/.lamindb/{}.zarr"
 
@@ -74,10 +74,34 @@ def make_fixture_catalog() -> pd.DataFrame:
             "study_id": ["Smith2023", "Smith2023", "Lee2022", "Lee2022", "Wong2021"],
             "vitessce_url": [f"s3://scverse-spatial-eu-central-1/.lamindb/{r[0]}_vitessce.json" for r in _ROWS],
             "flag_foo": [True] * n,  # unknown extra column
+            # superset list columns (exercise list[string] validation)
+            "collections": [["c-smith"], ["c-smith"], ["c-lee"], [], ["c-wong"]],
+            "staining_method": [["H&E"], ["H&E", "IF"], None, ["IF"], ["H&E"]],
         }
     )
-    known = {c: t for c, t in CATALOG_COLUMNS.items() if c in df.columns}
+    # list[string] is not a pandas dtype — only cast the scalar columns.
+    known = {c: t for c, t in CATALOG_COLUMNS.items() if c in df.columns and not t.startswith("list")}
     return df.astype(known)
+
+
+def make_fixture_collections() -> pd.DataFrame:
+    """Build a valid synthetic collections table (one row per collection)."""
+    rows = [
+        ("c-smith", "Smith2023", "Smith 2023 atlas", "publication", "EpCAM atlas",
+         "10.1/smith", "DOI", "Xenium", "human", "lung", 2, 2, 180_000, ["uid0001", "uid0002"]),
+        ("c-lee", "Lee2022", "Lee 2022 brain", "replicates", None, None, None,
+         "Visium", "mouse", "brain", 1, 1, 4_000, ["uid0003"]),
+    ]
+    df = pd.DataFrame(rows, columns=list(COLLECTION_COLUMNS))
+    scalar = {c: t for c, t in COLLECTION_COLUMNS.items() if not t.startswith("list")}
+    return df.astype(scalar)
+
+
+def write_fixture_collections(path: str | Path) -> Path:
+    """Write the fixture collections table to parquet and return its path."""
+    p = Path(path)
+    make_fixture_collections().to_parquet(p)
+    return p
 
 
 def make_fixture_gene_index() -> pd.DataFrame:
