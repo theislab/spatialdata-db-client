@@ -8,7 +8,7 @@ from typing import Any
 import pandas as pd
 
 from sddb.catalog import Catalog
-from sddb.dataset import Dataset
+from sddb.dataset import Dataset, Results
 
 MAX_ROWS = 200
 
@@ -16,6 +16,25 @@ MAX_ROWS = 200
 def _records(df: pd.DataFrame) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = json.loads(df.to_json(orient="records"))
     return out
+
+
+def _query(
+    catalog_url: str | None,
+    *,
+    validation: str = "pass",
+    expressing: str | None = None,
+    min_fraction: float | None = None,
+    search: str | None = None,
+    **facets: Any,
+) -> Results:
+    """Shared filter path for the MCP tools: one Catalog.query call with the WP-A surface."""
+    return Catalog(catalog_url).query(
+        validation=None if validation == "all" else validation,
+        expressing=expressing,
+        min_fraction=min_fraction,
+        search=search,
+        **facets,
+    )
 
 
 def query_tool(
@@ -32,14 +51,10 @@ def query_tool(
     ``**facets`` accepts equality, lists (isin) and ``col__gte``/``gt``/``lte``/``lt`` ranges. ``expressing``
     (+ optional ``min_fraction``) and ``search`` compose as in :meth:`Catalog.query`.
     """
-    res = Catalog(catalog_url).query(
-        validation=None if validation == "all" else validation,
-        expressing=expressing,
-        min_fraction=min_fraction,
-        search=search,
-        **facets,
-    )
-    df = res.to_df()
+    df = _query(
+        catalog_url, validation=validation, expressing=expressing,
+        min_fraction=min_fraction, search=search, **facets,
+    ).to_df()
     rows = _records(df.head(MAX_ROWS))
     if len(df) > MAX_ROWS:
         rows.append({"note": f"truncated: showing {MAX_ROWS} of {len(df)} rows; narrow the query"})

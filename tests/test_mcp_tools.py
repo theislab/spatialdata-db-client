@@ -94,3 +94,12 @@ def test_query_tool_search(cat_url):
 def test_query_tool_expressing_min_fraction(cat_url):
     assert {r["uid"] for r in tools.query_tool(cat_url, expressing="EPCAM")} == {"uid0001", "uid0002", "uid0005"}
     assert {r["uid"] for r in tools.query_tool(cat_url, expressing="EPCAM", min_fraction=0.35)} == {"uid0001"}
+
+
+def test__query_helper_filters(tmp_path):
+    from tests._fixtures import write_fixture_catalog
+    from sddb.mcp.tools import _query
+
+    cat = write_fixture_catalog(tmp_path / "catalog.parquet")
+    res = _query(cat.as_uri(), organism="human")
+    assert sorted(d.uid for d in res) == ["uid0001", "uid0002", "uid0005"]
