@@ -1,6 +1,12 @@
 import pandas as pd
 import pytest
-from tests._fixtures import make_fixture_catalog, make_fixture_gene_index, write_fixture_catalog
+from tests._fixtures import (
+    make_fixture_catalog,
+    make_fixture_collections,
+    make_fixture_gene_index,
+    write_fixture_catalog,
+    write_fixture_collections,
+)
 
 from sddb import _catalog_schema as cs
 
@@ -60,3 +66,22 @@ def test_constants_consistent():
 def test_parquet_roundtrip(tmp_path):
     p = write_fixture_catalog(tmp_path / "catalog.parquet")
     cs.validate(pd.read_parquet(p))
+
+
+def test_collections_fixture_valid():
+    assert cs.validate(make_fixture_collections(), kind="collections") is None
+
+
+def test_collections_missing_required():
+    df = make_fixture_collections().drop(columns="members")
+    with pytest.raises(cs.SchemaError, match="members"):
+        cs.validate(df, kind="collections")
+
+
+def test_collections_parquet_roundtrip(tmp_path):
+    p = write_fixture_collections(tmp_path / "collections.parquet")
+    cs.validate(pd.read_parquet(p), kind="collections")
+
+
+def test_collection_constants_consistent():
+    assert set(cs.COLLECTION_REQUIRED) <= set(cs.COLLECTION_COLUMNS)

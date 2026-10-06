@@ -47,9 +47,52 @@ CATALOG_COLUMNS: dict[str, str] = {
     "container_tag": "string",
     "sddb_version": "string",
     "published_at": "string",
+    # presentation / curation superset — consumed by the website build; the pip
+    # client carries them through to_df() but does not require them. chemistry_version
+    # (reagent-kit version) is a SEPARATE attribute from technology_version above.
+    "slug": "string",
+    "title": "string",
+    "pathological": "boolean",
+    "product": "string",
+    "modality": "string",
+    "biomaterial_type": "string",
+    "chemistry_version": "string",
+    "staining_method": "list[string]",
+    "preservation_method": "string",
+    "hne_image": "boolean",
+    "if_image": "boolean",
+    "ftu_annotation": "boolean",
+    "publication_date": "string",
+    "sample_id": "string",
+    "sddb_id": "string",
+    "disease_details": "string",
+    "default_table": "string",
+    "dataset_url": "string",
+    "thumbnail_url": "string",
+    "collections": "list[string]",
 }
 
 REQUIRED_COLUMNS: tuple[str, ...] = ("uid", "technology", "assay", "organism", "validation_status", "zarr_url")
+
+# Collection-level table (one row per ln.Collection), published as collections.parquet
+# beside catalog.parquet. The website renders its collection pages from this.
+COLLECTION_COLUMNS: dict[str, str] = {
+    "slug": "string",
+    "key": "string",
+    "name": "string",
+    "kind": "string",
+    "description": "string",
+    "reference": "string",
+    "reference_type": "string",
+    "assay": "string",
+    "organism": "string",
+    "tissue": "string",
+    "n_datasets": "Int64",
+    "n_members_total": "Int64",
+    "size_bytes": "Int64",
+    "members": "list[string]",
+}
+COLLECTION_REQUIRED: tuple[str, ...] = ("slug", "name", "members")
 
 FACETS: tuple[str, ...] = (
     "organism",
@@ -81,8 +124,24 @@ class SchemaError(ValueError):
     """Raised when a catalog/gene-index DataFrame violates the schema contract."""
 
 
+def _all_null(series: pd.Series) -> bool:
+    """True if every value is null — list/array-safe (avoids Series.isna() ambiguity on list cells)."""
+    for v in series:
+        if v is None:
+            continue
+        if not hasattr(v, "__iter__") and pd.isna(v):
+            continue
+        return False
+    return True
+
+
 def _compatible(series: pd.Series, dtype: str) -> bool:
     """Return whether ``series`` can be read as the declared pandas dtype."""
+    if dtype == "list[string]":
+        # parquet list<string> -> object column of lists / numpy arrays (or None).
+        return pdt.is_object_dtype(series.dtype) and all(
+            v is None or (not isinstance(v, str) and hasattr(v, "__iter__")) for v in series
+        )
     if pdt.is_bool_dtype(series.dtype) and not pdt.is_object_dtype(series.dtype):
         return dtype == "boolean"
     if dtype == "string":
@@ -109,7 +168,8 @@ def validate(df: pd.DataFrame, *, kind: str = "catalog") -> None:
         Frame to validate.
     kind
         ``"catalog"`` checks ``CATALOG_COLUMNS``/``REQUIRED_COLUMNS``; ``"gene_index"``
-        checks ``GENE_INDEX_COLUMNS`` (all required).
+        checks ``GENE_INDEX_COLUMNS`` (all required); ``"collections"`` checks
+        ``COLLECTION_COLUMNS``/``COLLECTION_REQUIRED``.
 
     Raises
     ------
@@ -121,8 +181,10 @@ def validate(df: pd.DataFrame, *, kind: str = "catalog") -> None:
         columns, required = CATALOG_COLUMNS, REQUIRED_COLUMNS
     elif kind == "gene_index":
         columns, required = GENE_INDEX_COLUMNS, tuple(GENE_INDEX_COLUMNS)
+    elif kind == "collections":
+        columns, required = COLLECTION_COLUMNS, COLLECTION_REQUIRED
     else:
-        raise ValueError(f"unknown kind {kind!r}; expected 'catalog' or 'gene_index'")
+        raise ValueError(f"unknown kind {kind!r}; expected 'catalog', 'gene_index' or 'collections'")
 
     missing = [c for c in required if c not in df.columns]
     if missing:
@@ -131,5 +193,5 @@ def validate(df: pd.DataFrame, *, kind: str = "catalog") -> None:
         if col in df.columns and not _compatible(df[col], dtype):
             raise SchemaError(f"column {col!r} has dtype {df[col].dtype}, incompatible with {dtype}")
     for col in required:
-        if len(df) and df[col].isna().all():
+        if len(df) and _all_null(df[col]):
             raise SchemaError(f"required column {col!r} is all-null")
