@@ -11,6 +11,7 @@ from rapidfuzz import fuzz, process
 
 from sddb import _catalog_schema as schema
 from sddb.catalog import Catalog
+from sddb.citations import parse_bibtex
 from sddb.dataset import Results
 
 app = typer.Typer(help="Query and download spatialdata-db datasets.", no_args_is_help=True, add_completion=False)
@@ -161,3 +162,42 @@ def genes(
     widths = [max(len(c), *(len(r[i]) for r in rows)) for i, c in enumerate(cols)]
     for r in [cols, *rows]:
         typer.echo("  ".join(v.ljust(w) for v, w in zip(r, widths, strict=True)).rstrip())
+
+
+@app.command()
+def cite(
+    output: Annotated[Path, typer.Option("-o", "--output", help="BibTeX file to write.")],
+    organism: str | None = None,
+    assay: str | None = None,
+    tissue: str | None = None,
+    disease: str | None = None,
+    technology: str | None = None,
+    tier: str | None = None,
+    search: Annotated[str | None, typer.Option(help="Free-text search over facet values.")] = None,
+    validation: Annotated[str, typer.Option(help="'pass' (default) or 'all'.")] = "pass",
+    bib_url: Annotated[str | None, typer.Option(help="citations.bib URL/path (default: next to the catalog).")] = None,
+    catalog: _CatalogOpt = None,
+) -> None:
+    """Write BibTeX for the studies of the datasets matching the given facets/search."""
+    if validation not in ("pass", "all"):
+        raise typer.BadParameter("must be 'pass' or 'all'", param_hint="--validation")
+    given = {"organism": organism, "assay": assay, "tissue": tissue, "disease": disease}
+    given |= {"technology": technology, "tier": tier}
+    facets: dict[str, Any] = {k: v for k, v in given.items() if v is not None}
+    try:
+        cat = Catalog(catalog)
+        res = cat.query(validation=None if validation == "all" else "pass", **facets)
+        if search is not None:
+            keep = set(cat.search(search).to_df()["uid"])
+            df = res.to_df()
+            res = Results(df[df["uid"].isin(keep)], source=cat._source())
+        if len(res) == 0:
+            typer.echo("error: no datasets matched", err=True)
+            raise typer.Exit(1)
+        res.citations(output, bib_url=bib_url)
+    except typer.Exit:
+        raise
+    except Exception as err:
+        raise _fail(err) from err
+    n = len(parse_bibtex(output.read_text(encoding="utf-8")))
+    typer.echo(f"wrote {n} citations -> {output}")
