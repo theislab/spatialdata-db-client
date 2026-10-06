@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import operator
 import os
 import re
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import pyarrow.parquet as pq
@@ -21,6 +23,20 @@ if TYPE_CHECKING:
 
 DEFAULT_CATALOG_URL = "https://github.com/theislab/spatialdata-db-client/releases/latest/download/catalog.parquet"
 _FUZZY_CUTOFF = 88
+_RANGE_OPS = {"gte": operator.ge, "gt": operator.gt, "lte": operator.le, "lt": operator.lt}
+
+
+def _split_facets(facets: Mapping[str, Any]) -> tuple[dict[str, Any], list[tuple[str, str, Any]]]:
+    """Separate plain equality facets from ``col__op`` range predicates (op in _RANGE_OPS)."""
+    equality: dict[str, Any] = {}
+    ranges: list[tuple[str, str, Any]] = []
+    for key, val in facets.items():
+        base, _, op = key.rpartition("__")
+        if base and op in _RANGE_OPS:
+            ranges.append((base, op, val))
+        else:
+            equality[key] = val
+    return equality, ranges
 
 
 def _token_matches(token: str, value: str) -> bool:
@@ -135,7 +151,7 @@ class Catalog:
         validation: str | None = "pass",
         license_set: bool | None = None,
         noncommercial: bool | None = None,
-        **facets: str | list[str] | tuple[str, ...] | set[str],
+        **facets: str | float | list[str] | tuple[str, ...] | set[str],
     ) -> Results:
         """Filter the catalog.
 
@@ -151,16 +167,23 @@ class Catalog:
         **facets
             Facet column -> value (equality) or list/tuple/set of values (isin). ``license`` and
             ``license_noncommercial`` are facets, so you can also filter by exact license id.
+            ``<col>__gte`` / ``__gt`` / ``__lte`` / ``__lt`` apply a numeric range on a column in
+            ``RANGE_COLUMNS`` (e.g. ``n_obs__gte=50_000``); missing values never match.
 
         Raises
         ------
         ValueError
-            If a keyword is not a facet column, or a facet column is absent from the loaded catalog.
+            If a keyword is not a facet or range column, a facet column is absent from the loaded catalog,
+            or a range value is not numeric.
         """
-        bad = [k for k in facets if k not in schema.FACETS]
+        equality, ranges = _split_facets(facets)
+        bad = [k for k in equality if k not in schema.FACETS]
         if bad:
             raise ValueError(f"unknown facet(s) {bad}; valid facets: {list(schema.FACETS)}")
         df = self._df
+        bad_range = [c for c, _, _ in ranges if c not in schema.RANGE_COLUMNS or c not in df.columns]
+        if bad_range:
+            raise ValueError(f"unknown range column(s) {bad_range}; valid: {list(schema.RANGE_COLUMNS)}")
         mask = pd.Series(True, index=df.index)
         if validation is not None:
             mask &= df["validation_status"] == validation
@@ -168,10 +191,16 @@ class Catalog:
             mask &= df["license_unknown"].fillna(True) == False  # noqa: E712
         if noncommercial is not None and "license_noncommercial" in df.columns:
             mask &= df["license_noncommercial"].fillna(False) == noncommercial
-        for col, val in facets.items():
+        for col, val in equality.items():
             if col not in df.columns:
                 raise ValueError(f"facet column {col!r} is not present in this catalog (columns: {list(df.columns)})")
             mask &= df[col].isin(list(val) if isinstance(val, (list, tuple, set)) else [val])
+        for col, op, val in ranges:
+            try:
+                cmp = _RANGE_OPS[op](df[col], val)
+            except TypeError as err:
+                raise ValueError(f"range value for {col}__{op} must be numeric, got {val!r}") from err
+            mask &= cmp.fillna(False).astype(bool)
         return Results(df[mask.fillna(False).astype(bool)], source=self._source())
 
     def search(self, text: str) -> Results:

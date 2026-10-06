@@ -203,3 +203,31 @@ def test_default_catalog_loads_from_published_release(tmp_path):
 def test_from_file_missing(tmp_path):
     with pytest.raises(FileNotFoundError):
         Catalog.from_file(tmp_path / "nope.parquet", cache_dir=tmp_path / "c")
+
+
+def test_query_range_gte(cat):
+    assert sorted(d.uid for d in cat.query(n_obs__gte=50_000)) == ["uid0001", "uid0002"]
+
+
+def test_query_range_gt_excludes_boundary(cat):
+    # uid0003=4000 excluded by gt; uid0004 fails validation
+    assert sorted(d.uid for d in cat.query(n_obs__gt=4_000)) == ["uid0001", "uid0002", "uid0005"]
+
+
+def test_query_range_lte_and_lt(cat):
+    assert sorted(d.uid for d in cat.query(n_features__lte=5_000)) == ["uid0001", "uid0002"]
+    assert sorted(d.uid for d in cat.query(total_counts__lt=500_000)) == ["uid0003", "uid0005"]
+
+
+def test_query_facet_and_range(cat):
+    assert sorted(d.uid for d in cat.query(organism="human", n_obs__gte=50_000)) == ["uid0001", "uid0002"]
+
+
+def test_query_range_unknown_column_errors(cat):
+    with pytest.raises(ValueError, match="range column"):
+        cat.query(organism__gte=1)
+
+
+def test_query_range_nonnumeric_value_errors(cat):
+    with pytest.raises(ValueError, match="numeric"):
+        cat.query(n_obs__gte="big")
