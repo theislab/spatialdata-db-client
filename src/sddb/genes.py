@@ -42,10 +42,10 @@ class GeneIndex:
             raise schema.SchemaError(f"gene index at {self.url} is invalid: {err}") from err
         self._df = df
 
-    def datasets_with(
+    def where_expressed(
         self, symbol: str, *, min_fraction: float | None = None, validation: str | None = "pass"
     ) -> Results:
-        """Catalog datasets whose gene index has ``symbol`` (case-insensitive).
+        """Catalog datasets expressing ``symbol`` (case-insensitive), as a Results.
 
         Parameters
         ----------
@@ -60,6 +60,8 @@ class GeneIndex:
         cat = self._catalog_df(validation)
         return Results(cat[cat["uid"].isin(uids)], source=self._catalog._source())
 
+    datasets_with = where_expressed  # backward-compatible alias (MCP + existing callers)
+
     def _catalog_df(self, validation: str | None) -> pd.DataFrame:
         cat = self._catalog.to_df()
         return cat if validation is None else cat[cat["validation_status"] == validation]
@@ -69,7 +71,8 @@ class GeneIndex:
     ) -> pd.DataFrame:
         """Per-dataset ``uid``, ``fraction_obs_detected``, ``total_counts`` for ``symbol``, best detection first.
 
-        Filters as in :meth:`datasets_with`; one row per catalog dataset (max over matching features).
+        The per-dataset detection profile for ``symbol``. Filters as in :meth:`where_expressed`; one row per
+        catalog dataset (max over matching features).
         """
         df = self._df
         mask = df["symbol"].str.casefold() == symbol.casefold()
