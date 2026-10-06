@@ -28,7 +28,9 @@ def test_query_table(cat_url):
     assert r.exit_code == 0, r.output
     assert "uid0001" in r.output
     assert "uid0003" not in r.output
-    assert r.output.splitlines()[0].split() == ["uid", "technology", "organism", "tissue", "n_obs"]
+    # Skip the catalog header line (starts with #)
+    lines = [l for l in r.output.splitlines() if not l.startswith("#")]
+    assert lines[0].split() == ["uid", "technology", "organism", "tissue", "n_obs"]
 
 
 def test_query_table_renders_na(tmp_path):

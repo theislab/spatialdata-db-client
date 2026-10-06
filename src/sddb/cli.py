@@ -41,13 +41,20 @@ def query(
     given |= {"technology": technology, "tier": tier}
     facets: dict[str, Any] = {k: v for k, v in given.items() if v is not None}
     try:
-        res = Catalog(catalog).query(validation=None if validation == "all" else "pass", **facets)
+        cat = Catalog(catalog)
+        res = cat.query(validation=None if validation == "all" else "pass", **facets)
     except Exception as err:
         raise _fail(err) from err
+
     df = res.to_df()
     if as_json:
         typer.echo(df.to_json(orient="records", indent=2))
         return
+
+    # Print catalog metadata header for table output
+    date_str = f" {cat.generated_at}" if cat.generated_at else ""
+    typer.echo(f"# catalog{date_str} · {len(cat)} datasets", err=True)
+
     cols = [c for c in _COLS if c in df.columns]
     rows = [["-" if pd.isna(v) else str(v) for v in r] for r in df[cols].itertuples(index=False)]
     widths = [max(len(c), *(len(r[i]) for r in rows)) if rows else len(c) for i, c in enumerate(cols)]
