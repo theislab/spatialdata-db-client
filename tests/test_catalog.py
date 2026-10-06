@@ -3,7 +3,7 @@ from __future__ import annotations
 import warnings
 
 import pytest
-from tests._fixtures import write_fixture_catalog
+from tests._fixtures import write_fixture_catalog, write_fixture_gene_index
 
 from sddb._cache import catalog_cache_path, fetch_catalog
 from sddb.catalog import Catalog
@@ -231,3 +231,50 @@ def test_query_range_unknown_column_errors(cat):
 def test_query_range_nonnumeric_value_errors(cat):
     with pytest.raises(ValueError, match="numeric"):
         cat.query(n_obs__gte="big")
+
+
+def _cat_genes(tmp_path):
+    p = write_fixture_catalog(tmp_path / "catalog.parquet")
+    write_fixture_gene_index(tmp_path / "gene_index.parquet")
+    return Catalog(p.as_uri(), cache_dir=tmp_path / "cache")
+
+
+def test_query_search_intersects(tmp_path):
+    cat = _cat_genes(tmp_path)
+    res = cat.query(organism="human", search="lung")
+    assert [d.uid for d in res] == ["uid0001"]
+    assert res.matched  # search's matched dict is carried through
+
+
+def test_query_expressing(tmp_path):
+    cat = _cat_genes(tmp_path)
+    assert sorted(d.uid for d in cat.query(organism="human", expressing="EPCAM")) == ["uid0001", "uid0002", "uid0005"]
+
+
+def test_query_expressing_min_fraction(tmp_path):
+    cat = _cat_genes(tmp_path)
+    assert [d.uid for d in cat.query(expressing="EPCAM", min_fraction=0.35)] == ["uid0001"]
+
+
+def test_query_all_combined(tmp_path):
+    cat = _cat_genes(tmp_path)
+    res = cat.query(organism="human", n_obs__gte=50_000, expressing="EPCAM", search="lung")
+    assert [d.uid for d in res] == ["uid0001"]
+
+
+def test_query_min_fraction_without_expressing_errors(tmp_path):
+    cat = _cat_genes(tmp_path)
+    with pytest.raises(ValueError, match="min_fraction requires expressing"):
+        cat.query(min_fraction=0.5)
+
+
+def test_query_expressing_absent_symbol_empty(tmp_path):
+    cat = _cat_genes(tmp_path)
+    assert len(cat.query(expressing="NOPE")) == 0
+
+
+def test_query_search_nothing_empty(tmp_path):
+    cat = _cat_genes(tmp_path)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert len(cat.query(organism="human", search="zzzznotathing")) == 0

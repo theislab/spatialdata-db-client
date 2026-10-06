@@ -6,8 +6,8 @@ import operator
 import os
 import re
 import warnings
-from pathlib import Path
 from collections.abc import Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
@@ -151,6 +151,9 @@ class Catalog:
         validation: str | None = "pass",
         license_set: bool | None = None,
         noncommercial: bool | None = None,
+        search: str | None = None,
+        expressing: str | None = None,
+        min_fraction: float | None = None,
         **facets: str | float | list[str] | tuple[str, ...] | set[str],
     ) -> Results:
         """Filter the catalog.
@@ -164,6 +167,14 @@ class Catalog:
         noncommercial
             If False, keep only commercial-ok data (``license_noncommercial`` is False) — the common
             "exclude NonCommercial" filter; if True, keep only NonCommercial data; ``None`` disables.
+        search
+            Free text, as in :meth:`search`; the result is intersected with the other filters and
+            carries the ``matched`` facet values.
+        expressing
+            Gene symbol; keep datasets where it is expressed (see ``genes.ranked``). The first use
+            downloads the gene index (~142 MB, cached).
+        min_fraction
+            Minimum fraction of expressing cells for ``expressing``; requires ``expressing``.
         **facets
             Facet column -> value (equality) or list/tuple/set of values (isin). ``license`` and
             ``license_noncommercial`` are facets, so you can also filter by exact license id.
@@ -174,8 +185,10 @@ class Catalog:
         ------
         ValueError
             If a keyword is not a facet or range column, a facet column is absent from the loaded catalog,
-            or a range value is not numeric.
+            a range value is not numeric, or ``min_fraction`` is given without ``expressing``.
         """
+        if min_fraction is not None and expressing is None:
+            raise ValueError("min_fraction requires expressing=<symbol>")
         equality, ranges = _split_facets(facets)
         bad = [k for k in equality if k not in schema.FACETS]
         if bad:
@@ -201,7 +214,20 @@ class Catalog:
             except TypeError as err:
                 raise ValueError(f"range value for {col}__{op} must be numeric, got {val!r}") from err
             mask &= cmp.fillna(False).astype(bool)
-        return Results(df[mask.fillna(False).astype(bool)], source=self._source())
+        result = Results(df[mask.fillna(False).astype(bool)], source=self._source())
+        matched: dict[str, list[str]] | None = None
+        if search is not None:
+            hits = self.search(search)
+            matched = hits.matched or None
+            keep = set(hits.to_df()["uid"])
+            rdf = result.to_df()
+            result = Results(rdf[rdf["uid"].isin(keep)], matched=matched, source=self._source())
+        if expressing is not None:
+            ranked = self.genes.ranked(expressing, min_fraction=min_fraction, validation=validation)
+            keep = set(ranked["uid"])
+            rdf = result.to_df()
+            result = Results(rdf[rdf["uid"].isin(keep)], matched=matched, source=self._source())
+        return result
 
     def search(self, text: str) -> Results:
         """Deterministic text search over facet values.
