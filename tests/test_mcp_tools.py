@@ -191,6 +191,9 @@ def test_server_query_forwards_new_params(monkeypatch):
     server.build_server()
     assert {"query", "describe", "genes", "facets", "cite", "download"} <= set(registered)
     registered["query"](organism="human", expressing="EPCAM", search="liver", min_obs=1000)
-    assert seen["expressing"] == "EPCAM" and seen["search"] == "liver"
-    assert seen["n_obs__gte"] == 1000 and seen["organism"] == "human"
-    assert "min_obs" not in seen and "n_features__gte" not in seen
+    assert seen["expressing"] == "EPCAM"
+    assert seen["search"] == "liver"
+    assert seen["n_obs__gte"] == 1000
+    assert seen["organism"] == "human"
+    assert "min_obs" not in seen
+    assert "n_features__gte" not in seen
