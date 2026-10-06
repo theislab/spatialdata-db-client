@@ -54,15 +54,27 @@ def query(
     technology: str | None = None,
     tier: str | None = None,
     validation: Annotated[str, typer.Option(help="'pass' (default) or 'all'.")] = "pass",
+    expressing: Annotated[
+        str | None, typer.Option(help="Keep datasets expressing this gene symbol (downloads the gene index once).")
+    ] = None,
+    min_fraction: Annotated[float | None, typer.Option(help="With --expressing: min fraction_obs_detected.")] = None,
+    search: Annotated[str | None, typer.Option(help="Free-text search over facet values.")] = None,
+    min_obs: Annotated[int | None, typer.Option(help="Keep datasets with n_obs >= this.")] = None,
+    min_features: Annotated[int | None, typer.Option(help="Keep datasets with n_features >= this.")] = None,
     catalog: _CatalogOpt = None,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON records.")] = False,
 ) -> None:
     """List datasets matching the given facets."""
     val = _validation(validation)
     facets = _facets(organism=organism, assay=assay, tissue=tissue, disease=disease, technology=technology, tier=tier)
+    ranges: dict[str, Any] = {
+        k: v for k, v in {"n_obs__gte": min_obs, "n_features__gte": min_features}.items() if v is not None
+    }
     try:
         cat = Catalog(catalog)
-        res = cat.query(validation=val, **facets)
+        res = cat.query(
+            validation=val, search=search, expressing=expressing, min_fraction=min_fraction, **facets, **ranges
+        )
     except Exception as err:
         raise _fail(err) from err
 
@@ -194,11 +206,7 @@ def cite(
     facets = _facets(organism=organism, assay=assay, tissue=tissue, disease=disease, technology=technology, tier=tier)
     try:
         cat = Catalog(catalog)
-        res = cat.query(validation=val, **facets)
-        if search is not None:
-            keep = set(cat.search(search).to_df()["uid"])
-            df = res.to_df()
-            res = Results(df[df["uid"].isin(keep)], source=cat._source())
+        res = cat.query(validation=val, search=search, **facets)
     except Exception as err:
         raise _fail(err) from err
     if len(res) == 0:
