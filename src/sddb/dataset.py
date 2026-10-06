@@ -161,6 +161,12 @@ class Results(Sequence[Dataset]):
 
         return write_citations(self, path, bib_url=bib_url)
 
+    def citations_text(self, *, bib_url: str | None = None) -> tuple[str, int]:
+        """Return ``(BibTeX text, entry count)`` for the studies in this set, without writing a file."""
+        from sddb.citations import citations_text
+
+        return citations_text(self, bib_url=bib_url)
+
     def download(
         self, dest: str | Path, *, workers: int = 4, pin_versions: bool = False, allow_version_change: bool = False
     ) -> Manifest:
