@@ -68,7 +68,7 @@ def test_server_registers_tools():
     from sddb.mcp.server import build_server
 
     names = {t.name for t in asyncio.run(build_server().list_tools())}
-    assert names == {"query", "describe", "genes"}
+    assert names == {"query", "describe", "genes", "facets", "cite", "download"}
 
 
 def test_server_tools_hide_catalog_url():
@@ -168,3 +168,29 @@ def test_download_tool_fetch_sandbox(tmp_path, monkeypatch):
     assert out["dest"] == str(sandbox)
     assert out["entries"] == [{"uid": "uid0001", "size_bytes": 5, "status": "complete"}]
     assert "manifest_path" in out
+
+
+def test_server_query_forwards_new_params(monkeypatch):
+    import sddb.mcp.server as server
+    import sddb.mcp.tools as tools
+
+    seen = {}
+    monkeypatch.setattr(tools, "query_tool", lambda **kw: seen.update(kw) or [])
+    registered = {}
+
+    class FakeServer:
+        def __init__(self, name): ...
+        def tool(self, name, description=""):
+            def deco(fn):
+                registered[name] = fn
+                return fn
+            return deco
+        def run(self): ...
+
+    monkeypatch.setattr(server, "_server_class", lambda: FakeServer)
+    server.build_server()
+    assert {"query", "describe", "genes", "facets", "cite", "download"} <= set(registered)
+    registered["query"](organism="human", expressing="EPCAM", search="liver", min_obs=1000)
+    assert seen["expressing"] == "EPCAM" and seen["search"] == "liver"
+    assert seen["n_obs__gte"] == 1000 and seen["organism"] == "human"
+    assert "min_obs" not in seen and "n_features__gte" not in seen
