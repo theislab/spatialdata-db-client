@@ -85,3 +85,43 @@ def test_collections_parquet_roundtrip(tmp_path):
 
 def test_collection_constants_consistent():
     assert set(cs.COLLECTION_REQUIRED) <= set(cs.COLLECTION_COLUMNS)
+
+
+def test_list_string_rejects_non_strings():
+    df = make_fixture_catalog()
+    df["collections"] = [[i] for i in range(len(df))]  # list<int>, not list<str>
+    with pytest.raises(cs.SchemaError, match="collections"):
+        cs.validate(df)
+
+
+def test_list_string_accepts_scalar_nulls():
+    import numpy as np
+
+    df = make_fixture_catalog()
+    df["staining_method"] = [["H&E"], np.nan, None, [], ["IF"]]  # NaN/None cells are null, not invalid
+    cs.validate(df)
+
+
+def test_nullable_int_with_null_validates():
+    df = make_fixture_catalog()
+    df.loc[df.index[0], "n_obs"] = pd.NA
+    cs.validate(df)
+
+
+def test_string_arrowdtype_accepted():
+    pa = pytest.importorskip("pyarrow")
+    df = make_fixture_catalog()
+    df["organism"] = df["organism"].astype(pd.ArrowDtype(pa.string()))
+    cs.validate(df)
+
+
+def test_fixture_is_row_count_agnostic():
+    # the fixture derives every column from _ROWS, so adding rows must not raise
+    from tests import _fixtures
+
+    orig = _fixtures._ROWS
+    _fixtures._ROWS = [*orig, orig[0]]
+    try:
+        cs.validate(make_fixture_catalog())
+    finally:
+        _fixtures._ROWS = orig

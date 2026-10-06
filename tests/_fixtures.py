@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from sddb._catalog_schema import CATALOG_COLUMNS, COLLECTION_COLUMNS
+from sddb._catalog_schema import CATALOG_COLUMNS, COLLECTION_COLUMNS, cast_scalars
+
+# study_id per fixture row (first len(_ROWS) used; pairs share a study for the citation tests)
+_STUDIES = ("Smith2023", "Smith2023", "Lee2022", "Lee2022", "Wong2021")
 
 _URL = "s3://scverse-spatial-eu-central-1/.lamindb/{}.zarr"
 
@@ -69,19 +72,17 @@ def make_fixture_catalog() -> pd.DataFrame:
             "n_obs": [r[8] for r in _ROWS],
             "n_features": [r[9] for r in _ROWS],
             "zarr_url": [_URL.format(r[0]) for r in _ROWS],
-            "license_unknown": [False, False, False, True, False],
+            "license_unknown": [r[7] is None for r in _ROWS],
             "total_counts": [float(r[8]) * 100 for r in _ROWS],
-            "study_id": ["Smith2023", "Smith2023", "Lee2022", "Lee2022", "Wong2021"],
+            "study_id": [_STUDIES[i] if i < len(_STUDIES) else f"Study{i}" for i in range(n)],
             "vitessce_url": [f"s3://scverse-spatial-eu-central-1/.lamindb/{r[0]}_vitessce.json" for r in _ROWS],
             "flag_foo": [True] * n,  # unknown extra column
-            # superset list columns (exercise list[string] validation)
-            "collections": [["c-smith"], ["c-smith"], ["c-lee"], [], ["c-wong"]],
-            "staining_method": [["H&E"], ["H&E", "IF"], None, ["IF"], ["H&E"]],
+            # superset list columns, derived per-row so the fixture stays len(_ROWS)-agnostic
+            "collections": [[f"c-{i}"] if i % 3 else [] for i in range(n)],
+            "staining_method": [["H&E", "IF"] if i % 2 else None for i in range(n)],
         }
     )
-    # list[string] is not a pandas dtype — only cast the scalar columns.
-    known = {c: t for c, t in CATALOG_COLUMNS.items() if c in df.columns and not t.startswith("list")}
-    return df.astype(known)
+    return cast_scalars(df, CATALOG_COLUMNS)
 
 
 def make_fixture_collections() -> pd.DataFrame:
@@ -93,8 +94,7 @@ def make_fixture_collections() -> pd.DataFrame:
          "Visium", "mouse", "brain", 1, 1, 4_000, ["uid0003"]),
     ]
     df = pd.DataFrame(rows, columns=list(COLLECTION_COLUMNS))
-    scalar = {c: t for c, t in COLLECTION_COLUMNS.items() if not t.startswith("list")}
-    return df.astype(scalar)
+    return cast_scalars(df, COLLECTION_COLUMNS)
 
 
 def write_fixture_collections(path: str | Path) -> Path:

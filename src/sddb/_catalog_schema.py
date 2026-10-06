@@ -120,29 +120,35 @@ class SchemaError(ValueError):
     """Raised when a catalog/gene-index DataFrame violates the schema contract."""
 
 
+def _is_null(v) -> bool:
+    """A single cell is null — scalar NaN/NA/None. A list/array cell is never null."""
+    return v is None or (not hasattr(v, "__iter__") and pd.isna(v))
+
+
 def _all_null(series: pd.Series) -> bool:
-    """True if every value is null — list/array-safe (avoids Series.isna() ambiguity on list cells)."""
-    for v in series:
-        if v is None:
-            continue
-        if not hasattr(v, "__iter__") and pd.isna(v):
-            continue
-        return False
-    return True
+    """True if every cell is null — list/array-safe (avoids Series.isna() ambiguity on list cells)."""
+    return all(_is_null(v) for v in series)
+
+
+def cast_scalars(df: pd.DataFrame, columns: dict[str, str]) -> pd.DataFrame:
+    """Cast ``df``'s scalar columns to their declared dtypes, leaving list<string> columns as object."""
+    scalar = {c: t for c, t in columns.items() if c in df.columns and not t.startswith("list")}
+    return df.astype(scalar)
 
 
 def _compatible(series: pd.Series, dtype: str) -> bool:
     """Return whether ``series`` can be read as the declared pandas dtype."""
     if dtype == "list[string]":
-        # parquet list<string> -> object column of lists / numpy arrays (or None).
+        # parquet list<string> -> object column whose cells are None or a list/array of str.
         return pdt.is_object_dtype(series.dtype) and all(
-            v is None or (not isinstance(v, str) and hasattr(v, "__iter__")) for v in series
+            _is_null(v) or (not isinstance(v, str) and hasattr(v, "__iter__") and all(isinstance(e, str) for e in v))
+            for v in series
         )
     if pdt.is_bool_dtype(series.dtype) and not pdt.is_object_dtype(series.dtype):
         return dtype == "boolean"
     if dtype == "string":
-        if isinstance(series.dtype, pd.StringDtype):
-            return True
+        if pdt.is_string_dtype(series.dtype) and not pdt.is_object_dtype(series.dtype):
+            return True  # pandas StringDtype or a pyarrow-backed string ArrowDtype
         return pdt.is_object_dtype(series.dtype) and all(isinstance(v, str) for v in series.dropna())
     if dtype == "Int64":
         return pdt.is_integer_dtype(series.dtype)
