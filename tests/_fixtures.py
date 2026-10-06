@@ -10,9 +10,18 @@ from sddb._catalog_schema import CATALOG_COLUMNS
 
 _URL = "s3://scverse-spatial-eu-central-1/.lamindb/{}.zarr"
 
+# license id -> (url, noncommercial, redistributable); the producer derives these from the engine's
+# licenses vocab, but the client-only fixture hardcodes the few ids it uses.
+_LIC_PROPS: dict[str, tuple[str, bool, bool]] = {
+    "CC-BY-4.0": ("https://creativecommons.org/licenses/by/4.0/", False, True),
+    "CC-BY-NC-SA-4.0": ("https://creativecommons.org/licenses/by-nc-sa/4.0/", True, True),
+    "CC0-1.0": ("https://creativecommons.org/publicdomain/zero/1.0/", False, True),
+    "unknown": ("", False, False),
+}
+
 _ROWS = [
     ("uid0001", "human", "lung", "Xenium", "10x Xenium", "pass", "silver", "CC-BY-4.0", 100_000, 5000),
-    ("uid0002", "human", "breast", "Xenium", "10x Xenium", "pass", "gold", "CC-BY-4.0", 80_000, 5000),
+    ("uid0002", "human", "breast", "Xenium", "10x Xenium", "pass", "gold", "CC-BY-NC-SA-4.0", 80_000, 5000),
     (
         "uid0003",
         "mouse",
@@ -53,7 +62,10 @@ def make_fixture_catalog() -> pd.DataFrame:
             "assay": [r[4] for r in _ROWS],
             "validation_status": [r[5] for r in _ROWS],
             "tier": [r[6] for r in _ROWS],
-            "license_spdx": [r[7] for r in _ROWS],
+            "license": [(r[7] or "unknown") for r in _ROWS],
+            "license_url": [_LIC_PROPS[r[7] or "unknown"][0] for r in _ROWS],
+            "license_noncommercial": [_LIC_PROPS[r[7] or "unknown"][1] for r in _ROWS],
+            "license_redistributable": [_LIC_PROPS[r[7] or "unknown"][2] for r in _ROWS],
             "n_obs": [r[8] for r in _ROWS],
             "n_features": [r[9] for r in _ROWS],
             "zarr_url": [_URL.format(r[0]) for r in _ROWS],
