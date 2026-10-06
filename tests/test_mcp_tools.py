@@ -103,3 +103,16 @@ def test__query_helper_filters(tmp_path):
     cat = write_fixture_catalog(tmp_path / "catalog.parquet")
     res = _query(cat.as_uri(), organism="human")
     assert sorted(d.uid for d in res) == ["uid0001", "uid0002", "uid0005"]
+
+
+def test_facets_tool(tmp_path):
+    from tests._fixtures import write_fixture_catalog
+    from sddb.mcp.tools import facets_tool
+    import pytest
+
+    cat = write_fixture_catalog(tmp_path / "catalog.parquet")
+    cols = facets_tool(catalog_url=cat.as_uri())
+    assert "organism" in cols and "technology" in cols
+    assert facets_tool("organism", catalog_url=cat.as_uri()) == ["human", "mouse"]
+    with pytest.raises(ValueError, match="unknown facet"):
+        facets_tool("not_a_facet", catalog_url=cat.as_uri())

@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from sddb import _catalog_schema as schema
 from sddb.catalog import Catalog
 from sddb.dataset import Dataset, Results
 
@@ -80,3 +81,13 @@ def describe_tool(uid: str, catalog_url: str | None = None) -> dict[str, Any]:
 def genes_tool(symbol: str, catalog_url: str | None = None) -> list[dict[str, Any]]:
     """Return catalog rows of datasets whose gene index contains ``symbol``."""
     return _records(Catalog(catalog_url).genes.datasets_with(symbol).to_df())
+
+
+def facets_tool(field: str | None = None, catalog_url: str | None = None) -> list[str]:
+    """List facet columns present in the catalog, or the sorted distinct values of ``field``."""
+    df = Catalog(catalog_url).to_df()
+    if field is None:
+        return [c for c in schema.FACETS if c in df.columns]
+    if field not in schema.FACETS or field not in df.columns:
+        raise ValueError(f"unknown facet {field!r}; valid facets: {list(schema.FACETS)}")
+    return sorted(str(v) for v in df[field].dropna().unique())
