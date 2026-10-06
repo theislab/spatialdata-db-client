@@ -50,6 +50,18 @@ def _token_matches(token: str, value: str) -> bool:
     return len(token) >= 4 and any(fuzz.ratio(token, w) >= _FUZZY_CUTOFF for w in words)
 
 
+def facet_values(df: pd.DataFrame, field: str | None = None) -> list[str]:
+    """Facet columns present in ``df``, or the sorted distinct non-null values of ``field``.
+
+    Raises ``ValueError`` if ``field`` is not a known facet or is absent from ``df``.
+    """
+    if field is None:
+        return [c for c in schema.FACETS if c in df.columns]
+    if field not in schema.FACETS or field not in df.columns:
+        raise ValueError(f"unknown facet {field!r}; valid facets: {list(schema.FACETS)}")
+    return sorted(str(v) for v in df[field].dropna().unique())
+
+
 class Catalog:
     """The dataset catalog: fetched, cached and validated on construction."""
 

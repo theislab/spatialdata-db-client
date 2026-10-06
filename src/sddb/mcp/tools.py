@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import platformdirs
 
-from sddb import _catalog_schema as schema
-from sddb.catalog import Catalog
-from sddb.citations import parse_bibtex
+from sddb.catalog import Catalog, facet_values
 from sddb.dataset import Dataset, Results
 from sddb.manifest import plan_sizes
 
@@ -91,12 +88,7 @@ def genes_tool(symbol: str, catalog_url: str | None = None) -> list[dict[str, An
 
 def facets_tool(field: str | None = None, catalog_url: str | None = None) -> list[str]:
     """List facet columns present in the catalog, or the sorted distinct values of ``field``."""
-    df = Catalog(catalog_url).to_df()
-    if field is None:
-        return [c for c in schema.FACETS if c in df.columns]
-    if field not in schema.FACETS or field not in df.columns:
-        raise ValueError(f"unknown facet {field!r}; valid facets: {list(schema.FACETS)}")
-    return sorted(str(v) for v in df[field].dropna().unique())
+    return facet_values(Catalog(catalog_url).to_df(), field)
 
 
 def cite_tool(
@@ -116,10 +108,8 @@ def cite_tool(
     )
     if len(res) == 0:
         return {"bibtex": "", "n": 0}
-    with tempfile.TemporaryDirectory() as d:
-        path = res.citations(Path(d) / "c.bib", bib_url=bib_url)
-        text = path.read_text(encoding="utf-8")
-    return {"bibtex": text, "n": len(parse_bibtex(text))}
+    text, n = res.citations_text(bib_url=bib_url)
+    return {"bibtex": text, "n": n}
 
 
 def _download_dir() -> Path:

@@ -9,8 +9,7 @@ import pandas as pd
 import typer
 from rapidfuzz import fuzz, process
 
-from sddb import _catalog_schema as schema
-from sddb.catalog import Catalog
+from sddb.catalog import Catalog, facet_values
 from sddb.citations import parse_bibtex
 from sddb.dataset import Results
 
@@ -117,15 +116,9 @@ def facets(
 ) -> None:
     """List facet columns, or the distinct values of FIELD."""
     try:
-        df = Catalog(catalog).to_df()
+        cols = facet_values(Catalog(catalog).to_df(), field)
     except Exception as err:
         raise _fail(err) from err
-    if field is None:
-        cols = [c for c in schema.FACETS if c in df.columns]
-    elif field not in schema.FACETS or field not in df.columns:
-        raise _fail(ValueError(f"unknown facet {field!r}; valid facets: {list(schema.FACETS)}"))
-    else:
-        cols = sorted(str(v) for v in df[field].dropna().unique())
     typer.echo("\n".join(cols))
 
 

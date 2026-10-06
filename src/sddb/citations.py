@@ -47,8 +47,8 @@ def parse_bibtex(text: str) -> dict[str, str]:
     return out
 
 
-def write_citations(results: Results, path: str | Path, *, bib_url: str | None = None) -> Path:
-    """Write the BibTeX entries whose cite-key is a ``study_id`` in ``results`` to ``path``.
+def citations_text(results: Results, *, bib_url: str | None = None) -> tuple[str, int]:
+    """Return ``(BibTeX text, entry count)`` for the studies in ``results``.
 
     ``bib_url`` defaults to ``citations.bib`` next to the catalog. Studies without an entry are
     skipped; a warning is emitted if the catalog has no ``study_id`` or nothing matches.
@@ -61,9 +61,14 @@ def write_citations(results: Results, path: str | Path, *, bib_url: str | None =
     entries = parse_bibtex(text)
     keys = [k for k in sorted(ids) if k in entries]
     if "study_id" not in df.columns:
-        warnings.warn("catalog has no 'study_id' column; writing an empty citations file", stacklevel=2)
+        warnings.warn("catalog has no 'study_id' column; no citations", stacklevel=2)
     elif not keys:
-        warnings.warn("no cite-keys match the cohort's study_id values; writing an empty citations file", stacklevel=2)
+        warnings.warn("no cite-keys match the cohort's study_id values; no citations", stacklevel=2)
+    return "".join(entries[k] + "\n\n" for k in keys), len(keys)
+
+
+def write_citations(results: Results, path: str | Path, *, bib_url: str | None = None) -> Path:
+    """Write the BibTeX entries whose cite-key is a ``study_id`` in ``results`` to ``path``."""
     out = Path(path)
-    out.write_text("".join(entries[k] + "\n\n" for k in keys), encoding="utf-8")
+    out.write_text(citations_text(results, bib_url=bib_url)[0], encoding="utf-8")
     return out

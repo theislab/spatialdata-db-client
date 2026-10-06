@@ -19,6 +19,11 @@ def _server_class() -> Any:
     raise ImportError("the MCP server needs the optional extra: pip install 'spatialdata-db[mcp]'")
 
 
+def _drop_none(**kw: Any) -> dict[str, Any]:
+    """Keyword args with ``None`` values removed — the wrappers forward only what the caller set."""
+    return {k: v for k, v in kw.items() if v is not None}
+
+
 def build_server() -> Any:
     """Create the FastMCP server with the catalog tools registered."""
     server = _server_class()("spatialdata-db")
@@ -37,21 +42,15 @@ def build_server() -> Any:
         min_obs: int | None = None,
         min_features: int | None = None,
     ) -> list[dict[str, Any]]:
-        facets: dict[str, Any] = {"organism": organism, "tissue": tissue, "disease": disease}
-        facets |= {"technology": technology, "assay": assay, "tier": tier}
-        facets |= {"n_obs__gte": min_obs, "n_features__gte": min_features}
         return tools.query_tool(
             validation=validation,
-            expressing=expressing,
-            min_fraction=min_fraction,
-            search=search,
-            **{k: v for k, v in facets.items() if v is not None},
+            **_drop_none(
+                organism=organism, tissue=tissue, disease=disease,
+                technology=technology, assay=assay, tier=tier,
+                n_obs__gte=min_obs, n_features__gte=min_features,
+                expressing=expressing, min_fraction=min_fraction, search=search,
+            ),
         )
-
-    server.tool(
-        name="query",
-        description="Filter datasets by facets, ranges (min_obs/min_features), gene (expressing) and free-text search.",
-    )(query)
 
     def describe(uid: str) -> dict[str, Any]:
         return tools.describe_tool(uid)
@@ -74,17 +73,16 @@ def build_server() -> Any:
         min_fraction: float | None = None,
         validation: str = "pass",
     ) -> dict[str, Any]:
-        facets: dict[str, Any] = {"organism": organism, "tissue": tissue, "disease": disease}
-        facets |= {"technology": technology, "assay": assay, "tier": tier}
         return tools.cite_tool(
             validation=validation,
-            search=search,
-            expressing=expressing,
-            min_fraction=min_fraction,
-            **{k: v for k, v in facets.items() if v is not None},
+            **_drop_none(
+                organism=organism, tissue=tissue, disease=disease,
+                technology=technology, assay=assay, tier=tier,
+                search=search, expressing=expressing, min_fraction=min_fraction,
+            ),
         )
 
-    def download(
+    def download_cohort(
         organism: str | None = None,
         tissue: str | None = None,
         disease: str | None = None,
@@ -97,22 +95,24 @@ def build_server() -> Any:
         validation: str = "pass",
         download: bool = False,
     ) -> dict[str, Any]:
-        facets: dict[str, Any] = {"organism": organism, "tissue": tissue, "disease": disease}
-        facets |= {"technology": technology, "assay": assay, "tier": tier}
         return tools.download_tool(
-            validation=validation,
-            search=search,
-            expressing=expressing,
-            min_fraction=min_fraction,
-            download=download,
-            **{k: v for k, v in facets.items() if v is not None},
+            validation=validation, download=download,
+            **_drop_none(
+                organism=organism, tissue=tissue, disease=disease,
+                technology=technology, assay=assay, tier=tier,
+                search=search, expressing=expressing, min_fraction=min_fraction,
+            ),
         )
 
+    server.tool(
+        name="query",
+        description="Filter datasets by facets, ranges (min_obs/min_features), gene (expressing) and free-text search.",
+    )(query)
     server.tool(name="describe", description="Catalog row and element shapes for one dataset uid.")(describe)
     server.tool(name="genes", description="Datasets whose gene index contains a gene symbol.")(genes)
     server.tool(name="facets", description="List facet columns, or the distinct values of a facet field.")(facets)
     server.tool(name="cite", description="BibTeX for the studies of a filtered cohort.")(cite)
-    server.tool(name="download", description="Plan (sizes) or fetch a filtered cohort to the server download dir.")(download)
+    server.tool(name="download", description="Plan (sizes) or fetch a filtered cohort to the server download dir.")(download_cohort)
     return server
 
 
