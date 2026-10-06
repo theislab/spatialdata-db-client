@@ -134,6 +134,7 @@ class Catalog:
         *,
         validation: str | None = "pass",
         license_set: bool | None = None,
+        noncommercial: bool | None = None,
         **facets: str | list[str] | tuple[str, ...] | set[str],
     ) -> Results:
         """Filter the catalog.
@@ -144,8 +145,12 @@ class Catalog:
             Keep rows with this ``validation_status`` (default ``"pass"``); ``None`` disables.
         license_set
             If True, keep only rows with a known license (``license_unknown`` is False); False behaves like None.
+        noncommercial
+            If False, keep only commercial-ok data (``license_noncommercial`` is False) — the common
+            "exclude NonCommercial" filter; if True, keep only NonCommercial data; ``None`` disables.
         **facets
-            Facet column -> value (equality) or list/tuple/set of values (isin).
+            Facet column -> value (equality) or list/tuple/set of values (isin). ``license`` and
+            ``license_noncommercial`` are facets, so you can also filter by exact license id.
 
         Raises
         ------
@@ -161,6 +166,8 @@ class Catalog:
             mask &= df["validation_status"] == validation
         if license_set and "license_unknown" in df.columns:
             mask &= df["license_unknown"].fillna(True) == False  # noqa: E712
+        if noncommercial is not None and "license_noncommercial" in df.columns:
+            mask &= df["license_noncommercial"].fillna(False) == noncommercial
         for col, val in facets.items():
             if col not in df.columns:
                 raise ValueError(f"facet column {col!r} is not present in this catalog (columns: {list(df.columns)})")

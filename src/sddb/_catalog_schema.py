@@ -28,8 +28,11 @@ CATALOG_COLUMNS: dict[str, str] = {
     # validation
     "validation_status": "string",
     "tier": "string",
-    # license
-    "license_spdx": "string",
+    # license (vocab id + properties derived by the producer from the License ULabel)
+    "license": "string",
+    "license_url": "string",
+    "license_noncommercial": "boolean",
+    "license_redistributable": "boolean",
     "license_unknown": "boolean",
     # headline stats
     "n_obs": "Int64",
@@ -57,7 +60,8 @@ FACETS: tuple[str, ...] = (
     "assay",
     "tier",
     "validation_status",
-    "license_spdx",
+    "license",
+    "license_noncommercial",
 )
 
 GENE_INDEX_COLUMNS: dict[str, str] = {

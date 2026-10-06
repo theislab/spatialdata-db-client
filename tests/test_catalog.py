@@ -36,6 +36,16 @@ def test_query_isin_assay_license(cat):
     assert len(cat.query(validation=None, license_set=True)) == 4
 
 
+def test_query_by_license_and_noncommercial(cat):
+    # exact license id via the facet
+    assert {d.uid for d in cat.query(license="CC-BY-NC-SA-4.0")} == {"uid0002"}
+    # the headline filter: exclude NonCommercial (uid0002 is CC-BY-NC-SA)
+    comm = {d.uid for d in cat.query(validation=None, noncommercial=False)}
+    assert "uid0002" not in comm and "uid0001" in comm
+    # keep only NonCommercial
+    assert {d.uid for d in cat.query(noncommercial=True)} == {"uid0002"}
+
+
 def test_query_tuple_and_set_values(cat):
     assert len(cat.query(organism=("human", "mouse"))) == 4
     assert len(cat.query(organism={"human"})) == 3
