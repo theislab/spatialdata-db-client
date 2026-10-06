@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from sddb import _catalog_schema as schema
 from sddb.catalog import Catalog
+from sddb.citations import parse_bibtex
 from sddb.dataset import Dataset, Results
 
 MAX_ROWS = 200
@@ -91,3 +94,26 @@ def facets_tool(field: str | None = None, catalog_url: str | None = None) -> lis
     if field not in schema.FACETS or field not in df.columns:
         raise ValueError(f"unknown facet {field!r}; valid facets: {list(schema.FACETS)}")
     return sorted(str(v) for v in df[field].dropna().unique())
+
+
+def cite_tool(
+    catalog_url: str | None = None,
+    *,
+    validation: str = "pass",
+    expressing: str | None = None,
+    min_fraction: float | None = None,
+    search: str | None = None,
+    bib_url: str | None = None,
+    **facets: Any,
+) -> dict[str, Any]:
+    """Return BibTeX text + entry count for the studies of a filtered cohort (empty cohort -> n=0)."""
+    res = _query(
+        catalog_url, validation=validation, expressing=expressing,
+        min_fraction=min_fraction, search=search, **facets,
+    )
+    if len(res) == 0:
+        return {"bibtex": "", "n": 0}
+    with tempfile.TemporaryDirectory() as d:
+        path = res.citations(Path(d) / "c.bib", bib_url=bib_url)
+        text = path.read_text(encoding="utf-8")
+    return {"bibtex": text, "n": len(parse_bibtex(text))}

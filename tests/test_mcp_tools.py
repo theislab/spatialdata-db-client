@@ -116,3 +116,16 @@ def test_facets_tool(tmp_path):
     assert facets_tool("organism", catalog_url=cat.as_uri()) == ["human", "mouse"]
     with pytest.raises(ValueError, match="unknown facet"):
         facets_tool("not_a_facet", catalog_url=cat.as_uri())
+
+
+def test_cite_tool(tmp_path):
+    from tests._fixtures import write_fixture_catalog, make_fixture_citations_bib
+    from sddb.mcp.tools import cite_tool
+
+    cat = write_fixture_catalog(tmp_path / "catalog.parquet")
+    (tmp_path / "citations.bib").write_text(make_fixture_citations_bib(), encoding="utf-8")
+    out = cite_tool(catalog_url=cat.as_uri(), organism="human")
+    assert out["n"] >= 1
+    assert "@" in out["bibtex"] and "Smith2023" in out["bibtex"]
+    empty = cite_tool(catalog_url=cat.as_uri(), organism="nonexistent_xyz")
+    assert empty == {"bibtex": "", "n": 0}
