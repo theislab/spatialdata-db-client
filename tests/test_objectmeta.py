@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import zarr
 from tests._fixtures import make_tiny_sdata_zarr
 
 from sddb.objectmeta import ObjectMetaError, compute_fingerprint, fetch_many, fetch_object_metadata
@@ -40,3 +41,20 @@ def test_fetch_many_all_or_nothing(tmp_path):
     with pytest.raises(ObjectMetaError) as ei:
         fetch_many([("good", str(z)), ("bad", str(tmp_path / "missing.zarr"))], workers=2)
     assert "bad" in ei.value.failed
+
+
+def test_fetch_fingerprint_tracks_root_provenance(tmp_path):
+    z = make_tiny_sdata_zarr(tmp_path)
+    g = zarr.open_group(str(z), mode="r+")
+    g.attrs["sddb_provenance"] = {"converted_at": "A"}
+    a1 = fetch_object_metadata("u1", str(z)).fingerprint
+    assert fetch_object_metadata("u1", str(z)).fingerprint == a1
+    g.attrs["sddb_provenance"] = {"converted_at": "B"}
+    assert fetch_object_metadata("u1", str(z)).fingerprint != a1
+
+
+def test_fetch_many_success_preserves_order(tmp_path):
+    z1 = make_tiny_sdata_zarr(tmp_path / "a")
+    z2 = make_tiny_sdata_zarr(tmp_path / "b")
+    out = fetch_many([("second", str(z2)), ("first", str(z1))], workers=2)
+    assert [m.uid for m in out] == ["second", "first"]

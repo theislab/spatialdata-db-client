@@ -8,9 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
-import zarr
-
-from sddb.remote import elements, storage_options
+from sddb.remote import _open_group, elements
 
 _ROOT_KEYS = ("sddb_provenance", "spatialdata_attrs")
 
@@ -51,13 +49,9 @@ def compute_fingerprint(elements: dict[str, Any], tables: tuple[str, ...], lamin
 
 
 def _root_attrs(zarr_url: str) -> dict[str, Any]:
-    """Root-group provenance attrs (one metadata read); {} if absent or unreadable."""
-    try:
-        g = zarr.open_group(zarr_url, mode="r", storage_options=storage_options(zarr_url) or None)
-        a = dict(g.attrs)
-        return {k: a[k] for k in _ROOT_KEYS if k in a}
-    except Exception:
-        return {}
+    """Root-group provenance attrs (one metadata read); absent keys are omitted, read errors propagate."""
+    a = dict(_open_group(zarr_url).attrs)
+    return {k: a[k] for k in _ROOT_KEYS if k in a}
 
 
 def fetch_object_metadata(uid: str, zarr_url: str) -> ObjectMeta:
