@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, overload
+from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
 
@@ -12,6 +12,46 @@ from sddb.dataset import Dataset, Source
 
 if TYPE_CHECKING:
     from sddb.manifest import Manifest
+
+_MODALITY_FLAGS = ("hne_image", "if_image", "ftu_annotation")  # catalog boolean columns
+
+
+def group_counts(df: pd.DataFrame, field: str) -> pd.DataFrame:
+    """Count rows per value of ``field``; missing values form an explicit ``"unknown"`` row."""
+    if field not in df.columns:
+        raise KeyError(f"no such field: {field!r}")
+    key = df[field].astype("string").fillna("unknown")
+    out = key.value_counts(dropna=False).rename_axis(field).reset_index(name="n")
+    return out.sort_values("n", ascending=False, ignore_index=True)
+
+
+def modalities(df: pd.DataFrame) -> pd.DataFrame:
+    """Whether any row carries each modality flag (catalog columns only, no network)."""
+    rows = [(flag, bool(df[flag].fillna(False).any())) for flag in _MODALITY_FLAGS if flag in df.columns]
+    return pd.DataFrame(rows, columns=["modality", "present"])
+
+
+def licenses(df: pd.DataFrame) -> pd.DataFrame:
+    """Count rows per license."""
+    return group_counts(df, "license") if "license" in df.columns else pd.DataFrame(columns=["license", "n"])
+
+
+def coverage(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-column counts of present and unknown (missing) values."""
+    rows = []
+    for col in df.columns:
+        present = int(df[col].notna().sum())
+        rows.append((col, present, len(df) - present))
+    return pd.DataFrame(rows, columns=["field", "present", "unknown"])
+
+
+def summary(df: pd.DataFrame) -> dict[str, Any]:
+    """Headline numbers: object count, distinct studies, technologies."""
+    return {
+        "n_objects": len(df),
+        "n_studies": int(df["study_id"].astype("string").fillna("unknown").nunique()) if "study_id" in df else None,
+        "technologies": sorted(df["technology"].dropna().unique()) if "technology" in df else [],
+    }
 
 
 class SpatialDataCohort(Sequence[Dataset]):
@@ -53,6 +93,26 @@ class SpatialDataCohort(Sequence[Dataset]):
     def to_df(self) -> pd.DataFrame:
         """Return the underlying rows as a DataFrame copy."""
         return self._df.copy()
+
+    def groupby(self, field: str) -> pd.DataFrame:
+        """Count members per value of ``field`` (missing values bucketed as ``"unknown"``)."""
+        return group_counts(self._df, field)
+
+    def modalities(self) -> pd.DataFrame:
+        """Which modalities are present, from catalog flag columns only (no network)."""
+        return modalities(self._df)
+
+    def licenses(self) -> pd.DataFrame:
+        """Count members per license."""
+        return licenses(self._df)
+
+    def coverage(self) -> pd.DataFrame:
+        """Per-column counts of present vs. unknown values."""
+        return coverage(self._df)
+
+    def summary(self) -> dict[str, Any]:
+        """Headline numbers for this set."""
+        return summary(self._df)
 
     def __len__(self) -> int:
         return len(self._df)
