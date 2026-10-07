@@ -58,6 +58,22 @@ class FrozenCohort:
 
         return make_split(self.members, self.hash, **kw)
 
+    def check(self, adapter: Any, *, deep: bool = False) -> Any:
+        """Compatibility report of this cohort against a TaskAdapter (advisory unless ``deep``)."""
+        from sddb.adapter import check
+
+        return check(self.members, adapter, deep=deep)
+
+    def build(
+        self, adapter: Any, *, split: Any = None, materialize: bool = False, out: str | Path | None = None, verify: bool = True
+    ) -> Any:
+        """Task view via ``adapter``; ``split`` must derive from this cohort. Lazy unless ``materialize``."""
+        from sddb.adapter import build
+
+        return build(
+            self.members, adapter, split=split, materialize=materialize, out=out, verify=verify, cohort_hash=self.hash
+        )
+
     def write(self, path: str | Path) -> Path:
         """Write JSON to ``path`` (members go to a parquet sidecar when large); return the path."""
         p = Path(path)
