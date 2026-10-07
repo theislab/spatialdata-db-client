@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -56,9 +57,18 @@ def make_split(
 
     Deterministic: group keys are sorted before a local ``default_rng(seed)`` shuffle, so the result
     is independent of row order, pandas/Python version and global RNG state.
+
+    Fold sizes are counted in groups, not rows, so row-level proportions can differ from the
+    requested ratios when studies are uneven.
     """
+    if mode not in {"group", "annotate"}:
+        raise ValueError(f"mode must be 'group' or 'annotate', got {mode!r}")
+    if by not in members.columns:
+        raise KeyError(f"split column {by!r} not in cohort members")
     ratios = {"train": train, "val": val, "test": test}
-    groups = {str(r.uid): _group_key(r.uid, getattr(r, by, None)) for r in members.itertuples(index=False)}
+    if min(ratios.values()) < 0 or max(ratios.values()) <= 0 or not math.isclose(sum(ratios.values()), 1.0):
+        raise ValueError(f"ratios must be >= 0, include a positive one, and sum to 1; got {ratios}")
+    groups = {str(u): _group_key(u, s) for u, s in zip(members["uid"], members[by], strict=True)}
     if mode == "annotate":
         return SplitManifest(parent_hash, by, seed, ratios, mode, groups)
     keys = sorted(set(groups.values()))  # deterministic input order
