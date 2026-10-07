@@ -139,7 +139,7 @@ def test_download_tool_plan_no_copy(tmp_path, monkeypatch):
     monkeypatch.setattr(t, "plan_sizes", lambda res: [(d.uid, 1000) for d in res])
     called = {"download": False}
     monkeypatch.setattr(
-        "sddb.dataset.Results.download",
+        "sddb.cohort.SpatialDataCohort.download",
         lambda self, *a, **k: called.__setitem__("download", True),
     )
     out = t.download_tool(catalog_url=cat.as_uri(), organism="human")
@@ -162,7 +162,7 @@ def test_download_tool_fetch_sandbox(tmp_path, monkeypatch):
         seen["dest"] = str(dest)
         return Manifest("now", None, [ManifestEntry("uid0001", "s3://x", str(dest), 5, "complete", None)])
 
-    monkeypatch.setattr("sddb.dataset.Results.download", fake_download)
+    monkeypatch.setattr("sddb.cohort.SpatialDataCohort.download", fake_download)
     out = t.download_tool(catalog_url=cat.as_uri(), organism="human", download=True)
     assert seen["dest"] == str(sandbox)  # fetched only into the sandbox
     assert out["dest"] == str(sandbox)

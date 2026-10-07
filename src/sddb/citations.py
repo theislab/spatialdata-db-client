@@ -1,4 +1,4 @@
-"""Cohort citations: filter a published citations.bib to the studies in a Results."""
+"""Cohort citations: filter a published citations.bib to the studies in a SpatialDataCohort."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from sddb._cache import fetch_catalog
 from sddb.genes import sibling_url
 
 if TYPE_CHECKING:
-    from sddb.dataset import Results
+    from sddb.cohort import SpatialDataCohort
 
 DEFAULT_BIB_URL = "https://github.com/theislab/spatialdata-db-client/releases/latest/download/citations.bib"
 
@@ -47,7 +47,7 @@ def parse_bibtex(text: str) -> dict[str, str]:
     return out
 
 
-def citations_text(results: Results, *, bib_url: str | None = None) -> tuple[str, int]:
+def citations_text(results: SpatialDataCohort, *, bib_url: str | None = None) -> tuple[str, int]:
     """Return ``(BibTeX text, entry count)`` for the studies in ``results``.
 
     ``bib_url`` defaults to ``citations.bib`` next to the catalog. Studies without an entry are
@@ -67,7 +67,7 @@ def citations_text(results: Results, *, bib_url: str | None = None) -> tuple[str
     return "".join(entries[k] + "\n\n" for k in keys), len(keys)
 
 
-def write_citations(results: Results, path: str | Path, *, bib_url: str | None = None) -> Path:
+def write_citations(results: SpatialDataCohort, path: str | Path, *, bib_url: str | None = None) -> Path:
     """Write the BibTeX entries whose cite-key is a ``study_id`` in ``results`` to ``path``."""
     out = Path(path)
     out.write_text(citations_text(results, bib_url=bib_url)[0], encoding="utf-8")

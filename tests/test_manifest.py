@@ -6,7 +6,8 @@ import pytest
 from tests._fixtures import make_fixture_catalog, make_tiny_sdata_zarr
 
 from sddb import Manifest, ManifestVersionMismatch, manifest
-from sddb.dataset import Results, Source
+from sddb.cohort import SpatialDataCohort
+from sddb.dataset import Source
 
 
 @pytest.fixture
@@ -14,7 +15,7 @@ def cohort(tmp_path):
     z = make_tiny_sdata_zarr(tmp_path)
     df = make_fixture_catalog().iloc[:2].copy()
     df["zarr_url"] = str(z)
-    return Results(df, source=Source(version="v1"))
+    return SpatialDataCohort(df, source=Source(version="v1"))
 
 
 def test_download_and_resume(tmp_path, cohort, monkeypatch):
@@ -41,7 +42,7 @@ def test_download_and_resume(tmp_path, cohort, monkeypatch):
 def test_failed_entry_refetched(tmp_path, cohort):
     df = cohort.to_df()
     df.loc[1, "zarr_url"] = str(tmp_path / "missing.zarr")
-    m = Results(df).download(tmp_path / "out")
+    m = SpatialDataCohort(df).download(tmp_path / "out")
     assert [e.status for e in m.entries] == ["complete", "failed"]
     assert not list((tmp_path / "out").glob("*.part"))
 
@@ -49,7 +50,7 @@ def test_failed_entry_refetched(tmp_path, cohort):
 def test_version_mismatch_and_allow(tmp_path, cohort):
     dest = tmp_path / "out"
     cohort.download(dest, pin_versions=True)  # pinned to "v1"
-    other = Results(cohort.to_df(), source=Source(version="B"))
+    other = SpatialDataCohort(cohort.to_df(), source=Source(version="B"))
     with pytest.raises(ManifestVersionMismatch, match="'v1'.*'B'"):
         other.download(dest)
     m = other.download(dest, allow_version_change=True, pin_versions=True)
@@ -94,11 +95,11 @@ def test_failed_entry_records_error(tmp_path, cohort, monkeypatch):
 
 def test_plan_sizes_local_store(tmp_path):
     import pandas as pd
-    from sddb.dataset import Results
+    from sddb.cohort import SpatialDataCohort
     from sddb.manifest import plan_sizes
     from tests._fixtures import make_tiny_sdata_zarr
 
     store = make_tiny_sdata_zarr(tmp_path)
-    res = Results(pd.DataFrame({"uid": ["uidX"], "zarr_url": [store.as_uri()]}))
+    res = SpatialDataCohort(pd.DataFrame({"uid": ["uidX"], "zarr_url": [store.as_uri()]}))
     sizes = plan_sizes(res)
     assert len(sizes) == 1 and sizes[0][0] == "uidX" and sizes[0][1] > 0

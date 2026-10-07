@@ -17,7 +17,7 @@ import fsspec
 from sddb.remote import storage_options
 
 if TYPE_CHECKING:
-    from sddb.dataset import Results
+    from sddb.cohort import SpatialDataCohort
 
 
 @dataclass
@@ -130,7 +130,7 @@ def _fetch_all(pairs: list[tuple[str, str]], root: Path, catalog_version: str | 
     return manifest
 
 
-def plan_sizes(results: Results) -> list[tuple[str, int]]:
+def plan_sizes(results: SpatialDataCohort) -> list[tuple[str, int]]:
     """Per-store ``(uid, total bytes)`` from a LIST/``du`` on each store — no data is copied."""
     out: list[tuple[str, int]] = []
     for ds in results:
@@ -140,7 +140,7 @@ def plan_sizes(results: Results) -> list[tuple[str, int]]:
 
 
 def download(
-    results: Results,
+    results: SpatialDataCohort,
     dest: str | Path,
     *,
     workers: int = 4,

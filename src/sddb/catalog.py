@@ -16,7 +16,8 @@ from rapidfuzz import fuzz
 
 from sddb import _catalog_schema as schema
 from sddb._cache import _local_path, fetch_catalog
-from sddb.dataset import Results, Source
+from sddb.cohort import SpatialDataCohort
+from sddb.dataset import Source
 
 if TYPE_CHECKING:
     from sddb.genes import GeneIndex
@@ -167,7 +168,7 @@ class Catalog:
         expressing: str | None = None,
         min_fraction: float | None = None,
         **facets: str | float | list[str] | tuple[str, ...] | set[str],
-    ) -> Results:
+    ) -> SpatialDataCohort:
         """Filter the catalog.
 
         Parameters
@@ -233,7 +234,7 @@ class Catalog:
             except TypeError as err:
                 raise ValueError(f"range value for {col}__{op} must be numeric, got {val!r}") from err
         keep = mask.fillna(False).astype(bool)
-        # search and expressing each constrain the surviving uids; intersect into one mask, build Results once.
+        # search and expressing each constrain the surviving uids; intersect into one mask, build SpatialDataCohort once.
         matched: dict[str, list[str]] | None = None
         if search is not None and keep.any():
             hits = self.search(search)
@@ -242,14 +243,14 @@ class Catalog:
         if expressing is not None and keep.any():  # skip the ~142 MB gene index when nothing is left to filter
             ranked = self.genes.ranked(expressing, min_fraction=min_fraction, validation=validation)
             keep &= df["uid"].isin(ranked["uid"])
-        return Results(df[keep], matched=matched, source=self._source())
+        return SpatialDataCohort(df[keep], matched=matched, source=self._source())
 
-    def search(self, text: str) -> Results:
+    def search(self, text: str) -> SpatialDataCohort:
         """Deterministic text search over facet values.
 
         Tokens are fuzzy/substring-matched against the distinct values of each facet; matched values
         within a facet are OR-ed and facets are AND-ed. Rows that failed validation are excluded unless
-        ``validation_status`` itself was matched. Nothing matching returns an empty Results with a warning.
+        ``validation_status`` itself was matched. Nothing matching returns an empty SpatialDataCohort with a warning.
         """
         tokens = re.findall(r"\w+", text.lower())
         matched: dict[str, list[str]] = {}
@@ -262,10 +263,10 @@ class Catalog:
                 matched[col] = hits
         if not matched:
             warnings.warn(f"nothing matched {text!r}", stacklevel=2)
-            return Results(self._df.iloc[0:0], source=self._source())
+            return SpatialDataCohort(self._df.iloc[0:0], source=self._source())
         mask = pd.Series(True, index=self._df.index)
         for col, hits in matched.items():
             mask &= self._df[col].isin(hits)
         if "validation_status" not in matched:
             mask &= self._df["validation_status"] == "pass"
-        return Results(self._df[mask.fillna(False).astype(bool)], matched=matched, source=self._source())
+        return SpatialDataCohort(self._df[mask.fillna(False).astype(bool)], matched=matched, source=self._source())

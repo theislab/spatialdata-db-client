@@ -3,7 +3,7 @@ from __future__ import annotations
 from tests._fixtures import make_fixture_catalog, make_fixture_citations_bib
 
 from sddb.citations import parse_bibtex
-from sddb.dataset import Results
+from sddb.cohort import SpatialDataCohort
 
 
 def test_parse_nested():
@@ -17,7 +17,7 @@ def test_parse_nested():
 def test_results_citations(tmp_path):
     bib = tmp_path / "citations.bib"
     bib.write_text(make_fixture_citations_bib())
-    res = Results(make_fixture_catalog().iloc[:2])  # Smith2023 only
+    res = SpatialDataCohort(make_fixture_catalog().iloc[:2])  # Smith2023 only
     out = res.citations(tmp_path / "refs.bib", bib_url=str(bib))
     text = out.read_text()
     assert "Smith2023" in text
@@ -34,7 +34,7 @@ def test_citations_warns_on_no_match(tmp_path):
     df = make_fixture_catalog().iloc[:2].copy()
     df["study_id"] = "NoSuchKey"
     with pytest.warns(UserWarning, match="no cite-keys match"):
-        out = Results(df).citations(tmp_path / "refs.bib", bib_url=str(bib))
+        out = SpatialDataCohort(df).citations(tmp_path / "refs.bib", bib_url=str(bib))
     assert out.read_text() == ""
 
 
@@ -47,7 +47,7 @@ def test_citations_refresh_passed(tmp_path, monkeypatch):
     seen = []
     real = cit.fetch_catalog
     monkeypatch.setattr(cit, "fetch_catalog", lambda url, **kw: (seen.append(kw.get("refresh")), real(url, **kw))[1])
-    Results(make_fixture_catalog().iloc[:2], source=Source(refresh=True)).citations(
+    SpatialDataCohort(make_fixture_catalog().iloc[:2], source=Source(refresh=True)).citations(
         tmp_path / "r.bib", bib_url=str(bib)
     )
     assert seen == [True]
