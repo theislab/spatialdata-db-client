@@ -72,3 +72,26 @@ class FrozenCohort:
             members = pd.DataFrame(head["members"])
         src = Source(url=head["source"]["url"], version=head["source"]["version"])
         return cls(head["schema_version"], head["created_at"], src, head["filter"], head["hash"], members)
+
+
+class CohortDriftError(RuntimeError):
+    """A frozen cohort's objects changed since freeze; `drifted` maps uid -> reason."""
+
+    def __init__(self, drifted: dict[str, str]) -> None:
+        self.drifted = drifted
+        super().__init__(f"{len(drifted)} object(s) drifted since freeze: {sorted(drifted)}")
+
+
+def verify_members(members: pd.DataFrame, *, workers: int = 8) -> None:
+    """Re-fetch each member's metadata and raise CohortDriftError on fingerprint mismatch."""
+    from sddb.objectmeta import fetch_many
+
+    pairs = [(str(r.uid), str(r.zarr_url)) for r in members.itertuples(index=False)]
+    now = {m.uid: m for m in fetch_many(pairs, workers=workers)}
+    drifted: dict[str, str] = {}
+    for r in members.itertuples(index=False):
+        cur = now[str(r.uid)]
+        if cur.fingerprint != str(r.fingerprint):
+            drifted[str(r.uid)] = f"fingerprint {r.fingerprint} -> {cur.fingerprint}"
+    if drifted:
+        raise CohortDriftError(drifted)
