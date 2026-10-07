@@ -111,7 +111,11 @@ def build(
     verify: bool = True,
     cohort_hash: str = "",
 ) -> TaskView:
-    """Task view over ``members``. Lazy by default; ``materialize=True`` builds all and writes provenance."""
+    """Task view over ``members``. Lazy by default; ``materialize=True`` builds all and writes provenance.
+
+    With ``materialize=True`` each ``adapter.build(sdata)`` runs once for its side effects and provenance; the
+    returned ``TaskView`` stays lazy (re-invoking a thunk re-opens the store).
+    """
     if split is not None and split.parent_hash != cohort_hash:
         raise ValueError(f"split.parent_hash {split.parent_hash!r} does not match cohort hash {cohort_hash!r}")
     if verify:

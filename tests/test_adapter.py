@@ -86,3 +86,20 @@ def test_build_split_match_records_split_hash(tmp_path, monkeypatch):
     split = SimpleNamespace(parent_hash="h")
     build(_members(), FakeAdapter(), split=split, materialize=True, out=tmp_path, verify=False, cohort_hash="h")
     assert json.loads((tmp_path / "provenance.json").read_text())["split_hash"] == "h"
+
+
+def test_build_verify_runs_before_open(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr("sddb.freeze.verify_members", lambda m, **k: calls.append("verify"))
+    monkeypatch.setattr("sddb.adapter._open", lambda url: calls.append("open") or object())
+    build(_members(), FakeAdapter(), materialize=True, out=tmp_path, verify=True, cohort_hash="h")
+    assert calls == ["verify", "open"]
+
+
+def test_build_verify_false_skips_verify(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr("sddb.freeze.verify_members", lambda m, **k: calls.append("verify"))
+    monkeypatch.setattr("sddb.adapter._open", lambda url: calls.append("open") or object())
+    build(_members(), FakeAdapter(), materialize=True, out=tmp_path, verify=False, cohort_hash="h")
+    assert "verify" not in calls
+    assert calls == ["open"]
