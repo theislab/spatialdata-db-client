@@ -243,7 +243,18 @@ class Catalog:
         if expressing is not None and keep.any():  # skip the ~142 MB gene index when nothing is left to filter
             ranked = self.genes.ranked(expressing, min_fraction=min_fraction, validation=validation)
             keep &= df["uid"].isin(ranked["uid"])
-        return SpatialDataCohort(df[keep], matched=matched, source=self._source())
+        params: dict[str, Any] = {
+            "validation": validation,
+            "license_set": license_set,
+            "noncommercial": noncommercial,
+            "search": search,
+            "expressing": expressing,
+            "min_fraction": min_fraction,
+        }
+        flt = {k: v for k, v in params.items() if v is not None}
+        for k, v in facets.items():
+            flt[k] = sorted(v, key=str) if isinstance(v, (list, tuple, set)) else v
+        return SpatialDataCohort(df[keep], matched=matched, source=self._source(), filter=flt)
 
     def search(self, text: str) -> SpatialDataCohort:
         """Deterministic text search over facet values.
@@ -263,10 +274,12 @@ class Catalog:
                 matched[col] = hits
         if not matched:
             warnings.warn(f"nothing matched {text!r}", stacklevel=2)
-            return SpatialDataCohort(self._df.iloc[0:0], source=self._source())
+            return SpatialDataCohort(self._df.iloc[0:0], source=self._source(), filter={"search": text})
         mask = pd.Series(True, index=self._df.index)
         for col, hits in matched.items():
             mask &= self._df[col].isin(hits)
         if "validation_status" not in matched:
             mask &= self._df["validation_status"] == "pass"
-        return SpatialDataCohort(self._df[mask.fillna(False).astype(bool)], matched=matched, source=self._source())
+        return SpatialDataCohort(
+            self._df[mask.fillna(False).astype(bool)], matched=matched, source=self._source(), filter={"search": text}
+        )

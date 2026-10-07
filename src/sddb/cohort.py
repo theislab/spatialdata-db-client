@@ -11,6 +11,7 @@ import pandas as pd
 from sddb.dataset import Dataset, Source
 
 if TYPE_CHECKING:
+    from sddb.freeze import FrozenCohort
     from sddb.manifest import Manifest
 
 _MODALITY_FLAGS = ("hne_image", "if_image", "ftu_annotation")  # catalog boolean columns
@@ -58,11 +59,44 @@ class SpatialDataCohort(Sequence[Dataset]):
     """An ordered, sliceable set of Dataset records from a query/search."""
 
     def __init__(
-        self, df: pd.DataFrame, *, matched: dict[str, list[str]] | None = None, source: Source | None = None
+        self,
+        df: pd.DataFrame,
+        *,
+        matched: dict[str, list[str]] | None = None,
+        source: Source | None = None,
+        filter: dict[str, Any] | None = None,
     ) -> None:
         self._df = df.reset_index(drop=True)
         self.matched: dict[str, list[str]] = matched or {}
         self._source = source or Source()
+        self._filter: dict[str, Any] = filter or {}
+
+    def object_metadata(self, *, workers: int = 8) -> pd.DataFrame:
+        """Fetch metadata-only fingerprints for every member (all-or-nothing; raises ``ObjectMetaError``)."""
+        from sddb.objectmeta import fetch_many
+
+        pairs = [(str(r.uid), str(r.zarr_url)) for r in self._df.itertuples(index=False)]
+        metas = fetch_many(pairs, workers=workers)
+        return pd.DataFrame(
+            [
+                {"uid": m.uid, "lamin_version": m.lamin_version, "fingerprint": m.fingerprint, "tables": list(m.tables)}
+                for m in metas
+            ],
+            columns=["uid", "lamin_version", "fingerprint", "tables"],
+        )
+
+    def freeze(self, *, workers: int = 8) -> FrozenCohort:
+        """Pin this selection to its exact members and a deterministic content hash."""
+        from datetime import UTC, datetime
+
+        from sddb.freeze import SCHEMA_VERSION, FrozenCohort, cohort_hash
+
+        meta = self.object_metadata(workers=workers)
+        members = self._df.merge(meta, on="uid", how="left")
+        flt = dict(self._filter)
+        return FrozenCohort(
+            SCHEMA_VERSION, datetime.now(UTC).isoformat(), self._source, flt, cohort_hash(flt, members), members
+        )
 
     def citations(self, path: str | Path, *, bib_url: str | None = None) -> Path:
         """Write the BibTeX entries for the studies in this set to ``path``."""
