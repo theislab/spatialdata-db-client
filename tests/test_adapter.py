@@ -60,10 +60,11 @@ def test_build_materialize_writes_provenance(tmp_path, monkeypatch):
     build(_members(), FakeAdapter(), materialize=True, out=tmp_path, verify=False, cohort_hash="h")
     prov = json.loads((tmp_path / "provenance.json").read_text())
     assert prov["cohort_hash"] == "h"
-    assert prov["split_hash"] is None
+    assert prov["split"] is None
+    assert prov["created_at"]
     assert prov["adapter"] == {"name": "fake", "version": "0.1", "config": {"k": 1}}
     assert "sddb_version" in prov
-    assert prov["members"][0]["uid"] == "a"
+    assert prov["members"][0] == {"uid": "a", "table": "table", "output": "dict"}
 
 
 def test_build_lazy_opens_nothing(monkeypatch):
@@ -81,11 +82,15 @@ def test_build_split_parent_hash_mismatch_raises():
         build(_members(), FakeAdapter(), split=split, verify=False, cohort_hash="h")
 
 
-def test_build_split_match_records_split_hash(tmp_path, monkeypatch):
+def test_build_split_match_records_split_identity(tmp_path, monkeypatch):
     monkeypatch.setattr("sddb.adapter._open", lambda url: object())
-    split = SimpleNamespace(parent_hash="h")
+    split = SimpleNamespace(parent_hash="h", by="study_id", seed=7, ratios={"train": 0.8}, mode="group")
     build(_members(), FakeAdapter(), split=split, materialize=True, out=tmp_path, verify=False, cohort_hash="h")
-    assert json.loads((tmp_path / "provenance.json").read_text())["split_hash"] == "h"
+    prov = json.loads((tmp_path / "provenance.json").read_text())
+    assert prov["cohort_hash"] == "h"
+    assert prov["split"]["seed"] == 7
+    assert prov["split"] == {"by": "study_id", "seed": 7, "ratios": {"train": 0.8}, "mode": "group"}
+    assert "split_hash" not in prov
 
 
 def test_build_verify_runs_before_open(tmp_path, monkeypatch):

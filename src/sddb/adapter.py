@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 import pandas as pd
 
 import sddb
+from sddb.concat import _table_name
 from sddb.objectmeta import ObjectMeta, fetch_many
 
 Issue = str
@@ -131,12 +133,19 @@ def build(
         return view
     out_dir = Path(out or ".")
     out_dir.mkdir(parents=True, exist_ok=True)
-    produced = [{"uid": uid, "output": type(fn()).__name__} for uid, fn in view]
+    tables = {str(r.uid): _table_name(r) for r in members.itertuples(index=False)}
+    produced = [{"uid": uid, "table": tables[uid], "output": type(fn()).__name__} for uid, fn in view]
+    split_id = (
+        None
+        if split is None
+        else {"by": split.by, "seed": split.seed, "ratios": split.ratios, "mode": split.mode}
+    )
     (out_dir / "provenance.json").write_text(
         json.dumps(
             {
                 "cohort_hash": cohort_hash,
-                "split_hash": split.parent_hash if split is not None else None,
+                "created_at": datetime.now(UTC).isoformat(),
+                "split": split_id,
                 "adapter": {"name": adapter.name, "version": adapter.version, "config": adapter.config},
                 "sddb_version": sddb.__version__,
                 "members": produced,

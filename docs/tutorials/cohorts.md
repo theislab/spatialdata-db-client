@@ -40,6 +40,20 @@ manifest.entries[0]
 # ManifestEntry(uid='...', zarr_url='s3://...', dest='data/....zarr', size_bytes=..., status='complete', sha256='...')
 ```
 
+### Reproducible re-fetch
+
+A `Manifest` records the exact URLs downloaded; `refetch` replays them into a new directory.
+
+```python
+# not executed
+from sddb import Manifest
+
+m = Manifest.read("./data/manifest.json")
+m.refetch("./data_copy")
+```
+
+Only URLs are replayed, so a store republished at the same URL is not detected.
+
 Pass `pin_versions=True` to record the catalog version; downloading into a directory pinned to a different
 version then raises `ManifestVersionMismatch` unless `allow_version_change=True`.
 
@@ -51,7 +65,7 @@ sidecar); `FrozenCohort.load` restores it offline, without a catalog.
 
 ```python
 # not executed
-from sddb.freeze import FrozenCohort
+from sddb import CohortDriftError, FrozenCohort
 
 frozen = cohort.freeze()
 frozen.write("cohort.json")
@@ -79,7 +93,7 @@ tiny cohorts. The `SplitManifest` records the parent cohort hash, and can be wri
 
 ```python
 # not executed
-from sddb.split import SplitManifest
+from sddb import SplitManifest
 
 split = frozen.split(by="study_id", train=0.8, val=0.1, test=0.1, seed=42)
 split.write("split.json")

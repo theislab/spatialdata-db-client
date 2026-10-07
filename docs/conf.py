@@ -11,6 +11,6 @@ extensions = [
     "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
 ]
-exclude_patterns = ["_build", "design"]
+exclude_patterns = ["_build", "design", "superpowers"]
 html_theme = "sphinx_book_theme"
 html_title = "spatialdata-db"

@@ -52,11 +52,13 @@ class FrozenCohort:
 
         return concat_tables(self.members, table=table, verify=verify)
 
-    def split(self, **kw: Any) -> SplitManifest:
+    def split(
+        self, *, by: str = "study_id", train: float, val: float, test: float, seed: int, mode: str = "group"
+    ) -> SplitManifest:
         """Group-safe deterministic split of this cohort; the manifest records ``self.hash`` as ``parent_hash``."""
         from sddb.split import make_split
 
-        return make_split(self.members, self.hash, **kw)
+        return make_split(self.members, self.hash, by=by, train=train, val=val, test=test, seed=seed, mode=mode)
 
     def check(self, adapter: Any, *, deep: bool = False) -> Any:
         """Compatibility report of this cohort against a TaskAdapter (advisory unless ``deep``)."""
