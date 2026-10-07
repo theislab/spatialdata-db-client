@@ -6,11 +6,14 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
 from sddb.dataset import Source
+
+if TYPE_CHECKING:
+    from anndata import AnnData
 
 SCHEMA_VERSION = "1"
 _SIDECAR_THRESHOLD = 200  # members beyond this go to a parquet sidecar
@@ -40,6 +43,12 @@ class FrozenCohort:
     filter: dict[str, Any]
     hash: str
     members: pd.DataFrame  # read-only by contract; frozen=True does NOT protect in-place mutation
+
+    def to_anndata(self, *, table: str | None = None, verify: bool = True) -> AnnData:
+        """Concatenate each member's table into one AnnData, verifying fingerprints first by default."""
+        from sddb.concat import concat_tables
+
+        return concat_tables(self.members, table=table, verify=verify)
 
     def write(self, path: str | Path) -> Path:
         """Write JSON to ``path`` (members go to a parquet sidecar when large); return the path."""

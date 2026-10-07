@@ -11,6 +11,8 @@ import pandas as pd
 from sddb.dataset import Dataset, Source
 
 if TYPE_CHECKING:
+    from anndata import AnnData
+
     from sddb.freeze import FrozenCohort
     from sddb.manifest import Manifest
 
@@ -127,6 +129,12 @@ class SpatialDataCohort(Sequence[Dataset]):
         return download(
             self, dest, workers=workers, pin_versions=pin_versions, allow_version_change=allow_version_change
         )
+
+    def to_anndata(self, *, table: str | None = None) -> AnnData:
+        """Concatenate each member's table into one AnnData (no drift check: a live cohort is unfrozen)."""
+        from sddb.concat import concat_tables
+
+        return concat_tables(self._df, table=table, verify=False)
 
     def to_df(self) -> pd.DataFrame:
         """Return the underlying rows as a DataFrame copy."""
