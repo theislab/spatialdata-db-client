@@ -79,6 +79,12 @@ def test_query_records_deterministic_filter(tmp_path):
         assert cat.search("zzzzqqq")._filter == {"search": "zzzzqqq"}
 
 
+def test_slice_keeps_filter():
+    df = pd.DataFrame({"uid": ["u1", "u2", "u3"], "zarr_url": ["a", "b", "c"]})
+    parent = SpatialDataCohort(df, filter={"organism": "human"})
+    assert parent[:2]._filter == {"organism": "human"}
+
+
 def test_freeze_local_store(tmp_path):
     z = make_tiny_sdata_zarr(tmp_path)
     df = pd.DataFrame({"uid": ["u1"], "zarr_url": [str(z)], "study_id": ["S1"]})

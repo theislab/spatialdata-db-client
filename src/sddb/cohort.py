@@ -86,7 +86,11 @@ class SpatialDataCohort(Sequence[Dataset]):
         )
 
     def freeze(self, *, workers: int = 8) -> FrozenCohort:
-        """Pin this selection to its exact members and a deterministic content hash."""
+        """Pin this selection to its exact members and a deterministic content hash.
+
+        The recorded filter captures effective defaults (e.g. ``validation="pass"``). Cohorts built by
+        paths other than ``query``/``search`` may carry an empty filter.
+        """
         from datetime import UTC, datetime
 
         from sddb.freeze import SCHEMA_VERSION, FrozenCohort, cohort_hash
@@ -157,7 +161,7 @@ class SpatialDataCohort(Sequence[Dataset]):
     def __getitem__(self, i: slice) -> SpatialDataCohort: ...
     def __getitem__(self, i: int | slice) -> Dataset | SpatialDataCohort:
         if isinstance(i, slice):
-            return SpatialDataCohort(self._df.iloc[i], matched=self.matched, source=self._source)
+            return SpatialDataCohort(self._df.iloc[i], matched=self.matched, source=self._source, filter=self._filter)
         return Dataset(self._df.iloc[i])
 
     def __iter__(self) -> Iterator[Dataset]:
