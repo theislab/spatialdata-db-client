@@ -15,6 +15,8 @@ from sddb.dataset import Source
 if TYPE_CHECKING:
     from anndata import AnnData
 
+    from sddb.split import SplitManifest
+
 SCHEMA_VERSION = "1"
 _SIDECAR_THRESHOLD = 200  # members beyond this go to a parquet sidecar
 
@@ -49,6 +51,12 @@ class FrozenCohort:
         from sddb.concat import concat_tables
 
         return concat_tables(self.members, table=table, verify=verify)
+
+    def split(self, **kw: Any) -> SplitManifest:
+        """Group-safe deterministic split of this cohort; the manifest records ``self.hash`` as ``parent_hash``."""
+        from sddb.split import make_split
+
+        return make_split(self.members, self.hash, **kw)
 
     def write(self, path: str | Path) -> Path:
         """Write JSON to ``path`` (members go to a parquet sidecar when large); return the path."""
