@@ -53,10 +53,11 @@ def query(
     technology: str | None = None,
     tier: str | None = None,
     validation: Annotated[str, typer.Option(help="'pass' (default) or 'all'.")] = "pass",
-    expressing: Annotated[
-        str | None, typer.Option(help="Keep datasets expressing this gene symbol (downloads the gene index once).")
+    gene: Annotated[
+        list[str] | None,
+        typer.Option("--gene", "--expressing", help="Gene symbol or Ensembl id; repeat to require all (downloads the gene index once)."),
     ] = None,
-    min_fraction: Annotated[float | None, typer.Option(help="With --expressing: min fraction_obs_detected.")] = None,
+    min_fraction: Annotated[float | None, typer.Option(help="With --gene: min fraction_obs_detected.")] = None,
     search: Annotated[str | None, typer.Option(help="Free-text search over facet values.")] = None,
     min_obs: Annotated[int | None, typer.Option(help="Keep datasets with n_obs >= this.")] = None,
     min_features: Annotated[int | None, typer.Option(help="Keep datasets with n_features >= this.")] = None,
@@ -70,7 +71,8 @@ def query(
     try:
         cat = Catalog(catalog)
         res = cat.query(
-            validation=val, search=search, expressing=expressing, min_fraction=min_fraction, **facets, **ranges
+            validation=val, search=search, expressing=gene or None, mode="all", min_fraction=min_fraction,
+            **facets, **ranges
         )
     except Exception as err:
         raise _fail(err) from err
@@ -160,20 +162,29 @@ def viewer_url(uid: str, catalog: _CatalogOpt = None) -> None:
 
 @app.command()
 def genes(
-    symbol: Annotated[str, typer.Argument(help="Gene symbol (case-insensitive).")],
+    genes: Annotated[list[str], typer.Argument(help="Gene symbol(s) or Ensembl id(s), case-insensitive.")],
     limit: Annotated[int, typer.Option(help="Max datasets to list.")] = 20,
+    validation: Annotated[str, typer.Option(help="'all' (default, includes bronze) or 'pass'.")] = "all",
     catalog: _CatalogOpt = None,
 ) -> None:
-    """List datasets expressing SYMBOL, ranked by fraction of observations detected.
+    """List datasets expressing all GENES (one gene: ranked by fraction of observations detected).
 
     The first call downloads the cross-dataset gene index (~105 MB, one-time; cached afterwards).
     """
+    val = _validation(validation)
     try:
-        df = Catalog(catalog).genes.ranked(symbol).head(limit)
+        cat = Catalog(catalog)
+        flags = [c for c in ("validation_status", "tier") if c in cat.to_df().columns]
+        if len(genes) == 1:
+            df = cat.genes.ranked(genes[0], validation=val).head(limit)
+            df = df.merge(cat.to_df()[["uid", *flags]], on="uid", how="left")
+        else:
+            df = cat.genes.where_expressed(genes, mode="all", validation=val).to_df().head(limit)
+            df = df[[c for c in (*_COLS, *flags) if c in df.columns]]
     except Exception as err:
         raise _fail(RuntimeError(f"could not load the gene index: {err}")) from err
     if df.empty:
-        typer.echo(f"no datasets express {symbol!r}", err=True)
+        typer.echo(f"no datasets express {' + '.join(genes)!r}", err=True)
         return
     _print_table(list(df.columns), [[_fmt(v) for v in r] for r in df.itertuples(index=False)])
 

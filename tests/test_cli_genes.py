@@ -12,7 +12,7 @@ runner = CliRunner()
 
 
 class _FakeIndex:
-    def ranked(self, symbol):
+    def ranked(self, symbol, validation=None):
         return pd.DataFrame(
             {
                 "uid": ["uid0002", "uid0001", "uid0003"],

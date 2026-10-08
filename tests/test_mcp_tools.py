@@ -55,10 +55,38 @@ def test_describe_tool_remote_failure_and_missing(cat_url):
         tools.describe_tool("nope", cat_url)
 
 
+def _uids(rows):
+    return {r["uid"] for r in rows}
+
+
 def test_genes_tool(cat_url):
-    rows = tools.genes_tool("epcam", cat_url)
-    assert {r["uid"] for r in rows} == {"uid0001", "uid0002", "uid0005"}
+    rows = tools.genes_tool(["epcam"], catalog_url=cat_url)
+    assert _uids(rows) == {"uid0001", "uid0002", "uid0005"}
     assert json.loads(json.dumps(rows)) == rows
+    assert _uids(tools.genes_tool("epcam", catalog_url=cat_url)) == _uids(rows)  # bare string tolerated
+
+
+def test_genes_tool_symbol_and_ensembl_agree(cat_url):
+    assert _uids(tools.genes_tool(["ENSG00000119888"], catalog_url=cat_url)) == _uids(
+        tools.genes_tool(["EPCAM"], catalog_url=cat_url)
+    )
+
+
+def test_genes_tool_modes(cat_url):
+    assert _uids(tools.genes_tool(["EPCAM", "KRT8"], catalog_url=cat_url)) == {"uid0001"}
+    assert _uids(tools.genes_tool(["EPCAM", "PTPRC"], mode="all", catalog_url=cat_url)) == {"uid0002"}
+    assert _uids(tools.genes_tool(["KRT8", "PTPRC"], mode="any", catalog_url=cat_url)) == {"uid0001", "uid0002"}
+
+
+def test_genes_tool_bronze_default(cat_url):
+    assert _uids(tools.genes_tool(["Alb"], catalog_url=cat_url)) == {"uid0004"}  # validation "fail" row
+    assert tools.genes_tool(["Alb"], include_bronze=False, catalog_url=cat_url) == []
+
+
+def test_genes_tool_facets_compose(cat_url):
+    rows = tools.genes_tool(["EPCAM"], tissue="lung", catalog_url=cat_url)
+    assert _uids(rows) == {"uid0001"}
+    assert _uids(tools.genes_tool(["EPCAM"], organism="mouse", catalog_url=cat_url)) == set()
 
 
 def test_server_registers_tools():
@@ -197,3 +225,24 @@ def test_server_query_forwards_new_params(monkeypatch):
     assert seen["organism"] == "human"
     assert "min_obs" not in seen
     assert "n_features__gte" not in seen
+
+
+def test_server_genes_forwards(monkeypatch):
+    import sddb.mcp.server as server
+
+    seen = {}
+    monkeypatch.setattr(tools, "genes_tool", lambda symbols, **kw: seen.update(symbols=symbols, **kw) or [])
+    registered = {}
+
+    class FakeServer:
+        def __init__(self, name): ...
+        def tool(self, name, description=""):
+            def deco(fn):
+                registered[name] = fn
+                return fn
+            return deco
+
+    monkeypatch.setattr(server, "_server_class", lambda: FakeServer)
+    server.build_server()
+    registered["genes"](["EPCAM", "CD3D"], tissue="lung", mode="any", include_bronze=False)
+    assert seen == {"symbols": ["EPCAM", "CD3D"], "mode": "any", "include_bronze": False, "tissue": "lung"}

@@ -82,9 +82,28 @@ def describe_tool(uid: str, catalog_url: str | None = None) -> dict[str, Any]:
     return row
 
 
-def genes_tool(symbol: str, catalog_url: str | None = None) -> list[dict[str, Any]]:
-    """Return catalog rows of datasets whose gene index contains ``symbol``."""
-    return _records(Catalog(catalog_url).genes.datasets_with(symbol).to_df())
+def genes_tool(
+    symbols: list[str],
+    organism: str | None = None,
+    tissue: str | None = None,
+    disease: str | None = None,
+    assay: str | None = None,
+    mode: str = "all",
+    include_bronze: bool = True,
+    catalog_url: str | None = None,
+) -> list[dict[str, Any]]:
+    """Catalog rows of datasets expressing ``symbols`` (symbols or Ensembl ids; ``mode`` all/any).
+
+    Bronze/non-pass datasets are included by default (``include_bronze=False`` keeps only validated ones);
+    ``organism``/``tissue``/``disease``/``assay`` narrow the result.
+    """
+    if isinstance(symbols, str):
+        symbols = [symbols]
+    facets = {k: v for k, v in (("organism", organism), ("tissue", tissue), ("disease", disease), ("assay", assay)) if v is not None}
+    cohort = Catalog(catalog_url).query(
+        expressing=symbols, mode=mode, validation=None if include_bronze else "pass", **facets
+    )
+    return _records(cohort.to_df())
 
 
 def facets_tool(field: str | None = None, catalog_url: str | None = None) -> list[str]:
