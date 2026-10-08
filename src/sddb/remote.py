@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -43,7 +48,13 @@ def _is_remote(url: str) -> bool:
     return url.startswith(("s3://", "http://", "https://"))
 
 
-def open_sdata(zarr_url: str, *, lazy: bool = True, cache_dir: str | Path | None = None) -> SpatialData:
+def open_sdata(
+    zarr_url: str,
+    *,
+    lazy: bool = True,
+    elements: list[str] | None = None,
+    cache_dir: str | Path | None = None,
+) -> SpatialData:
     """Open a SpatialData zarr from a URL or local path, anonymously.
 
     Parameters
@@ -54,6 +65,9 @@ def open_sdata(zarr_url: str, *, lazy: bool = True, cache_dir: str | Path | None
         If True, open a *local* store in place (dask-backed). Not supported for remote URLs
         (``s3://``, ``http(s)://``): spatialdata's remote ``read_zarr`` is broken upstream. If False,
         copy the store (remote or local) into the cache directory and open the local copy.
+    elements
+        Element paths (``"<kind>/<name>"``) to localize; only these are copied and opened. ``None``
+        opens the whole store. Requires ``lazy=False``.
     cache_dir
         Cache directory override (only used when ``lazy=False``).
 
@@ -70,6 +84,11 @@ def open_sdata(zarr_url: str, *, lazy: bool = True, cache_dir: str | Path | None
     """
     from spatialdata import read_zarr
 
+    if elements is not None:
+        if lazy:
+            raise NotImplementedError("elements= requires lazy=False (a partial store is always copied)")
+        dest = _localize_to_cache(zarr_url, list(elements), _cache_dir(cache_dir))
+        return read_zarr(dest)
     if lazy and _is_remote(zarr_url):
         raise NotImplementedError(
             f"Remote lazy/partial open is not supported ({zarr_url!r}): blocked by a spatialdata upstream "
@@ -104,6 +123,88 @@ def _copy_to_cache(zarr_url: str, dest_root: Path) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     fs.get(root.rstrip("/") + "/", str(dest) + "/", recursive=True)
     return dest
+
+
+def _prune_consolidated(dest: Path, kept: set[str]) -> None:
+    """Prune the store's consolidated metadata so dropped elements are not referenced.
+
+    ``kept`` contains kept kind nodes (``"images"``) and kept element nodes (``"images/<name>"``).
+    Handles the zarr-v3 root ``zarr.json`` form here; the v2 ``.zmetadata`` form is handled in Task 3.
+    """
+    zj = dest / "zarr.json"
+    if zj.exists():
+        doc = json.loads(zj.read_text())
+        cm = doc.get("consolidated_metadata")
+        if isinstance(cm, dict) and isinstance(cm.get("metadata"), dict):
+            cm["metadata"] = {k: v for k, v in cm["metadata"].items() if k in kept}
+            zj.write_text(json.dumps(doc, indent=2))
+
+
+def _localize_to_cache(zarr_url: str, elements: list[str], dest_root: Path) -> Path:
+    """Copy only ``elements`` (``"kind/name"``) + store metadata into a subset-keyed cache dir, pruned."""
+    paths = sorted(set(elements))
+    if not paths:
+        raise ValueError("pass element paths in `elements`, or None for the whole store")
+    stem = zarr_url.rstrip("/").rsplit("/", 1)[-1]
+    stem = stem[:-5] if stem.endswith(".zarr") else stem
+    subset = hashlib.sha1("\n".join(paths).encode()).hexdigest()[:12]  # cache key, not security
+    dest = dest_root / f"{stem}__{subset}.zarr"
+
+    fs, root = fsspec.core.url_to_fs(zarr_url, **storage_options(zarr_url))
+    if not fs.exists(root):
+        raise FileNotFoundError(zarr_url)
+    root = root.rstrip("/")
+    kinds: dict[str, list[tuple[str, str]]] = {}
+    for rel in paths:
+        kind, _, name = rel.partition("/")
+        if not name:
+            raise ValueError(f"element path must be 'kind/name', got {rel!r}")
+        kinds.setdefault(kind, []).append((name, rel))
+
+    if dest.exists() and _localized_complete(dest, paths):
+        return dest
+
+    dest_root.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix=f"{stem}.partial-", dir=dest_root))
+    try:
+        for name in ("zarr.json", ".zattrs", ".zgroup", ".zmetadata", "zmetadata"):
+            src = f"{root}/{name}"
+            if fs.exists(src):
+                fs.get(src, str(tmp / name))
+        for kind, members in kinds.items():
+            (tmp / kind).mkdir(exist_ok=True)
+            for name in ("zarr.json", ".zattrs", ".zgroup"):
+                src = f"{root}/{kind}/{name}"
+                if fs.exists(src):
+                    fs.get(src, str(tmp / kind / name))
+            for name, rel in members:
+                srcdir = f"{root}/{kind}/{name}"
+                if not fs.exists(srcdir):
+                    # `elements` is shadowed by the parameter; list siblings straight from the filesystem.
+                    present = sorted(
+                        str(p).rstrip("/").rsplit("/", 1)[-1] for p in fs.ls(f"{root}/{kind}", detail=False)
+                    )
+                    raise FileNotFoundError(f"element {rel!r} not in store {zarr_url!r}; {kind} present: {present}")
+                fs.get(srcdir + "/", str(tmp / kind / name) + "/", recursive=True)
+        _prune_consolidated(tmp, set(paths) | set(kinds))
+        _assert_localized_complete(tmp, paths)
+        if dest.exists():
+            shutil.rmtree(dest)
+        os.replace(tmp, dest)  # atomic on the same filesystem
+        return dest
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+
+
+def _localized_complete(dest: Path, paths: list[str]) -> bool:
+    return all((dest / p).is_dir() and any((dest / p).iterdir()) for p in paths)
+
+
+def _assert_localized_complete(dest: Path, paths: list[str]) -> None:
+    missing = [p for p in paths if not ((dest / p).is_dir() and any((dest / p).iterdir()))]
+    if missing:
+        raise OSError(f"incomplete localized store at {dest}: missing {missing}")
 
 
 def _describe(node: zarr.Array[Any] | zarr.Group, kind: str) -> dict[str, Any]:
