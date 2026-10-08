@@ -267,3 +267,23 @@ def test_open_member_verifies_then_opens(vhd_store, tmp_path, monkeypatch):
     sdata = fc.open_member("u1", elements=["tables/square_008um"])
     assert calls == ["verify", "open"]
     assert set(sdata.tables) == {"square_008um"}
+
+
+@pytest.mark.network
+def test_localize_oliveira_excludes_2um(tmp_path):
+    # Real Oliveira Visium HD store: localizing 8um + H&E must not download the 8.1M-row 2um table.
+    import sddb
+
+    cat = sddb.Catalog()
+    url = cat.to_df().set_index("uid").loc["4OgPqTscrYc4veqE0000", "zarr_url"]
+    roles = [
+        {"role": "image", "select": "full_image"},
+        {"role": "table", "select": "square_008um"},
+        {"role": "shapes", "select": "square_008um"},
+    ]
+    paths = adapter._resolve_elements(url, roles)
+    sdata = remote.open_sdata(url, lazy=False, elements=paths, cache_dir=tmp_path)
+    assert "square_002um" not in sdata.tables
+    assert any("square_008um" in t for t in sdata.tables)
+    cached = next(tmp_path.glob("*.zarr"))
+    assert not list(cached.glob("tables/*002um*"))  # 2um subtree never copied
