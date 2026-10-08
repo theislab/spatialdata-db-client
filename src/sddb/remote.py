@@ -136,7 +136,8 @@ def _prune_consolidated(dest: Path, kept: set[str]) -> None:
         doc = json.loads(zj.read_text())
         cm = doc.get("consolidated_metadata")
         if isinstance(cm, dict) and isinstance(cm.get("metadata"), dict):
-            cm["metadata"] = {k: v for k, v in cm["metadata"].items() if k in kept}
+            prefixes = tuple(e + "/" for e in kept if "/" in e)  # element nodes only; kind nodes would keep everything
+            cm["metadata"] = {k: v for k, v in cm["metadata"].items() if k in kept or k.startswith(prefixes)}
             zj.write_text(json.dumps(doc, indent=2))
 
 
@@ -181,8 +182,9 @@ def _localize_to_cache(zarr_url: str, elements: list[str], dest_root: Path) -> P
                 srcdir = f"{root}/{kind}/{name}"
                 if not fs.exists(srcdir):
                     # `elements` is shadowed by the parameter; list siblings straight from the filesystem.
+                    listed = (str(p).rstrip("/").rsplit("/", 1)[-1] for p in fs.ls(f"{root}/{kind}", detail=False))
                     present = sorted(
-                        str(p).rstrip("/").rsplit("/", 1)[-1] for p in fs.ls(f"{root}/{kind}", detail=False)
+                        n for n in listed if not n.startswith(".") and not n.endswith((".json", ".zattrs", ".zgroup"))
                     )
                     raise FileNotFoundError(f"element {rel!r} not in store {zarr_url!r}; {kind} present: {present}")
                 fs.get(srcdir + "/", str(tmp / kind / name) + "/", recursive=True)
@@ -190,7 +192,9 @@ def _localize_to_cache(zarr_url: str, elements: list[str], dest_root: Path) -> P
         _assert_localized_complete(tmp, paths)
         if dest.exists():
             shutil.rmtree(dest)
-        os.replace(tmp, dest)  # atomic on the same filesystem
+        os.replace(
+            tmp, dest
+        )  # replace is atomic, but the preceding rmtree(dest) + replace pair (stale dest only) is not
         return dest
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)

@@ -58,6 +58,11 @@ def test_open_elements_subset(vhd_store, tmp_path):
 def test_open_elements_prunes_consolidated(vhd_store, tmp_path):
     out = remote.open_sdata(str(vhd_store), lazy=False, elements=KEEP, cache_dir=tmp_path / "c")
     assert "s_hires_image" not in out.images
+    (loc,) = (tmp_path / "c").glob("vhd__*.zarr")
+    keys = set(json.loads((loc / "zarr.json").read_text())["consolidated_metadata"]["metadata"])
+    dropped = ("images/s_hires_image", "tables/square_002um", "shapes/s_square_016um")
+    assert not [k for k in keys if k.startswith(dropped)]
+    assert any(k.startswith("tables/square_008um/") for k in keys)
 
 
 def test_open_elements_missing_path_raises(vhd_store, tmp_path):
