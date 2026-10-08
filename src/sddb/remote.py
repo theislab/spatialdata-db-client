@@ -87,8 +87,12 @@ def open_sdata(
     if elements is not None:
         if lazy:
             raise NotImplementedError("elements= requires lazy=False (a partial store is always copied)")
-        dest = _localize_to_cache(zarr_url, list(elements), _cache_dir(cache_dir))
-        return read_zarr(dest)
+        try:
+            return read_zarr(_localize_to_cache(zarr_url, list(elements), _cache_dir(cache_dir)))
+        except (FileNotFoundError, ValueError, NotImplementedError):
+            raise
+        except Exception as e:
+            raise FileNotFoundError(f"Cannot open SpatialData zarr at {zarr_url!r}: {e}") from e
     if lazy and _is_remote(zarr_url):
         raise NotImplementedError(
             f"Remote lazy/partial open is not supported ({zarr_url!r}): blocked by a spatialdata upstream "
@@ -111,17 +115,30 @@ def _open_group(zarr_url: str) -> zarr.Group:
     return zarr.open_group(zarr_url, mode="r", storage_options=storage_options(zarr_url) or None)
 
 
-def _copy_to_cache(zarr_url: str, dest_root: Path) -> Path:
-    """Copy a (remote or local) store to ``dest_root/<basename>.zarr`` and return the path."""
-    name = zarr_url.rstrip("/").rsplit("/", 1)[-1]
-    if not name.endswith(".zarr"):
-        name += ".zarr"
-    dest = dest_root / name
+def _open_fs(zarr_url: str) -> tuple[Any, str]:
     fs, root = fsspec.core.url_to_fs(zarr_url, **storage_options(zarr_url))
     if not fs.exists(root):
         raise FileNotFoundError(zarr_url)
+    return fs, root.rstrip("/")
+
+
+def _store_stem(zarr_url: str) -> str:
+    stem = zarr_url.rstrip("/").rsplit("/", 1)[-1]
+    return stem[:-5] if stem.endswith(".zarr") else stem
+
+
+def _copy_meta(fs: Any, src_dir: str, dest_dir: Path, names: tuple[str, ...]) -> None:
+    for name in names:
+        if fs.exists(f"{src_dir}/{name}"):
+            fs.get(f"{src_dir}/{name}", str(dest_dir / name))
+
+
+def _copy_to_cache(zarr_url: str, dest_root: Path) -> Path:
+    """Copy a (remote or local) store to ``dest_root/<basename>.zarr`` and return the path."""
+    dest = dest_root / f"{_store_stem(zarr_url)}.zarr"
+    fs, root = _open_fs(zarr_url)
     dest.mkdir(parents=True, exist_ok=True)
-    fs.get(root.rstrip("/") + "/", str(dest) + "/", recursive=True)
+    fs.get(root + "/", str(dest) + "/", recursive=True)
     return dest
 
 
@@ -168,18 +185,14 @@ def _localize_to_cache(zarr_url: str, elements: list[str], dest_root: Path) -> P
     paths = sorted(set(elements))
     if not paths:
         raise ValueError("pass element paths in `elements`, or None for the whole store")
-    stem = zarr_url.rstrip("/").rsplit("/", 1)[-1]
-    stem = stem[:-5] if stem.endswith(".zarr") else stem
-    subset = hashlib.sha1("\n".join(paths).encode()).hexdigest()[:12]  # cache key, not security
-    dest = dest_root / f"{stem}__{subset}.zarr"
+    stem = _store_stem(zarr_url)
+    key = zarr_url.rstrip("/") + "\n" + "\n".join(paths)
+    dest = dest_root / f"{stem}__{hashlib.sha1(key.encode()).hexdigest()[:12]}.zarr"  # cache key, not security
 
-    fs, root = fsspec.core.url_to_fs(zarr_url, **storage_options(zarr_url))
-    if not fs.exists(root):
-        raise FileNotFoundError(zarr_url)
-    root = root.rstrip("/")
-    if dest.exists() and _localized_complete(dest, paths):  # reuse keyed on the ORIGINAL request
+    fs, root = _open_fs(zarr_url)
+    if dest.exists() and not _missing(dest, paths):  # keyed on the request, before region closure
         return dest
-    paths = sorted(set(_close_region(fs, root, paths)))  # dest stays keyed on the pre-closure request
+    paths = sorted(set(_close_region(fs, root, paths)))
     kinds: dict[str, list[tuple[str, str]]] = {}
     for rel in paths:
         kind, _, name = rel.partition("/")
@@ -190,20 +203,13 @@ def _localize_to_cache(zarr_url: str, elements: list[str], dest_root: Path) -> P
     dest_root.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix=f"{stem}.partial-", dir=dest_root))
     try:
-        for name in ("zarr.json", ".zattrs", ".zgroup", ".zmetadata", "zmetadata"):
-            src = f"{root}/{name}"
-            if fs.exists(src):
-                fs.get(src, str(tmp / name))
+        _copy_meta(fs, root, tmp, ("zarr.json", ".zattrs", ".zgroup", ".zmetadata", "zmetadata"))
         for kind, members in kinds.items():
             (tmp / kind).mkdir(exist_ok=True)
-            for name in ("zarr.json", ".zattrs", ".zgroup"):
-                src = f"{root}/{kind}/{name}"
-                if fs.exists(src):
-                    fs.get(src, str(tmp / kind / name))
+            _copy_meta(fs, f"{root}/{kind}", tmp / kind, ("zarr.json", ".zattrs", ".zgroup"))
             for name, rel in members:
                 srcdir = f"{root}/{kind}/{name}"
                 if not fs.exists(srcdir):
-                    # `elements` is shadowed by the parameter; list siblings straight from the filesystem.
                     listed = (str(p).rstrip("/").rsplit("/", 1)[-1] for p in fs.ls(f"{root}/{kind}", detail=False))
                     present = sorted(
                         n for n in listed if not n.startswith(".") and not n.endswith((".json", ".zattrs", ".zgroup"))
@@ -214,9 +220,7 @@ def _localize_to_cache(zarr_url: str, elements: list[str], dest_root: Path) -> P
         _assert_localized_complete(tmp, paths)
         if dest.exists():
             shutil.rmtree(dest)
-        os.replace(
-            tmp, dest
-        )  # replace is atomic, but the preceding rmtree(dest) + replace pair (stale dest only) is not
+        os.replace(tmp, dest)  # atomic swap into place
         return dest
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -244,7 +248,7 @@ def _close_region(fs: Any, root: str, paths: list[str]) -> list[str]:
                 attrs = doc.get("attributes", doc)  # v3 nests under "attributes"
                 # spatialdata 0.8 stores `region` directly in the table attrs; older stores nest it
                 region = attrs.get("region") or (attrs.get("spatialdata_attrs") or {}).get("region")
-            except Exception:
+            except (OSError, json.JSONDecodeError):
                 continue  # unreadable metadata: leave this table's region unclosed (documented fallback)
             regions = region if isinstance(region, list) else ([region] if region else [])
             for rname in regions:
@@ -257,13 +261,12 @@ def _close_region(fs: Any, root: str, paths: list[str]) -> list[str]:
     return out
 
 
-def _localized_complete(dest: Path, paths: list[str]) -> bool:
-    return all((dest / p).is_dir() and any((dest / p).iterdir()) for p in paths)
+def _missing(dest: Path, paths: list[str]) -> list[str]:
+    return [p for p in paths if not ((dest / p).is_dir() and any((dest / p).iterdir()))]
 
 
 def _assert_localized_complete(dest: Path, paths: list[str]) -> None:
-    missing = [p for p in paths if not ((dest / p).is_dir() and any((dest / p).iterdir()))]
-    if missing:
+    if missing := _missing(dest, paths):
         raise OSError(f"incomplete localized store at {dest}: missing {missing}")
 
 

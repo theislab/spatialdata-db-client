@@ -101,17 +101,12 @@ def test_cache_full_then_partial_no_collision(vhd_store, tmp_path):
 
 def test_partial_copy_atomic_on_failure(vhd_store, tmp_path, monkeypatch):
     cache = tmp_path / "cache"
-    orig = remote._prune_consolidated
-    calls = {"n": 0}
 
     def boom(dest, kept):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise RuntimeError("simulated mid-build failure")
-        return orig(dest, kept)
+        raise RuntimeError("simulated mid-build failure")
 
     monkeypatch.setattr(remote, "_prune_consolidated", boom)
-    with pytest.raises(RuntimeError, match="simulated"):
+    with pytest.raises(FileNotFoundError, match="simulated"):  # wrapped per the open_sdata contract
         remote.open_sdata(str(vhd_store), lazy=False, elements=KEEP, cache_dir=cache)
     assert not list(cache.glob("vhd__*.zarr"))
     assert not list(cache.glob("vhd.partial-*"))
@@ -322,3 +317,72 @@ def test_localize_oliveira_excludes_2um(tmp_path):
     assert any("square_008um" in t for t in sdata.tables)
     cached = next(tmp_path.glob("*.zarr"))
     assert not list(cached.glob("tables/*002um*"))  # 2um subtree never copied
+
+
+def test_same_basename_stores_get_distinct_cache_dirs(tmp_path):
+    cache = tmp_path / "cache"
+    got = {}
+    for tag, n in (("a", 5), ("b", 9)):
+        store = tmp_path / tag / "data.zarr"
+        sd.SpatialData(shapes={"s": _shapes(n)}).write(store)
+        got[tag] = remote.open_sdata(str(store), lazy=False, elements=["shapes/s"], cache_dir=cache)
+    assert len(got["a"].shapes["s"]) == 5
+    assert len(got["b"].shapes["s"]) == 9
+    assert len(list(cache.glob("data__*.zarr"))) == 2
+
+
+def test_open_elements_partial_store_error_names_url(vhd_store, tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("bad read")
+
+    monkeypatch.setattr(sd, "read_zarr", boom)
+    with pytest.raises(FileNotFoundError, match="Cannot open SpatialData zarr.*bad read"):
+        remote.open_sdata(str(vhd_store), lazy=False, elements=KEEP, cache_dir=tmp_path / "c")
+
+
+def test_resolve_elements_role_canonicalization(vhd_store):
+    url = str(vhd_store)
+    for role, want in [
+        ("shape", "shapes/s_square_008um"),
+        ("shapes", "shapes/s_square_008um"),
+        ("image", "images/s_full_image"),
+        ("images", "images/s_full_image"),
+        ("table", "tables/square_008um"),
+    ]:
+        select = "full_image" if "image" in role else "square_008um"
+        assert adapter._resolve_elements(url, [{"role": role, "select": select}]) == [want]
+
+
+class _NoRequirementsAdapter:
+    name, version, config = "noreq", "0", {}
+
+    def validate_meta(self, meta):
+        return []
+
+    def validate(self, sdata):
+        return []
+
+    def build(self, sdata):
+        return sorted(sdata.tables)
+
+
+def test_open_adapter_without_requirements(vhd_store, tmp_path, monkeypatch):
+    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
+    sdata = adapter._open(str(vhd_store), _NoRequirementsAdapter())
+    assert "square_002um" in sdata.tables  # whole store
+
+
+class _FakeTableOnlyAdapter(_FakeAdapter):
+    def requirements(self):
+        return {"elements": [{"role": "table", "select": "square_008um"}]}
+
+    def validate(self, sdata):
+        return []
+
+
+def test_provenance_reflects_region_closure(vhd_store, tmp_path, monkeypatch):
+    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
+    out = tmp_path / "prov"
+    adapter.build(_members_df(vhd_store), _FakeTableOnlyAdapter(), materialize=True, out=out, verify=False)
+    prov = json.loads((out / "provenance.json").read_text())
+    assert prov["members"][0]["elements"] == ["shapes/s_square_008um", "tables/square_008um"]

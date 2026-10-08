@@ -13,6 +13,7 @@ from typing import Any, Protocol, runtime_checkable
 import pandas as pd
 
 import sddb
+from sddb import remote
 from sddb.concat import _table_name
 from sddb.objectmeta import ObjectMeta, fetch_many
 
@@ -59,14 +60,15 @@ class PreflightReport:
         return "\n".join(lines)
 
 
+_ELEMENT_KINDS = remote._ELEMENT_KINDS
+
+
 def _metas(members: pd.DataFrame, **kw: Any) -> list[ObjectMeta]:
     return fetch_many([(str(r.uid), str(r.zarr_url)) for r in members.itertuples(index=False)], **kw)
 
 
-_ROLE_KIND = {"image": "images", "table": "tables"}  # role -> inventory kind; others are already plural
-
-
 def _match(name: str, select: str, how: str) -> bool:
+    """exact/suffix/substring are case-insensitive; regex uses the pattern's own flags."""
     n, s = name.lower(), select.lower()
     if how == "exact":
         return n == s
@@ -79,13 +81,19 @@ def _match(name: str, select: str, how: str) -> bool:
     raise ValueError(f"unknown match mode {how!r}")
 
 
+def _sdata_elements(sdata: Any) -> list[str]:
+    """Sorted ``"kind/name"`` of every element present in an opened SpatialData."""
+    return sorted(f"{kind}/{name}" for kind in _ELEMENT_KINDS for name in getattr(sdata, kind))
+
+
 def _resolve_elements(url: str, roles: list[dict[str, Any]]) -> list[str]:
     from sddb.remote import elements as _elements
 
     inv = _elements(url)  # {"kind/name": {...}}
     resolved: list[str] = []
     for role in roles:
-        kind = _ROLE_KIND.get(role["role"], role["role"])
+        kind = role["role"]
+        kind = kind if kind in _ELEMENT_KINDS else kind + "s"  # image -> images, shape -> shapes, ...
         select, how = role["select"], role.get("match", "suffix")
         hits = [p for p in inv if p.split("/", 1)[0] == kind and _match(p.split("/", 1)[1], select, how)]
         if len(hits) == 1:
@@ -100,8 +108,8 @@ def _resolve_elements(url: str, roles: list[dict[str, Any]]) -> list[str]:
 def _open(url: str, adapter_obj: TaskAdapter) -> Any:
     from sddb.remote import open_sdata
 
-    reqs = adapter_obj.requirements() or {}
-    roles = reqs.get("elements")
+    req = getattr(adapter_obj, "requirements", None)
+    roles = ((req() if callable(req) else {}) or {}).get("elements")
     if not roles:
         return open_sdata(url, lazy=False)
     return open_sdata(url, lazy=False, elements=_resolve_elements(url, roles))
@@ -172,18 +180,20 @@ def build(
         return view
     out_dir = Path(out or ".")
     out_dir.mkdir(parents=True, exist_ok=True)
-    tables = {str(r.uid): _table_name(r) for r in members.itertuples(index=False)}
-    url_by_uid = {str(r.uid): str(r.zarr_url) for r in members.itertuples(index=False)}
     reqs = adapter.requirements() or {}
     roles = reqs.get("elements")
-
-    def _resolved(url: str) -> list[str] | None:
-        return sorted(_resolve_elements(url, roles)) if roles else None
-
-    produced = [
-        {"uid": uid, "table": tables[uid], "output": type(fn()).__name__, "elements": _resolved(url_by_uid[uid])}
-        for uid, fn in view
-    ]
+    produced = []
+    for r in members.itertuples(index=False):
+        sdata = _open(str(r.zarr_url), adapter)
+        out_item = adapter.build(sdata)
+        produced.append(
+            {
+                "uid": str(r.uid),
+                "table": _table_name(r),
+                "output": type(out_item).__name__,
+                "elements": _sdata_elements(sdata) if roles else None,
+            }
+        )
     split_id = (
         None
         if split is None
