@@ -118,3 +118,43 @@ def test_partial_copy_atomic_on_failure(vhd_store, tmp_path, monkeypatch):
     monkeypatch.undo()
     out = remote.open_sdata(str(vhd_store), lazy=False, elements=KEEP, cache_dir=cache)
     assert set(out.tables) == {"square_008um"}
+
+
+def test_prune_zmetadata_v2(tmp_path):
+    import json
+
+    from sddb.remote import _prune_consolidated
+
+    dest = tmp_path / "v2.zarr"
+    (dest / "images" / "keep" / "s0").mkdir(parents=True)
+    (dest / "images" / "drop").mkdir(parents=True)
+    zmeta = {
+        "zarr_consolidated_format": 1,
+        "metadata": {
+            ".zgroup": {"zarr_format": 2},
+            "images/.zgroup": {"zarr_format": 2},
+            "images/keep/.zgroup": {"zarr_format": 2},
+            "images/keep/s0/.zarray": {"shape": [3, 4, 4]},
+            "images/drop/.zgroup": {"zarr_format": 2},
+            "images/drop/.zarray": {"shape": [3, 2, 2]},
+        },
+    }
+    (dest / ".zmetadata").write_text(json.dumps(zmeta))
+    _prune_consolidated(dest, {"images", "images/keep"})
+    out = json.loads((dest / ".zmetadata").read_text())["metadata"]
+    assert "images/keep/s0/.zarray" in out
+    assert not any(k.startswith("images/drop") for k in out)
+    assert "images/.zgroup" in out
+    assert ".zgroup" in out
+
+
+def test_prune_zmetadata_unknown_form_rejected(tmp_path):
+    import pytest
+
+    from sddb.remote import _prune_consolidated
+
+    dest = tmp_path / "bad.zarr"
+    dest.mkdir()
+    (dest / ".zmetadata").write_text('{"weird": 1}')
+    with pytest.raises(NotImplementedError):
+        _prune_consolidated(dest, {"images", "images/keep"})

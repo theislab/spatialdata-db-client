@@ -129,7 +129,7 @@ def _prune_consolidated(dest: Path, kept: set[str]) -> None:
     """Prune the store's consolidated metadata so dropped elements are not referenced.
 
     ``kept`` contains kept kind nodes (``"images"``) and kept element nodes (``"images/<name>"``).
-    Handles the zarr-v3 root ``zarr.json`` form here; the v2 ``.zmetadata`` form is handled in Task 3.
+    Handles the zarr-v3 root ``zarr.json`` form and the zarr-v2 root ``.zmetadata`` form.
     """
     zj = dest / "zarr.json"
     if zj.exists():
@@ -139,6 +139,28 @@ def _prune_consolidated(dest: Path, kept: set[str]) -> None:
             prefixes = tuple(e + "/" for e in kept if "/" in e)  # element nodes only; kind nodes would keep everything
             cm["metadata"] = {k: v for k, v in cm["metadata"].items() if k in kept or k.startswith(prefixes)}
             zj.write_text(json.dumps(doc, indent=2))
+
+    zm = dest / ".zmetadata"
+    if zm.exists():
+        zdoc = json.loads(zm.read_text())
+        md = zdoc.get("metadata")
+        if not isinstance(md, dict):
+            raise NotImplementedError(f"unrecognized consolidated form in {zm}")
+        zdoc["metadata"] = {k: v for k, v in md.items() if _zm_key_kept(k, kept)}
+        zm.write_text(json.dumps(zdoc))
+
+
+def _zm_key_kept(key: str, kept: set[str]) -> bool:
+    """Keep a ``.zmetadata`` entry iff its node is a kept kind group or under a kept element."""
+    head, _, leaf = key.rpartition("/")
+    node = head if leaf.startswith(".z") else key
+    if not node:  # root ".zgroup"/".zattrs"
+        return True
+    parts = node.split("/")
+    kinds = {k for k in kept if "/" not in k}
+    if parts[0] not in kinds:
+        return parts[0] in kept
+    return len(parts) == 1 or f"{parts[0]}/{parts[1]}" in kept
 
 
 def _localize_to_cache(zarr_url: str, elements: list[str], dest_root: Path) -> Path:
