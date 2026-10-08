@@ -120,10 +120,13 @@ def build_server() -> Any:
         description="Filter datasets by facets, ranges (min_obs/min_features), gene (expressing) and free-text search.",
     )(query)
     server.tool(name="describe", description="Catalog row and element shapes for one dataset uid.")(describe)
-    server.tool(name="genes", description=(
+    server.tool(
+        name="genes",
+        description=(
             "Datasets expressing one or more genes (symbols or Ensembl ids; mode all=AND, any=union), "
             "optionally filtered by organism/tissue/disease/assay. Bronze datasets are included by default."
-        ),)(genes)
+        ),
+    )(genes)
     server.tool(name="facets", description="List facet columns, or the distinct values of a facet field.")(facets)
     server.tool(name="cite", description="BibTeX for the studies of a filtered cohort.")(cite)
     server.tool(name="download", description="Plan (sizes) or fetch a filtered cohort to the server download dir.")(download_cohort)

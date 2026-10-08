@@ -205,6 +205,8 @@ class Catalog:
             If a keyword is not a facet or range column, a facet column is absent from the loaded catalog,
             a range value is not numeric, or ``min_fraction`` is given without ``expressing``.
         """
+        if mode not in ("all", "any"):
+            raise ValueError(f"mode must be 'all' or 'any', got {mode!r}")
         if min_fraction is not None and expressing is None:
             raise ValueError("min_fraction requires expressing=<gene>")
         equality, ranges = _split_facets(facets)

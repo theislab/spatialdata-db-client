@@ -173,12 +173,14 @@ def genes(
     """
     val = _validation(validation)
     try:
-        index = Catalog(catalog).genes
+        cat = Catalog(catalog)
+        flags = [c for c in ("validation_status", "tier") if c in cat.to_df().columns]
         if len(genes) == 1:
-            df = index.ranked(genes[0], validation=val).head(limit)
+            df = cat.genes.ranked(genes[0], validation=val).head(limit)
+            df = df.merge(cat.to_df()[["uid", *flags]], on="uid", how="left")
         else:
-            df = index.where_expressed(genes, mode="all", validation=val).to_df().head(limit)
-            df = df[[c for c in _COLS if c in df.columns]]
+            df = cat.genes.where_expressed(genes, mode="all", validation=val).to_df().head(limit)
+            df = df[[c for c in (*_COLS, *flags) if c in df.columns]]
     except Exception as err:
         raise _fail(RuntimeError(f"could not load the gene index: {err}")) from err
     if df.empty:

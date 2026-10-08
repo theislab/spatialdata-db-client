@@ -109,11 +109,11 @@ class GeneIndex:
         """Per-dataset ``uid``, ``fraction_obs_detected``, ``total_counts`` for ``symbol``, best detection first.
 
         The per-dataset detection profile for ``symbol``. Filters as in :meth:`where_expressed`; one row per
-        catalog dataset (max over matching features). Matches by symbol only (not Ensembl id) — for
-        id-based or multi-gene membership use :meth:`where_expressed`.
+        catalog dataset (max over matching features). ``symbol`` may be a symbol or an Ensembl feature id.
         """
         df = self._df
-        mask = df["symbol"].str.casefold() == symbol.casefold()
+        key = symbol.strip().casefold()
+        mask = ((self._sym == key) | (self._fid == key)).fillna(False).astype(bool)
         if min_fraction is not None:
             mask &= df["fraction_obs_detected"] >= min_fraction
         cols = ["uid", "fraction_obs_detected", "total_counts"]

@@ -118,6 +118,20 @@ def test_genes_multi_gene_and_validation(tmp_path):
     assert "uid0004" not in r.output
 
 
+def test_genes_ensembl_id_matches_symbol_and_flags_bronze(tmp_path):
+    cat = write_fixture_catalog(tmp_path / "catalog.parquet")
+    write_fixture_gene_index(tmp_path / "gene_index.parquet")
+    by_sym = runner.invoke(app, ["genes", "EPCAM", "--catalog", cat.as_uri()])
+    by_id = runner.invoke(app, ["genes", "ENSG00000119888", "--catalog", cat.as_uri()])
+    assert by_id.exit_code == 0, by_id.output
+    assert by_id.output == by_sym.output and "uid0001" in by_id.output
+    assert "validation_status" in by_id.output
+    bronze = runner.invoke(app, ["genes", "Alb", "--catalog", cat.as_uri()])
+    assert "fail" in bronze.output
+    multi = runner.invoke(app, ["genes", "EPCAM", "KRT8", "--catalog", cat.as_uri()])
+    assert "validation_status" in multi.output and "tier" in multi.output
+
+
 def test_query_min_obs_excludes_smaller(cat_url):
     r = runner.invoke(app, ["query", "--catalog", cat_url, "--organism", "human"])
     assert "uid0005" in r.output  # n_obs=4200, present without the flag

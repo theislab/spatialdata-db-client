@@ -265,6 +265,12 @@ def test_query_expressing_validation_mask_not_doubled(tmp_path):
     assert [d.uid for d in cat.query(expressing=["Alb"], validation=None)] == ["uid0004"]
 
 
+def test_query_bad_mode_errors(tmp_path):
+    cat = _cat_genes(tmp_path)
+    with pytest.raises(ValueError, match="mode must be"):
+        cat.query(mode="anyy")
+
+
 def test_query_expressing_min_fraction(tmp_path):
     cat = _cat_genes(tmp_path)
     assert [d.uid for d in cat.query(expressing="EPCAM", min_fraction=0.35)] == ["uid0001"]
