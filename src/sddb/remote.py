@@ -238,11 +238,14 @@ def _close_region(fs: Any, root: str, paths: list[str]) -> list[str]:
         for meta in (f"{root}/tables/{name}/zarr.json", f"{root}/tables/{name}/.zattrs"):
             if not fs.exists(meta):
                 continue
-            with fs.open(meta) as fh:
-                doc = json.load(fh)
-            attrs = doc.get("attributes", doc)  # v3 nests under "attributes"
-            # spatialdata 0.8 stores `region` directly in the table attrs; older stores nest it
-            region = attrs.get("region") or (attrs.get("spatialdata_attrs") or {}).get("region")
+            try:
+                with fs.open(meta) as fh:
+                    doc = json.load(fh)
+                attrs = doc.get("attributes", doc)  # v3 nests under "attributes"
+                # spatialdata 0.8 stores `region` directly in the table attrs; older stores nest it
+                region = attrs.get("region") or (attrs.get("spatialdata_attrs") or {}).get("region")
+            except Exception:
+                continue  # unreadable metadata: leave this table's region unclosed (documented fallback)
             regions = region if isinstance(region, list) else ([region] if region else [])
             for rname in regions:
                 for rkind in ("shapes", "labels"):

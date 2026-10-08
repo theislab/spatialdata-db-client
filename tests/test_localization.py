@@ -244,6 +244,41 @@ def test_build_provenance_records_elements(vhd_store, tmp_path, monkeypatch):
     assert member["elements"] == ["images/s_full_image", "shapes/s_square_008um", "tables/square_008um"]
 
 
+class _Fake002Adapter(_FakeAdapter):
+    def requirements(self):
+        return {"elements": [
+            {"role": "image", "select": "full_image"},
+            {"role": "table", "select": "square_002um"},
+            {"role": "shapes", "select": "square_002um"},
+        ]}
+
+    def validate(self, sdata):
+        return []
+
+
+def test_provenance_differs_by_element_selector(vhd_store, tmp_path, monkeypatch):
+    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
+    members = _members_df(vhd_store)
+    out_a, out_b = tmp_path / "prov_a", tmp_path / "prov_b"
+    adapter.build(members, _FakeAdapter(), materialize=True, out=out_a, verify=False)
+    adapter.build(members, _Fake002Adapter(), materialize=True, out=out_b, verify=False)
+    a = json.loads((out_a / "provenance.json").read_text())
+    b = json.loads((out_b / "provenance.json").read_text())
+    assert a["members"][0]["elements"] == ["images/s_full_image", "shapes/s_square_008um", "tables/square_008um"]
+    assert b["members"][0]["elements"] == ["images/s_full_image", "shapes/s_square_002um", "tables/square_002um"]
+    assert a["members"][0]["elements"] != b["members"][0]["elements"]
+    assert a["requirements"]["elements"] != b["requirements"]["elements"]
+
+
+def test_close_region_tolerates_corrupt_table_metadata(tmp_path):
+    import fsspec
+
+    (tmp_path / "tables" / "t").mkdir(parents=True)
+    (tmp_path / "tables" / "t" / "zarr.json").write_text("{not json")
+    fs = fsspec.filesystem("file")
+    assert remote._close_region(fs, str(tmp_path), ["tables/t"]) == ["tables/t"]
+
+
 def test_open_member_verifies_then_opens(vhd_store, tmp_path, monkeypatch):
     monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
     import sddb.freeze as fz
