@@ -7,7 +7,7 @@ from tests._fixtures import make_fixture_catalog, write_fixture_catalog, write_f
 
 from sddb._cache import catalog_cache_path, fetch_catalog
 from sddb.catalog import Catalog
-from sddb.dataset import Results
+from sddb.cohort import SpatialDataCohort
 
 
 @pytest.fixture
@@ -69,7 +69,7 @@ def test_search(cat):
     assert "technology" in res.matched or "assay" in res.matched
     with pytest.warns(UserWarning, match="nothing matched"):
         none = cat.search("zzzznope")
-    assert isinstance(none, Results)
+    assert isinstance(none, SpatialDataCohort)
     assert len(none) == 0
     assert none.matched == {}
 

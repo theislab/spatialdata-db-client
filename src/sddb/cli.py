@@ -11,7 +11,7 @@ from rapidfuzz import fuzz, process
 
 from sddb.catalog import Catalog, facet_values
 from sddb.citations import parse_bibtex
-from sddb.dataset import Results
+from sddb.cohort import SpatialDataCohort
 
 app = typer.Typer(help="Query and download spatialdata-db datasets.", no_args_is_help=True, add_completion=False)
 
@@ -122,12 +122,12 @@ def facets(
     typer.echo("\n".join(cols))
 
 
-def _resolve(cat: Catalog, uids: list[str]) -> Results:
+def _resolve(cat: Catalog, uids: list[str]) -> SpatialDataCohort:
     df = cat.to_df()
     missing = [u for u in uids if u not in set(df["uid"])]
     if missing:
         raise ValueError(f"uid(s) not in catalog: {missing}")
-    return Results(df[df["uid"].isin(uids)], source=cat._source())
+    return SpatialDataCohort(df[df["uid"].isin(uids)], source=cat._source())
 
 
 @app.command()

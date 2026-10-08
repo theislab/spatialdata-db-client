@@ -8,7 +8,7 @@ import pandas as pd
 
 from sddb import _catalog_schema as schema
 from sddb._cache import fetch_catalog
-from sddb.dataset import Results
+from sddb.cohort import SpatialDataCohort
 
 if TYPE_CHECKING:
     from sddb.catalog import Catalog
@@ -44,8 +44,8 @@ class GeneIndex:
 
     def where_expressed(
         self, symbol: str, *, min_fraction: float | None = None, validation: str | None = "pass"
-    ) -> Results:
-        """Catalog datasets expressing ``symbol`` (case-insensitive), as a Results.
+    ) -> SpatialDataCohort:
+        """Catalog datasets expressing ``symbol`` (case-insensitive), as a SpatialDataCohort.
 
         Parameters
         ----------
@@ -58,7 +58,7 @@ class GeneIndex:
         """
         uids = set(self.ranked(symbol, min_fraction=min_fraction, validation=validation)["uid"])
         cat = self._catalog_df(validation)
-        return Results(cat[cat["uid"].isin(uids)], source=self._catalog._source())
+        return SpatialDataCohort(cat[cat["uid"].isin(uids)], source=self._catalog._source())
 
     datasets_with = where_expressed  # backward-compatible alias (MCP + existing callers)
 

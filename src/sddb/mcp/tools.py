@@ -11,7 +11,8 @@ import pandas as pd
 import platformdirs
 
 from sddb.catalog import Catalog, facet_values
-from sddb.dataset import Dataset, Results
+from sddb.cohort import SpatialDataCohort
+from sddb.dataset import Dataset
 from sddb.manifest import plan_sizes
 
 MAX_ROWS = 200
@@ -30,7 +31,7 @@ def _query(
     min_fraction: float | None = None,
     search: str | None = None,
     **facets: Any,
-) -> Results:
+) -> SpatialDataCohort:
     """Shared filter path for the MCP tools: one Catalog.query call with the WP-A surface."""
     return Catalog(catalog_url).query(
         validation=None if validation == "all" else validation,

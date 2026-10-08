@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from tests._fixtures import make_fixture_catalog
 
-from sddb.dataset import Results
+from sddb.cohort import SpatialDataCohort
 
 
 def test_load_remote_lazy_gives_helpful_error(monkeypatch):
@@ -24,7 +24,7 @@ def test_load_remote_lazy_gives_helpful_error(monkeypatch):
     # Create a dataset with a remote zarr URL
     df = make_fixture_catalog().iloc[:1].copy()
     df["zarr_url"] = "s3://bucket/some.zarr"
-    d = Results(df)[0]
+    d = SpatialDataCohort(df)[0]
 
     # Call load(lazy=True) on the remote dataset
     with pytest.raises(NotImplementedError) as exc_info:
