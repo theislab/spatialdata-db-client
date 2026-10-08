@@ -119,3 +119,76 @@ def test_backcompat_single_shape(tmp_path):
     g = _stub_genes(tmp_path)
     a, b = g.where_expressed("EPCAM").to_df(), g.datasets_with("EPCAM").to_df()
     assert list(a.columns) == list(b.columns) and list(a["uid"]) == list(b["uid"])
+
+
+# ---------------------------------------------------------------------------
+# Cross-surface consistency guard (spec §3, shared canonical rules).
+#
+# The fixture below and the expected memberships in CANONICAL_MEMBERSHIP are the
+# SHARED expectation that sub-project A's engine tests also encode
+# (build_gene_entities / build_gene_search in the spatialdata-db repo). The web
+# consumes A's compact artifact and the client queries gene_index.parquet directly;
+# both must agree on gene -> dataset membership. This is a client-side guard: it
+# does NOT import engine code. A change to the canonical rules (spec §3: Ensembl-keyed
+# entities, symbol-keyed legacy entities, AND = intersection, bronze included by
+# default and flagged, validation="pass" restricts) MUST break BOTH repos' tests.
+#
+# Shared fixture (nullable "string" dtypes so pd.NA is a real missing feature_id):
+#   EPCAM / ENSG1      in {uid0001, uid0003}     Ensembl-keyed, several datasets
+#   CD3D  / ENSG2      in {uid0001, uid0004}     uid0004 is BRONZE (validation "fail")
+#   MALAT1 / <NA>      in {uid0002}              legacy symbol-only -> sym:malat1 entity
+# ---------------------------------------------------------------------------
+
+CANONICAL_MEMBERSHIP = {
+    # symbol and Ensembl id resolve to the same entity -> same uid set
+    "EPCAM": {"uid0001", "uid0003"},
+    "ENSG1": {"uid0001", "uid0003"},
+    # multi-gene AND = intersection; OR = union
+    "AND(EPCAM,CD3D)": {"uid0001"},
+    "OR(EPCAM,CD3D)": {"uid0001", "uid0003", "uid0004"},
+    # bronze: present by default (flagged), excluded under validation="pass"
+    "CD3D": {"uid0001", "uid0004"},
+    "CD3D@pass": {"uid0001"},
+    # legacy symbol-only gene (NA feature_id) resolves by its symbol
+    "MALAT1": {"uid0002"},
+}
+
+
+def _canonical_gene_index():
+    import pandas as pd
+
+    rows = [
+        ("EPCAM", "ENSG1", "uid0001", 5000.0, 0.4),
+        ("EPCAM", "ENSG1", "uid0003", 3000.0, 0.3),
+        ("CD3D", "ENSG2", "uid0001", 900.0, 0.5),
+        ("CD3D", "ENSG2", "uid0004", 120.0, 0.2),  # bronze: uid0004 validation_status "fail"
+        ("MALAT1", pd.NA, "uid0002", 50.0, 0.9),  # legacy symbol-only row
+    ]
+    df = pd.DataFrame(rows, columns=["symbol", "feature_id", "uid", "total_counts", "fraction_obs_detected"])
+    return df.astype(
+        {"symbol": "string", "feature_id": "string", "uid": "string", "total_counts": "Float64",
+         "fraction_obs_detected": "Float64"}
+    )
+
+
+def test_cross_surface_canonical_membership(tmp_path):
+    """Client membership equals the canonical expectation shared with A's engine tests (spec §3)."""
+    cat_p = write_fixture_catalog(tmp_path / "catalog.parquet")
+    df = _canonical_gene_index()
+    assert df["feature_id"].isna().sum() == 1  # legacy row is a real pd.NA
+    df.to_parquet(tmp_path / "gene_index.parquet")
+    g = Catalog(cat_p.as_uri(), cache_dir=tmp_path / "cache").genes
+
+    # symbol and Ensembl id -> same entity
+    assert _uids(g.where_expressed("EPCAM")) == sorted(CANONICAL_MEMBERSHIP["EPCAM"])
+    assert _uids(g.where_expressed("ENSG1")) == sorted(CANONICAL_MEMBERSHIP["ENSG1"])
+    # multi-gene AND / OR
+    assert _uids(g.where_expressed(["EPCAM", "CD3D"], mode="all")) == sorted(CANONICAL_MEMBERSHIP["AND(EPCAM,CD3D)"])
+    assert _uids(g.where_expressed(["EPCAM", "CD3D"], mode="any")) == sorted(CANONICAL_MEMBERSHIP["OR(EPCAM,CD3D)"])
+    # bronze: default includes and flags; validation="pass" excludes
+    assert _uids(g.where_expressed("CD3D")) == sorted(CANONICAL_MEMBERSHIP["CD3D"])
+    cd3d = g.where_expressed("CD3D").to_df().set_index("uid")
+    assert cd3d.loc["uid0004", "validation_status"] == "fail"
+    assert _uids(g.where_expressed("CD3D", validation="pass")) == sorted(CANONICAL_MEMBERSHIP["CD3D@pass"])
+    # legacy symbol-only gene resolves by symbol
+    assert _uids(g.where_expressed("MALAT1")) == sorted(CANONICAL_MEMBERSHIP["MALAT1"])
