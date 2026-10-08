@@ -14,6 +14,7 @@ from sddb.dataset import Source
 
 if TYPE_CHECKING:
     from anndata import AnnData
+    from spatialdata import SpatialData
 
     from sddb.split import SplitManifest
 
@@ -51,6 +52,17 @@ class FrozenCohort:
         from sddb.concat import concat_tables
 
         return concat_tables(self.members, table=table, verify=verify)
+
+    def open_member(self, uid: str, *, elements: list[str] | None = None, verify: bool = True) -> SpatialData:
+        """Localize+open one member's store. Verifies the member's fingerprint first (verify-on-read)."""
+        from sddb.remote import open_sdata
+
+        row = self.members[self.members["uid"].astype(str) == str(uid)]
+        if row.empty:
+            raise KeyError(f"uid {uid!r} not in this cohort")
+        if verify:
+            verify_members(row)
+        return open_sdata(str(row.iloc[0]["zarr_url"]), lazy=False, elements=elements)
 
     def split(
         self, *, by: str = "study_id", train: float, val: float, test: float, seed: int, mode: str = "group"

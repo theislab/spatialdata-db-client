@@ -242,3 +242,28 @@ def test_build_provenance_records_elements(vhd_store, tmp_path, monkeypatch):
     assert prov["requirements"]["elements"][0]["role"] == "image"
     member = prov["members"][0]
     assert member["elements"] == ["images/s_full_image", "shapes/s_square_008um", "tables/square_008um"]
+
+
+def test_open_member_verifies_then_opens(vhd_store, tmp_path, monkeypatch):
+    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
+    import sddb.freeze as fz
+    import sddb.remote as rem
+    from sddb.dataset import Source
+    from sddb.freeze import FrozenCohort
+
+    members = _members_df(vhd_store)
+    fc = FrozenCohort("1", "2026-10-08T00:00:00Z", Source(url=None, version=None), {}, "sha256:x", members)
+
+    calls = []
+    monkeypatch.setattr(fz, "verify_members", lambda m, **k: calls.append("verify"))
+    _orig = rem.open_sdata
+
+    def spy(*a, **k):
+        calls.append("open")
+        return _orig(*a, **k)
+
+    monkeypatch.setattr(rem, "open_sdata", spy)
+
+    sdata = fc.open_member("u1", elements=["tables/square_008um"])
+    assert calls == ["verify", "open"]
+    assert set(sdata.tables) == {"square_008um"}
