@@ -198,3 +198,37 @@ def test_resolve_elements_ambiguous_raises(vhd_store):
 def test_resolve_elements_missing_raises(vhd_store):
     with pytest.raises(ValueError, match="no element"):
         adapter._resolve_elements(str(vhd_store), [{"role": "image", "select": "nope"}])
+
+
+class _FakeAdapter:
+    name, version, config = "fake", "0", {}
+
+    def requirements(self):
+        return {"elements": [
+            {"role": "image", "select": "full_image"},
+            {"role": "table", "select": "square_008um"},
+            {"role": "shapes", "select": "square_008um"},
+        ]}
+
+    def validate_meta(self, meta):
+        return []
+
+    def validate(self, sdata):
+        return [] if set(sdata.tables) == {"square_008um"} else ["wrong tables"]
+
+    def build(self, sdata):
+        return sorted(sdata.tables)
+
+
+def _members_df(vhd_store):
+    return pd.DataFrame([{
+        "uid": "u1", "zarr_url": str(vhd_store), "lamin_version": "1", "fingerprint": "fp",
+    }])
+
+
+def test_build_localizes_from_requirements(vhd_store, tmp_path, monkeypatch):
+    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
+    from sddb import adapter
+    view = adapter.build(_members_df(vhd_store), _FakeAdapter(), verify=False)
+    uid, thunk = view[0]
+    assert thunk() == ["square_008um"]

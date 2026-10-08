@@ -97,10 +97,14 @@ def _resolve_elements(url: str, roles: list[dict[str, Any]]) -> list[str]:
     return resolved
 
 
-def _open(url: str) -> Any:
+def _open(url: str, adapter_obj: TaskAdapter) -> Any:
     from sddb.remote import open_sdata
 
-    return open_sdata(url, lazy=False)
+    reqs = adapter_obj.requirements() or {}
+    roles = reqs.get("elements")
+    if not roles:
+        return open_sdata(url, lazy=False)
+    return open_sdata(url, lazy=False, elements=_resolve_elements(url, roles))
 
 
 def check(members: pd.DataFrame, adapter: TaskAdapter, *, deep: bool = False) -> PreflightReport:
@@ -108,7 +112,7 @@ def check(members: pd.DataFrame, adapter: TaskAdapter, *, deep: bool = False) ->
     excluded: dict[Issue, list[str]] = {}
     compatible = 0
     if deep:
-        pairs = [(str(r.uid), adapter.validate(_open(str(r.zarr_url)))) for r in members.itertuples(index=False)]
+        pairs = [(str(r.uid), adapter.validate(_open(str(r.zarr_url), adapter))) for r in members.itertuples(index=False)]
         tier = "authoritative"
     else:
         pairs = [(m.uid, adapter.validate_meta(m)) for m in _metas(members)]
@@ -161,7 +165,7 @@ def build(
         verify_members(members)
 
     def thunk(url: str) -> Callable[[], Any]:
-        return lambda: adapter.build(_open(url))
+        return lambda: adapter.build(_open(url, adapter))
 
     view = TaskView([(str(r.uid), thunk(str(r.zarr_url))) for r in members.itertuples(index=False)])
     if not materialize:

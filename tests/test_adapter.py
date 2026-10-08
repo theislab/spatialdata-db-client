@@ -45,7 +45,7 @@ def test_check_advisory_tier_counts_and_reasons(monkeypatch):
 
 def test_check_deep_uses_authoritative_validate(monkeypatch):
     members = pd.DataFrame({"uid": ["a"], "zarr_url": ["za"], "fingerprint": ["x"]})
-    monkeypatch.setattr("sddb.adapter._open", lambda url: object())
+    monkeypatch.setattr("sddb.adapter._open", lambda url, a: object())
     rep = check(members, FakeAdapter(), deep=True)
     assert rep.tier == "authoritative"
     assert rep.compatible == 1
@@ -56,7 +56,7 @@ def _members():
 
 
 def test_build_materialize_writes_provenance(tmp_path, monkeypatch):
-    monkeypatch.setattr("sddb.adapter._open", lambda url: object())  # skip real sdata open
+    monkeypatch.setattr("sddb.adapter._open", lambda url, a: object())  # skip real sdata open
     build(_members(), FakeAdapter(), materialize=True, out=tmp_path, verify=False, cohort_hash="h")
     prov = json.loads((tmp_path / "provenance.json").read_text())
     assert prov["cohort_hash"] == "h"
@@ -68,7 +68,7 @@ def test_build_materialize_writes_provenance(tmp_path, monkeypatch):
 
 
 def test_build_lazy_opens_nothing(monkeypatch):
-    def boom(url):
+    def boom(url, a):
         raise AssertionError("opened")
 
     monkeypatch.setattr("sddb.adapter._open", boom)
@@ -83,7 +83,7 @@ def test_build_split_parent_hash_mismatch_raises():
 
 
 def test_build_split_match_records_split_identity(tmp_path, monkeypatch):
-    monkeypatch.setattr("sddb.adapter._open", lambda url: object())
+    monkeypatch.setattr("sddb.adapter._open", lambda url, a: object())
     split = SimpleNamespace(parent_hash="h", by="study_id", seed=7, ratios={"train": 0.8}, mode="group")
     build(_members(), FakeAdapter(), split=split, materialize=True, out=tmp_path, verify=False, cohort_hash="h")
     prov = json.loads((tmp_path / "provenance.json").read_text())
@@ -96,7 +96,7 @@ def test_build_split_match_records_split_identity(tmp_path, monkeypatch):
 def test_build_verify_runs_before_open(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr("sddb.freeze.verify_members", lambda m, **k: calls.append("verify"))
-    monkeypatch.setattr("sddb.adapter._open", lambda url: calls.append("open") or object())
+    monkeypatch.setattr("sddb.adapter._open", lambda url, a: calls.append("open") or object())
     build(_members(), FakeAdapter(), materialize=True, out=tmp_path, verify=True, cohort_hash="h")
     assert calls == ["verify", "open"]
 
@@ -104,7 +104,7 @@ def test_build_verify_runs_before_open(tmp_path, monkeypatch):
 def test_build_verify_false_skips_verify(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr("sddb.freeze.verify_members", lambda m, **k: calls.append("verify"))
-    monkeypatch.setattr("sddb.adapter._open", lambda url: calls.append("open") or object())
+    monkeypatch.setattr("sddb.adapter._open", lambda url, a: calls.append("open") or object())
     build(_members(), FakeAdapter(), materialize=True, out=tmp_path, verify=False, cohort_hash="h")
     assert "verify" not in calls
     assert calls == ["open"]
