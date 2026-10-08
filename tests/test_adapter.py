@@ -64,7 +64,7 @@ def test_build_materialize_writes_provenance(tmp_path, monkeypatch):
     assert prov["created_at"]
     assert prov["adapter"] == {"name": "fake", "version": "0.1", "config": {"k": 1}}
     assert "sddb_version" in prov
-    assert prov["members"][0] == {"uid": "a", "table": "table", "output": "dict"}
+    assert prov["members"][0] == {"uid": "a", "table": "table", "output": "dict", "elements": None}
 
 
 def test_build_lazy_opens_nothing(monkeypatch):

@@ -173,7 +173,17 @@ def build(
     out_dir = Path(out or ".")
     out_dir.mkdir(parents=True, exist_ok=True)
     tables = {str(r.uid): _table_name(r) for r in members.itertuples(index=False)}
-    produced = [{"uid": uid, "table": tables[uid], "output": type(fn()).__name__} for uid, fn in view]
+    url_by_uid = {str(r.uid): str(r.zarr_url) for r in members.itertuples(index=False)}
+    reqs = adapter.requirements() or {}
+    roles = reqs.get("elements")
+
+    def _resolved(url: str) -> list[str] | None:
+        return sorted(_resolve_elements(url, roles)) if roles else None
+
+    produced = [
+        {"uid": uid, "table": tables[uid], "output": type(fn()).__name__, "elements": _resolved(url_by_uid[uid])}
+        for uid, fn in view
+    ]
     split_id = (
         None
         if split is None
@@ -187,6 +197,7 @@ def build(
                 "split": split_id,
                 "adapter": {"name": adapter.name, "version": adapter.version, "config": adapter.config},
                 "sddb_version": sddb.__version__,
+                "requirements": reqs,
                 "members": produced,
             },
             indent=2,

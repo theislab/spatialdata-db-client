@@ -232,3 +232,13 @@ def test_build_localizes_from_requirements(vhd_store, tmp_path, monkeypatch):
     view = adapter.build(_members_df(vhd_store), _FakeAdapter(), verify=False)
     uid, thunk = view[0]
     assert thunk() == ["square_008um"]
+
+
+def test_build_provenance_records_elements(vhd_store, tmp_path, monkeypatch):
+    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
+    out = tmp_path / "prov"
+    adapter.build(_members_df(vhd_store), _FakeAdapter(), materialize=True, out=out, verify=False)
+    prov = json.loads((out / "provenance.json").read_text())
+    assert prov["requirements"]["elements"][0]["role"] == "image"
+    member = prov["members"][0]
+    assert member["elements"] == ["images/s_full_image", "shapes/s_square_008um", "tables/square_008um"]
