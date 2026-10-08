@@ -165,7 +165,8 @@ class Catalog:
         license_set: bool | None = None,
         noncommercial: bool | None = None,
         search: str | None = None,
-        expressing: str | None = None,
+        expressing: str | list[str] | None = None,
+        mode: str = "all",
         min_fraction: float | None = None,
         **facets: str | float | list[str] | tuple[str, ...] | set[str],
     ) -> SpatialDataCohort:
@@ -186,8 +187,10 @@ class Catalog:
             still imposes its own ``validation_status == "pass"`` filter unless ``validation_status``
             was itself matched, so failed rows do not survive a ``search``.
         expressing
-            Gene symbol; keep datasets where it is expressed (see ``genes.ranked``). The first use
-            downloads the gene index (~142 MB, cached).
+            Gene symbol or Ensembl id, or a list of them; keep datasets where they are expressed (see
+            ``genes.where_expressed``). The first use downloads the gene index (~142 MB, cached).
+        mode
+            With several ``expressing`` genes: ``"all"`` (default, AND) or ``"any"`` (union).
         min_fraction
             Minimum fraction of expressing cells for ``expressing``; requires ``expressing``.
         **facets
@@ -203,7 +206,7 @@ class Catalog:
             a range value is not numeric, or ``min_fraction`` is given without ``expressing``.
         """
         if min_fraction is not None and expressing is None:
-            raise ValueError("min_fraction requires expressing=<symbol>")
+            raise ValueError("min_fraction requires expressing=<gene>")
         equality, ranges = _split_facets(facets)
         bad = [k for k in equality if k not in schema.FACETS]
         if bad:
@@ -241,14 +244,15 @@ class Catalog:
             matched = hits.matched or None
             keep &= df["uid"].isin(hits.to_df()["uid"])
         if expressing is not None and keep.any():  # skip the ~142 MB gene index when nothing is left to filter
-            ranked = self.genes.ranked(expressing, min_fraction=min_fraction, validation=validation)
-            keep &= df["uid"].isin(ranked["uid"])
+            member = self.genes.where_expressed(expressing, mode=mode, min_fraction=min_fraction, validation=None)
+            keep &= df["uid"].isin(set(member.to_df()["uid"]))
         params: dict[str, Any] = {
             "validation": validation,
             "license_set": license_set,
             "noncommercial": noncommercial,
             "search": search,
             "expressing": expressing,
+            "mode": mode if expressing is not None else None,
             "min_fraction": min_fraction,
         }
         flt = {k: v for k, v in params.items() if v is not None}

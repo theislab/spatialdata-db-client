@@ -55,8 +55,19 @@ def build_server() -> Any:
     def describe(uid: str) -> dict[str, Any]:
         return tools.describe_tool(uid)
 
-    def genes(symbol: str) -> list[dict[str, Any]]:
-        return tools.genes_tool(symbol)
+    def genes(
+        symbols: list[str],
+        organism: str | None = None,
+        tissue: str | None = None,
+        disease: str | None = None,
+        assay: str | None = None,
+        mode: str = "all",
+        include_bronze: bool = True,
+    ) -> list[dict[str, Any]]:
+        return tools.genes_tool(
+            symbols, mode=mode, include_bronze=include_bronze,
+            **_drop_none(organism=organism, tissue=tissue, disease=disease, assay=assay),
+        )
 
     def facets(field: str | None = None) -> list[str]:
         return tools.facets_tool(field)
@@ -109,7 +120,10 @@ def build_server() -> Any:
         description="Filter datasets by facets, ranges (min_obs/min_features), gene (expressing) and free-text search.",
     )(query)
     server.tool(name="describe", description="Catalog row and element shapes for one dataset uid.")(describe)
-    server.tool(name="genes", description="Datasets whose gene index contains a gene symbol.")(genes)
+    server.tool(name="genes", description=(
+            "Datasets expressing one or more genes (symbols or Ensembl ids; mode all=AND, any=union), "
+            "optionally filtered by organism/tissue/disease/assay. Bronze datasets are included by default."
+        ),)(genes)
     server.tool(name="facets", description="List facet columns, or the distinct values of a facet field.")(facets)
     server.tool(name="cite", description="BibTeX for the studies of a filtered cohort.")(cite)
     server.tool(name="download", description="Plan (sizes) or fetch a filtered cohort to the server download dir.")(download_cohort)

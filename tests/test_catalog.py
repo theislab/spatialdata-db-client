@@ -251,6 +251,20 @@ def test_query_expressing(tmp_path):
     assert sorted(d.uid for d in cat.query(organism="human", expressing="EPCAM")) == ["uid0001", "uid0002", "uid0005"]
 
 
+def test_query_expressing_multi_gene(tmp_path):
+    cat = _cat_genes(tmp_path)
+    assert [d.uid for d in cat.query(expressing=["EPCAM", "KRT8"])] == ["uid0001"]
+    assert sorted(d.uid for d in cat.query(expressing=["KRT8", "PTPRC"], mode="any")) == ["uid0001", "uid0002"]
+    assert [d.uid for d in cat.query(expressing=["ENSG00000119888", "krt8"])] == ["uid0001"]
+    assert cat.query(expressing=["EPCAM", "KRT8"], mode="any")._filter["mode"] == "any"
+
+
+def test_query_expressing_validation_mask_not_doubled(tmp_path):
+    cat = _cat_genes(tmp_path)
+    assert len(cat.query(expressing=["Alb"])) == 0  # default validation="pass" drops the failing row
+    assert [d.uid for d in cat.query(expressing=["Alb"], validation=None)] == ["uid0004"]
+
+
 def test_query_expressing_min_fraction(tmp_path):
     cat = _cat_genes(tmp_path)
     assert [d.uid for d in cat.query(expressing="EPCAM", min_fraction=0.35)] == ["uid0001"]
