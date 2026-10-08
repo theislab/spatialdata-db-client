@@ -125,3 +125,28 @@ def test_fixture_is_row_count_agnostic():
         cs.validate(make_fixture_catalog())
     finally:
         _fixtures._ROWS = orig
+
+
+def test_new_producer_columns_present_and_typed():
+    # donor_id + database_version are part of the contract, as nullable strings.
+    assert cs.CATALOG_COLUMNS["donor_id"] == "string"
+    assert cs.CATALOG_COLUMNS["database_version"] == "string"
+    assert "donor_id" not in cs.REQUIRED_COLUMNS
+    assert "database_version" not in cs.REQUIRED_COLUMNS
+    assert "donor_id" not in cs.FACETS
+    assert "database_version" not in cs.FACETS
+
+
+def test_new_producer_columns_validate_populated_and_null(tmp_path):
+    df = make_fixture_catalog()
+    df["donor_id"] = ["donor-1"] * len(df)
+    df["database_version"] = ["0.0.11"] * len(df)
+    df = cs.cast_scalars(df, cs.CATALOG_COLUMNS)
+    assert cs.validate(df) is None  # populated
+    df["donor_id"] = pd.NA
+    df["database_version"] = pd.NA
+    df = cs.cast_scalars(df, cs.CATALOG_COLUMNS)
+    assert cs.validate(df) is None  # all-null tolerated (not required)
+    p = tmp_path / "c.parquet"
+    df.to_parquet(p)
+    cs.validate(pd.read_parquet(p))  # round-trips

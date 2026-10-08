@@ -64,6 +64,8 @@ CATALOG_COLUMNS: dict[str, str] = {
     "ftu_annotation": "boolean",
     "publication_date": "string",
     "sample_id": "string",
+    "donor_id": "string",
+    "database_version": "string",
     "sddb_id": "string",
     "disease_details": "string",
     "default_table": "string",
