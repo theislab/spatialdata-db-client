@@ -10,7 +10,7 @@ from geopandas import GeoDataFrame
 from shapely.geometry import Point
 from spatialdata.models import Image2DModel, ShapesModel, TableModel
 
-from sddb import remote
+from sddb import adapter, remote
 
 
 def _shapes(n):
@@ -165,3 +165,36 @@ def test_region_closure_autoincludes(vhd_store, tmp_path):
     out = remote.open_sdata(str(vhd_store), lazy=False, elements=["tables/square_008um"], cache_dir=tmp_path / "c")
     assert "s_square_008um" in out.shapes  # auto-included
     assert out.tables["square_008um"].obs["region"].cat.categories.tolist() == ["s_square_008um"]
+
+
+def test_resolve_elements_one_each(vhd_store):
+    roles = [
+        {"role": "image", "select": "full_image"},
+        {"role": "table", "select": "square_008um"},
+        {"role": "shapes", "select": "square_008um"},
+    ]
+    got = adapter._resolve_elements(str(vhd_store), roles)
+    assert sorted(got) == ["images/s_full_image", "shapes/s_square_008um", "tables/square_008um"]
+
+
+def test_resolve_elements_suffix_rejects_sibling(tmp_path):
+    # suffix "square_016um" must NOT also match "square_016um_for_vitessce"
+    store = tmp_path / "s.zarr"
+    sd.SpatialData(
+        shapes={
+            "a_square_016um": _shapes(5),
+            "a_square_016um_for_vitessce": _shapes(5),
+        }
+    ).write(store)
+    got = adapter._resolve_elements(str(store), [{"role": "shapes", "select": "square_016um"}])
+    assert got == ["shapes/a_square_016um"]
+
+
+def test_resolve_elements_ambiguous_raises(vhd_store):
+    with pytest.raises(ValueError, match="matched 3"):
+        adapter._resolve_elements(str(vhd_store), [{"role": "table", "select": "um", "match": "substring"}])
+
+
+def test_resolve_elements_missing_raises(vhd_store):
+    with pytest.raises(ValueError, match="no element"):
+        adapter._resolve_elements(str(vhd_store), [{"role": "image", "select": "nope"}])

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -60,6 +61,40 @@ class PreflightReport:
 
 def _metas(members: pd.DataFrame, **kw: Any) -> list[ObjectMeta]:
     return fetch_many([(str(r.uid), str(r.zarr_url)) for r in members.itertuples(index=False)], **kw)
+
+
+_ROLE_KIND = {"image": "images", "table": "tables"}  # role -> inventory kind; others are already plural
+
+
+def _match(name: str, select: str, how: str) -> bool:
+    n, s = name.lower(), select.lower()
+    if how == "exact":
+        return n == s
+    if how == "suffix":  # anchored: `square_016um` must not catch `square_016um_for_vitessce`
+        return n == s or (n.endswith(s) and not n[len(n) - len(s) - 1].isalnum())
+    if how == "substring":
+        return s in n
+    if how == "regex":
+        return re.search(select, name) is not None
+    raise ValueError(f"unknown match mode {how!r}")
+
+
+def _resolve_elements(url: str, roles: list[dict[str, Any]]) -> list[str]:
+    from sddb.remote import elements as _elements
+
+    inv = _elements(url)  # {"kind/name": {...}}
+    resolved: list[str] = []
+    for role in roles:
+        kind = _ROLE_KIND.get(role["role"], role["role"])
+        select, how = role["select"], role.get("match", "suffix")
+        hits = [p for p in inv if p.split("/", 1)[0] == kind and _match(p.split("/", 1)[1], select, how)]
+        if len(hits) == 1:
+            resolved.append(hits[0])
+        elif not hits:
+            raise ValueError(f"role {role!r}: no element matched; present: {sorted(inv)}")
+        else:
+            raise ValueError(f"role {role!r}: matched {len(hits)} elements {hits}; tighten `select`/`match`")
+    return resolved
 
 
 def _open(url: str) -> Any:
