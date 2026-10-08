@@ -177,15 +177,15 @@ def _localize_to_cache(zarr_url: str, elements: list[str], dest_root: Path) -> P
     if not fs.exists(root):
         raise FileNotFoundError(zarr_url)
     root = root.rstrip("/")
+    if dest.exists() and _localized_complete(dest, paths):  # reuse keyed on the ORIGINAL request
+        return dest
+    paths = sorted(set(_close_region(fs, root, paths)))  # dest stays keyed on the pre-closure request
     kinds: dict[str, list[tuple[str, str]]] = {}
     for rel in paths:
         kind, _, name = rel.partition("/")
         if not name:
             raise ValueError(f"element path must be 'kind/name', got {rel!r}")
         kinds.setdefault(kind, []).append((name, rel))
-
-    if dest.exists() and _localized_complete(dest, paths):
-        return dest
 
     dest_root.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix=f"{stem}.partial-", dir=dest_root))
@@ -221,6 +221,37 @@ def _localize_to_cache(zarr_url: str, elements: list[str], dest_root: Path) -> P
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
+
+
+def _close_region(fs: Any, root: str, paths: list[str]) -> list[str]:
+    """Auto-include the shapes/labels element a kept table annotates (best-effort, metadata-only).
+
+    If a table's region cannot be read from its metadata, ``paths`` is left unchanged for it and the
+    caller must request the region element explicitly.
+    """
+    out = list(paths)
+    present = set(paths)
+    for rel in paths:
+        kind, _, name = rel.partition("/")
+        if kind != "tables":
+            continue
+        for meta in (f"{root}/tables/{name}/zarr.json", f"{root}/tables/{name}/.zattrs"):
+            if not fs.exists(meta):
+                continue
+            with fs.open(meta) as fh:
+                doc = json.load(fh)
+            attrs = doc.get("attributes", doc)  # v3 nests under "attributes"
+            # spatialdata 0.8 stores `region` directly in the table attrs; older stores nest it
+            region = attrs.get("region") or (attrs.get("spatialdata_attrs") or {}).get("region")
+            regions = region if isinstance(region, list) else ([region] if region else [])
+            for rname in regions:
+                for rkind in ("shapes", "labels"):
+                    cand = f"{rkind}/{rname}"
+                    if fs.exists(f"{root}/{rkind}/{rname}") and cand not in present:
+                        out.append(cand)
+                        present.add(cand)
+            break
+    return out
 
 
 def _localized_complete(dest: Path, paths: list[str]) -> bool:

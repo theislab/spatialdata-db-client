@@ -158,3 +158,10 @@ def test_prune_zmetadata_unknown_form_rejected(tmp_path):
     (dest / ".zmetadata").write_text('{"weird": 1}')
     with pytest.raises(NotImplementedError):
         _prune_consolidated(dest, {"images", "images/keep"})
+
+
+def test_region_closure_autoincludes(vhd_store, tmp_path):
+    # request ONLY the 008um table; its region shapes must be auto-included so the annotation resolves
+    out = remote.open_sdata(str(vhd_store), lazy=False, elements=["tables/square_008um"], cache_dir=tmp_path / "c")
+    assert "s_square_008um" in out.shapes  # auto-included
+    assert out.tables["square_008um"].obs["region"].cat.categories.tolist() == ["s_square_008um"]
