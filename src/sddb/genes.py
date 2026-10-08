@@ -41,6 +41,9 @@ class GeneIndex:
         except schema.SchemaError as err:
             raise schema.SchemaError(f"gene index at {self.url} is invalid: {err}") from err
         self._df = df
+        # Casefold the token columns once (the index is ~11M rows) so resolve() is a cheap per-token mask.
+        self._sym = df["symbol"].str.casefold()
+        self._fid = df["feature_id"].str.casefold()  # may hold pd.NA (legacy rows): compare vectorised only
 
     def resolve(self, tokens: str | list[str], *, min_fraction: float | None = None) -> dict[str, set[str]]:
         """Map each token to the uids of datasets expressing it.
@@ -50,14 +53,18 @@ class GeneIndex:
         Keys keep the original token spelling.
         """
         df = self._df
-        if min_fraction is not None:
-            df = df[(df["fraction_obs_detected"] >= min_fraction).fillna(False).astype(bool)]
-        sym = df["symbol"].str.casefold()
-        fid = df["feature_id"].str.casefold()  # may hold pd.NA (legacy rows): compare vectorised only
+        base = (
+            (df["fraction_obs_detected"] >= min_fraction).fillna(False).astype(bool)
+            if min_fraction is not None
+            else None
+        )
+        sym, fid = self._sym, self._fid
         out: dict[str, set[str]] = {}
         for tok in [tokens] if isinstance(tokens, str) else tokens:
             key = tok.strip().casefold()
             mask = ((sym == key) | (fid == key)).fillna(False).astype(bool)
+            if base is not None:
+                mask &= base
             out[tok] = {str(u) for u in df.loc[mask, "uid"].dropna()}
         return out
 
@@ -102,7 +109,8 @@ class GeneIndex:
         """Per-dataset ``uid``, ``fraction_obs_detected``, ``total_counts`` for ``symbol``, best detection first.
 
         The per-dataset detection profile for ``symbol``. Filters as in :meth:`where_expressed`; one row per
-        catalog dataset (max over matching features).
+        catalog dataset (max over matching features). Matches by symbol only (not Ensembl id) — for
+        id-based or multi-gene membership use :meth:`where_expressed`.
         """
         df = self._df
         mask = df["symbol"].str.casefold() == symbol.casefold()
