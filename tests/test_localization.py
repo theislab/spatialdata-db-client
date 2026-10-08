@@ -86,3 +86,35 @@ def test_prune_consolidated_noop_without_block(tmp_path):
     before = zj.read_text()
     remote._prune_consolidated(tmp_path, {"images"})
     assert zj.read_text() == before
+
+
+def test_cache_full_then_partial_no_collision(vhd_store, tmp_path):
+    cache = tmp_path / "cache"
+    full = remote.open_sdata(str(vhd_store), lazy=False, cache_dir=cache)
+    assert "square_002um" in full.tables
+    part = remote.open_sdata(str(vhd_store), lazy=False, elements=KEEP, cache_dir=cache)
+    assert set(part.tables) == {"square_008um"}
+    dirs = sorted(p.name for p in cache.glob("*.zarr"))
+    assert len(dirs) == 2
+    assert any("__" in d for d in dirs)
+
+
+def test_partial_copy_atomic_on_failure(vhd_store, tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    orig = remote._prune_consolidated
+    calls = {"n": 0}
+
+    def boom(dest, kept):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("simulated mid-build failure")
+        return orig(dest, kept)
+
+    monkeypatch.setattr(remote, "_prune_consolidated", boom)
+    with pytest.raises(RuntimeError, match="simulated"):
+        remote.open_sdata(str(vhd_store), lazy=False, elements=KEEP, cache_dir=cache)
+    assert not list(cache.glob("vhd__*.zarr"))
+    assert not list(cache.glob("vhd.partial-*"))
+    monkeypatch.undo()
+    out = remote.open_sdata(str(vhd_store), lazy=False, elements=KEEP, cache_dir=cache)
+    assert set(out.tables) == {"square_008um"}
