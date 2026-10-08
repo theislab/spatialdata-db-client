@@ -372,6 +372,15 @@ def test_open_adapter_without_requirements(vhd_store, tmp_path, monkeypatch):
     assert "square_002um" in sdata.tables  # whole store
 
 
+def test_materialize_adapter_without_requirements(vhd_store, tmp_path, monkeypatch):
+    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
+    out = tmp_path / "prov"
+    adapter.build(_members_df(vhd_store), _NoRequirementsAdapter(), materialize=True, out=out, verify=False)
+    prov = json.loads((out / "provenance.json").read_text())
+    assert prov["requirements"] == {}
+    assert prov["members"][0]["elements"] is None
+
+
 class _FakeTableOnlyAdapter(_FakeAdapter):
     def requirements(self):
         return {"elements": [{"role": "table", "select": "square_008um"}]}

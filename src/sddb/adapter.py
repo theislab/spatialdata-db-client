@@ -105,11 +105,15 @@ def _resolve_elements(url: str, roles: list[dict[str, Any]]) -> list[str]:
     return resolved
 
 
+def _requirements(adapter_obj: Any) -> dict[str, Any]:
+    req = getattr(adapter_obj, "requirements", None)
+    return (req() if callable(req) else None) or {}
+
+
 def _open(url: str, adapter_obj: TaskAdapter) -> Any:
     from sddb.remote import open_sdata
 
-    req = getattr(adapter_obj, "requirements", None)
-    roles = ((req() if callable(req) else {}) or {}).get("elements")
+    roles = _requirements(adapter_obj).get("elements")
     if not roles:
         return open_sdata(url, lazy=False)
     return open_sdata(url, lazy=False, elements=_resolve_elements(url, roles))
@@ -180,7 +184,7 @@ def build(
         return view
     out_dir = Path(out or ".")
     out_dir.mkdir(parents=True, exist_ok=True)
-    reqs = adapter.requirements() or {}
+    reqs = _requirements(adapter)
     roles = reqs.get("elements")
     produced = []
     for r in members.itertuples(index=False):
