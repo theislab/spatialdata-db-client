@@ -63,6 +63,12 @@ CATALOG_COLUMNS: dict[str, str] = {
     "if_image": "boolean",
     "ftu_annotation": "boolean",
     "publication_date": "string",
+    # Publication verification (set by the engine's publication-verification gate): the resolved
+    # paper identifiers + the verify status (verified / provisional / no_associated_publication).
+    "doi": "string",
+    "pmid": "string",
+    "publication_year": "string",
+    "publication_verify_status": "string",
     "sample_id": "string",
     "donor_id": "string",
     "database_version": "string",
