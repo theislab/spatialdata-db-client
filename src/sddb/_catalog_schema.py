@@ -99,6 +99,13 @@ COLLECTION_COLUMNS: dict[str, str] = {
     "n_members_total": "Int64",
     "size_bytes": "Int64",
     "members": "list[string]",
+    "abstract": "string",
+    "abstract_license": "string",
+    "abstract_source": "string",
+    "study_title": "string",
+    "study_authors": "string",
+    "study_year": "string",
+    "study_journal": "string",
 }
 COLLECTION_REQUIRED: tuple[str, ...] = ("slug", "name", "members")
 

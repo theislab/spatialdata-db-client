@@ -150,3 +150,17 @@ def test_new_producer_columns_validate_populated_and_null(tmp_path):
     p = tmp_path / "c.parquet"
     df.to_parquet(p)
     cs.validate(pd.read_parquet(p))  # round-trips
+
+
+def test_collection_columns_include_study_fields():
+    import sddb._catalog_schema as cs
+
+    expected = {
+        "abstract", "abstract_license", "abstract_source",
+        "study_title", "study_authors", "study_year", "study_journal",
+    }
+    assert expected <= set(cs.COLLECTION_COLUMNS)
+    # all are nullable string columns
+    assert all(cs.COLLECTION_COLUMNS[c] == "string" for c in expected)
+    # not newly required
+    assert expected.isdisjoint(set(cs.COLLECTION_REQUIRED))
