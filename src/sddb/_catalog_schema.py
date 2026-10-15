@@ -114,6 +114,8 @@ COLLECTION_COLUMNS: dict[str, str] = {
 COLLECTION_REQUIRED: tuple[str, ...] = ("slug", "name", "members")
 
 FACETS: tuple[str, ...] = (
+    "study_id",
+    "doi",
     "organism",
     "tissue",
     "disease",

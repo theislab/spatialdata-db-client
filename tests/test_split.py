@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pandas as pd
 import pytest
 
-from sddb.freeze import FrozenCohort
-from sddb.split import SplitManifest, _largest_remainder, make_split
+from sddb.split import _largest_remainder, make_split
 
 
 def _members(studies):
@@ -58,14 +55,6 @@ def test_largest_remainder_sums_and_nonempty(n):
     c = _largest_remainder(n, {"train": 0.8, "val": 0.1, "test": 0.1})
     assert sum(c.values()) == n
     assert all(v >= 1 for v in c.values())
-
-
-def test_write_load_roundtrip_and_cohort_split(tmp_path):
-    m = _members(["A", "B", "C", "D"])
-    fc = SimpleNamespace(members=m, hash="sha256:abc")
-    s = FrozenCohort.split(fc, train=0.5, val=0.25, test=0.25, seed=3)  # type: ignore[arg-type]
-    assert s.parent_hash == "sha256:abc"
-    assert SplitManifest.load(s.write(tmp_path / "split.json")) == s
 
 
 def test_missing_by_column_raises():

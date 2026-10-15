@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
 
 from sddb.dataset import Dataset, Source
+from sddb.remote import _open_fs
 
 if TYPE_CHECKING:
     from anndata import AnnData
+    from spatialdata import SpatialData
 
-    from sddb.freeze import FrozenCohort
-    from sddb.manifest import Manifest
+    from sddb.catalog import Catalog
+    from sddb.manifest import CohortManifest, Manifest
 
 _MODALITY_FLAGS = ("hne_image", "if_image", "ftu_annotation")  # catalog boolean columns
 
@@ -72,37 +76,139 @@ class SpatialDataCohort(Sequence[Dataset]):
         self.matched: dict[str, list[str]] = matched or {}
         self._source = source or Source()
         self._filter: dict[str, Any] = filter or {}
+        self.split_manifest: Any = None  # set when this cohort is a fold of a split()
 
-    def object_metadata(self, *, workers: int = 8) -> pd.DataFrame:
-        """Fetch metadata-only fingerprints for every member (all-or-nothing; raises ``ObjectMetaError``)."""
-        from sddb.objectmeta import fetch_many
+    def freeze(self) -> CohortManifest:
+        """Pin this selection to its exact members and a deterministic hash. Offline/cheap.
 
-        pairs = [(str(r.uid), str(r.zarr_url)) for r in self._df.itertuples(index=False)]
-        metas = fetch_many(pairs, workers=workers)
-        return pd.DataFrame(
-            [
-                {"uid": m.uid, "lamin_version": m.lamin_version, "fingerprint": m.fingerprint, "tables": list(m.tables)}
-                for m in metas
-            ],
-            columns=["uid", "lamin_version", "fingerprint", "tables"],
-        )
-
-    def freeze(self, *, workers: int = 8) -> FrozenCohort:
-        """Pin this selection to its exact members and a deterministic content hash.
-
-        The recorded filter captures effective defaults (e.g. ``validation="pass"``). Cohorts built by
-        paths other than ``query``/``search`` may carry an empty filter.
+        The recorded filter captures effective defaults (e.g. ``validation="pass"``). Cohorts built
+        by paths other than ``query``/``search`` may carry an empty filter.
         """
         from datetime import UTC, datetime
 
-        from sddb.freeze import SCHEMA_VERSION, FrozenCohort, cohort_hash
+        from sddb.manifest import SCHEMA_VERSION, CohortManifest, cohort_hash
 
-        meta = self.object_metadata(workers=workers)
-        members = self._df.merge(meta, on="uid", how="left")
         flt = dict(self._filter)
-        return FrozenCohort(
-            SCHEMA_VERSION, datetime.now(UTC).isoformat(), self._source, flt, cohort_hash(flt, members), members
+        return CohortManifest(
+            SCHEMA_VERSION,
+            datetime.now(UTC).isoformat(),
+            self._source,
+            flt,
+            cohort_hash(flt, self._df["uid"]),
+            self._df.copy(),
         )
+
+    @classmethod
+    def from_manifest(cls, m: CohortManifest, *, catalog: Catalog | None = None) -> SpatialDataCohort:
+        """Rebuild a cohort pinned to exactly the manifest's members (offline — no catalog re-query).
+
+        If ``catalog`` is given, warn once about any members a newer version supersedes (see
+        :meth:`check_updates`).
+        """
+        coh = cls(m.members, source=m.source, filter=m.filter)
+        if catalog is not None:
+            coh.check_updates(catalog, warn=True)
+        return coh
+
+    def verify(self, *, workers: int = 8) -> None:
+        """Liveness check: raise ``CohortDriftError`` if any pinned store no longer resolves.
+
+        Immutable version-exact stores cannot drift, so existence is the only failure mode. Not called by
+        :meth:`download`, which runs its own inline liveness loop; not run by cheap ops.
+        """
+        from sddb.manifest import CohortDriftError
+
+        pairs = [(str(r.uid), str(r.zarr_url)) for r in self._df.itertuples(index=False)]
+
+        def resolves(uid: str, url: str) -> tuple[str, bool]:
+            try:
+                fs, root = _open_fs(url)
+                return uid, bool(fs.exists(root))
+            except Exception:
+                return uid, False
+
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            results = list(pool.map(lambda p: resolves(*p), pairs))
+        missing = {uid: "store does not resolve" for uid, ok in results if not ok}
+        if missing:
+            raise CohortDriftError(missing)
+
+    def check_updates(self, catalog: Catalog, *, warn: bool = True) -> dict[str, str]:
+        """Return ``{pinned_uid: current_uid}`` for members a newer catalog version supersedes.
+
+        Matches each pinned ``uid[:16]`` (stem) against the catalog's current uid for that stem (the
+        catalog is latest-only). Warns once listing the superseded members when ``warn``.
+        """
+        current = catalog.to_df()
+        latest_by_stem = {str(u)[:16]: str(u) for u in current["uid"]}
+        superseded: dict[str, str] = {}
+        for u in self._df["uid"]:
+            u = str(u)
+            cur = latest_by_stem.get(u[:16])
+            if cur is not None and cur != u:
+                superseded[u] = cur
+        if superseded and warn:
+            warnings.warn(
+                f"{len(superseded)} member(s) superseded by a newer version: {sorted(superseded)}",
+                stacklevel=2,
+            )
+        return superseded
+
+    def _derive(self, df: pd.DataFrame, filter: dict[str, Any]) -> SpatialDataCohort:
+        """A new cohort over ``df`` carrying this cohort's source (used by subsetting/splits)."""
+        return SpatialDataCohort(df, matched=self.matched, source=self._source, filter=filter)
+
+    def split(
+        self, *, by: str = "study_id", train: float, val: float, test: float, seed: int
+    ) -> dict[str, SpatialDataCohort]:
+        """Group-safe deterministic split into ``{fold: SpatialDataCohort}``.
+
+        Each returned cohort carries the derived ``SplitManifest`` as ``.split_manifest`` (pinned to
+        this cohort's hash). Splitting is always group-safe (``mode="group"``).
+        """
+        from sddb.manifest import cohort_hash
+        from sddb.split import make_split
+
+        parent = cohort_hash(self._filter, self._df["uid"])
+        sm = make_split(self._df, parent, by=by, train=train, val=val, test=test, seed=seed, mode="group")
+        uid_str = self._df["uid"].astype("string")
+        folds: dict[str, SpatialDataCohort] = {}
+        for fold in ("train", "val", "test"):
+            want = [u for u, f in sm.assignments.items() if f == fold]
+            sub = self._derive(self._df[uid_str.isin(want)], self._filter)
+            sub.split_manifest = sm
+            folds[fold] = sub
+        return folds
+
+    @property
+    def members(self) -> pd.DataFrame:
+        """The underlying catalog rows (a view; treat as read-only — use methods to derive new cohorts)."""
+        return self._df
+
+    def filter(self, **facets: Any) -> SpatialDataCohort:
+        """Return a new cohort keeping rows matching every ``column=value`` (a list/tuple/set means isin)."""
+        df = self._df
+        mask = pd.Series(True, index=df.index)
+        norm: dict[str, Any] = {}
+        for col, val in facets.items():
+            if col not in df.columns:
+                raise ValueError(f"unknown column {col!r}; present: {list(df.columns)}")
+            mask &= df[col].isin(list(val) if isinstance(val, (list, tuple, set)) else [val])
+            norm[col] = sorted(val, key=str) if isinstance(val, (list, tuple, set)) else val
+        return self._derive(df[mask.fillna(False).astype(bool)], {**self._filter, **norm})
+
+    def where(self, mask: pd.Series) -> SpatialDataCohort:
+        """Return a new cohort keeping rows where the boolean ``mask`` (aligned to ``members``) is True."""
+        return self._derive(self._df[mask.fillna(False).astype(bool)], self._filter)
+
+    def __or__(self, other: SpatialDataCohort) -> SpatialDataCohort:
+        """Union, deduped by uid (first occurrence wins). Provenance filter is dropped (no longer a pure facet set)."""
+        df = pd.concat([self._df, other._df]).drop_duplicates("uid", keep="first")
+        return self._derive(df, {})
+
+    def __sub__(self, other: SpatialDataCohort) -> SpatialDataCohort:
+        """Difference: drop any member whose uid is in ``other``."""
+        return self._derive(self._df[~self._df["uid"].isin(other._df["uid"])], self._filter)
 
     def citations(self, path: str | Path, *, bib_url: str | None = None) -> Path:
         """Write the BibTeX entries for the studies in this set to ``path``."""
@@ -117,24 +223,36 @@ class SpatialDataCohort(Sequence[Dataset]):
         return citations_text(self, bib_url=bib_url)
 
     def download(
-        self, dest: str | Path, *, workers: int = 4, pin_versions: bool = False, allow_version_change: bool = False
+        self,
+        dest: str | Path,
+        *,
+        workers: int = 4,
+        pin_versions: bool = False,
+        allow_version_change: bool = False,
+        strict: bool = False,
     ) -> Manifest:
         """Download every store under ``dest`` (resumable) and return the manifest.
 
         Raises ``ManifestVersionMismatch`` if ``dest`` holds a manifest pinned to another catalog version
-        (unless ``allow_version_change``).
+        (unless ``allow_version_change``). A missing pinned store falls back to the latest version with a
+        loud warning unless ``strict=True`` (then it raises ``CohortDriftError``).
         """
         from sddb.manifest import download
 
         return download(
-            self, dest, workers=workers, pin_versions=pin_versions, allow_version_change=allow_version_change
+            self,
+            dest,
+            workers=workers,
+            pin_versions=pin_versions,
+            allow_version_change=allow_version_change,
+            strict=strict,
         )
 
     def to_anndata(self, *, table: str | None = None) -> AnnData:
-        """Concatenate each member's table into one AnnData (no drift check: a live cohort is unfrozen)."""
+        """Concatenate each member's table into one AnnData (outer join, obs[uid]+obs[study_id])."""
         from sddb.concat import concat_tables
 
-        return concat_tables(self._df, table=table, verify=False)
+        return concat_tables(self._df, table=table)
 
     def to_df(self) -> pd.DataFrame:
         """Return the underlying rows as a DataFrame copy."""
@@ -159,6 +277,15 @@ class SpatialDataCohort(Sequence[Dataset]):
     def summary(self) -> dict[str, Any]:
         """Headline numbers for this set."""
         return summary(self._df)
+
+    @property
+    def sdatas(self) -> list[SpatialData]:
+        """Open every member as a full SpatialData (download-then-open; explicit and potentially large)."""
+        return [self[i].load(lazy=False) for i in range(len(self))]
+
+    def load(self, *, elements: list[str] | None = None) -> list[SpatialData]:
+        """Open every member, localizing only ``elements`` (``"kind/name"``) when given."""
+        return [self[i].load(lazy=False, elements=elements) for i in range(len(self))]
 
     def __len__(self) -> int:
         return len(self._df)

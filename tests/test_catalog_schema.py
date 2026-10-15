@@ -156,8 +156,13 @@ def test_collection_columns_include_study_fields():
     import sddb._catalog_schema as cs
 
     expected = {
-        "abstract", "abstract_license", "abstract_source",
-        "study_title", "study_authors", "study_year", "study_journal",
+        "abstract",
+        "abstract_license",
+        "abstract_source",
+        "study_title",
+        "study_authors",
+        "study_year",
+        "study_journal",
     }
     assert expected <= set(cs.COLLECTION_COLUMNS)
     # all are nullable string columns

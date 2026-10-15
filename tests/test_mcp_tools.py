@@ -126,6 +126,7 @@ def test_query_tool_expressing_min_fraction(cat_url):
 
 def test__query_helper_filters(tmp_path):
     from tests._fixtures import write_fixture_catalog
+
     from sddb.mcp.tools import _query
 
     cat = write_fixture_catalog(tmp_path / "catalog.parquet")
@@ -134,33 +135,38 @@ def test__query_helper_filters(tmp_path):
 
 
 def test_facets_tool(tmp_path):
-    from tests._fixtures import write_fixture_catalog
-    from sddb.mcp.tools import facets_tool
     import pytest
+    from tests._fixtures import write_fixture_catalog
+
+    from sddb.mcp.tools import facets_tool
 
     cat = write_fixture_catalog(tmp_path / "catalog.parquet")
     cols = facets_tool(catalog_url=cat.as_uri())
-    assert "organism" in cols and "technology" in cols
+    assert "organism" in cols
+    assert "technology" in cols
     assert facets_tool("organism", catalog_url=cat.as_uri()) == ["human", "mouse"]
     with pytest.raises(ValueError, match="unknown facet"):
         facets_tool("not_a_facet", catalog_url=cat.as_uri())
 
 
 def test_cite_tool(tmp_path):
-    from tests._fixtures import write_fixture_catalog, make_fixture_citations_bib
+    from tests._fixtures import make_fixture_citations_bib, write_fixture_catalog
+
     from sddb.mcp.tools import cite_tool
 
     cat = write_fixture_catalog(tmp_path / "catalog.parquet")
     (tmp_path / "citations.bib").write_text(make_fixture_citations_bib(), encoding="utf-8")
     out = cite_tool(catalog_url=cat.as_uri(), organism="human")
     assert out["n"] >= 1
-    assert "@" in out["bibtex"] and "Smith2023" in out["bibtex"]
+    assert "@" in out["bibtex"]
+    assert "Smith2023" in out["bibtex"]
     empty = cite_tool(catalog_url=cat.as_uri(), organism="nonexistent_xyz")
     assert empty == {"bibtex": "", "n": 0}
 
 
 def test_download_tool_plan_no_copy(tmp_path, monkeypatch):
     from tests._fixtures import write_fixture_catalog
+
     import sddb.mcp.tools as t
 
     cat = write_fixture_catalog(tmp_path / "catalog.parquet")
@@ -172,14 +178,16 @@ def test_download_tool_plan_no_copy(tmp_path, monkeypatch):
     )
     out = t.download_tool(catalog_url=cat.as_uri(), organism="human")
     assert called["download"] is False  # plan mode copies nothing
-    assert out["datasets"] == 3 and out["total_bytes"] == 3000
+    assert out["datasets"] == 3
+    assert out["total_bytes"] == 3000
     assert {p["uid"] for p in out["per_store"]} == {"uid0001", "uid0002", "uid0005"}
 
 
 def test_download_tool_fetch_sandbox(tmp_path, monkeypatch):
     from tests._fixtures import write_fixture_catalog
-    from sddb.manifest import Manifest, ManifestEntry
+
     import sddb.mcp.tools as t
+    from sddb.manifest import Manifest, ManifestEntry
 
     cat = write_fixture_catalog(tmp_path / "catalog.parquet")
     sandbox = tmp_path / "dl"
@@ -212,7 +220,9 @@ def test_server_query_forwards_new_params(monkeypatch):
             def deco(fn):
                 registered[name] = fn
                 return fn
+
             return deco
+
         def run(self): ...
 
     monkeypatch.setattr(server, "_server_class", lambda: FakeServer)
@@ -240,6 +250,7 @@ def test_server_genes_forwards(monkeypatch):
             def deco(fn):
                 registered[name] = fn
                 return fn
+
             return deco
 
     monkeypatch.setattr(server, "_server_class", lambda: FakeServer)

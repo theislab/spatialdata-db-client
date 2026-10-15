@@ -111,7 +111,8 @@ def test_genes_multi_gene_and_validation(tmp_path):
     write_fixture_gene_index(tmp_path / "gene_index.parquet")
     r = runner.invoke(app, ["genes", "EPCAM", "PTPRC", "--catalog", cat.as_uri()])
     assert r.exit_code == 0, r.output
-    assert "uid0002" in r.output and "uid0001" not in r.output
+    assert "uid0002" in r.output
+    assert "uid0001" not in r.output
     r = runner.invoke(app, ["genes", "Alb", "--catalog", cat.as_uri()])
     assert "uid0004" in r.output  # bronze included by default
     r = runner.invoke(app, ["genes", "Alb", "--validation", "pass", "--catalog", cat.as_uri()])
@@ -124,12 +125,14 @@ def test_genes_ensembl_id_matches_symbol_and_flags_bronze(tmp_path):
     by_sym = runner.invoke(app, ["genes", "EPCAM", "--catalog", cat.as_uri()])
     by_id = runner.invoke(app, ["genes", "ENSG00000119888", "--catalog", cat.as_uri()])
     assert by_id.exit_code == 0, by_id.output
-    assert by_id.output == by_sym.output and "uid0001" in by_id.output
+    assert by_id.output == by_sym.output
+    assert "uid0001" in by_id.output
     assert "validation_status" in by_id.output
     bronze = runner.invoke(app, ["genes", "Alb", "--catalog", cat.as_uri()])
     assert "fail" in bronze.output
     multi = runner.invoke(app, ["genes", "EPCAM", "KRT8", "--catalog", cat.as_uri()])
-    assert "validation_status" in multi.output and "tier" in multi.output
+    assert "validation_status" in multi.output
+    assert "tier" in multi.output
 
 
 def test_query_min_obs_excludes_smaller(cat_url):

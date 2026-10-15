@@ -272,7 +272,7 @@ class Catalog:
         tokens = re.findall(r"\w+", text.lower())
         matched: dict[str, list[str]] = {}
         for col in schema.FACETS:
-            if col not in self._df.columns:
+            if col == "doi" or col not in self._df.columns:  # DOIs tokenize to "10" etc.
                 continue
             values = sorted(str(v) for v in self._df[col].dropna().unique())
             hits = [v for v in values if any(_token_matches(t, v) for t in tokens)]
@@ -289,3 +289,23 @@ class Catalog:
         return SpatialDataCohort(
             self._df[mask.fillna(False).astype(bool)], matched=matched, source=self._source(), filter={"search": text}
         )
+
+    def cohort(self, *, uids: list[str] | None = None, study_ids: list[str] | None = None) -> SpatialDataCohort:
+        """Build a cohort from an explicit set of ``uids`` or ``study_ids`` (exactly one).
+
+        Raises ``KeyError`` naming any id not in the catalog; a valid but empty result warns.
+        """
+        if (uids is None) == (study_ids is None):
+            raise ValueError("pass exactly one of uids= or study_ids=")
+        col, want = ("uid", uids) if uids is not None else ("study_id", study_ids)
+        if col not in self._df.columns:
+            raise ValueError(f"catalog has no {col!r} column")
+        want = [str(x) for x in want]
+        sub = self._df[self._df[col].astype("string").isin(want)]
+        found = set(sub[col].astype("string"))
+        missing = [x for x in want if x not in found]
+        if missing:
+            raise KeyError(f"unknown {col}(s) not in catalog: {missing}")
+        if sub.empty:
+            warnings.warn(f"no catalog rows for {col} in {want}", stacklevel=2)
+        return SpatialDataCohort(sub, source=self._source(), filter={col: sorted(want)})
