@@ -57,65 +57,48 @@ Only URLs are replayed, so a store republished at the same URL is not detected.
 Pass `pin_versions=True` to record the catalog version; downloading into a directory pinned to a different
 version then raises `ManifestVersionMismatch` unless `allow_version_change=True`.
 
-## Freeze (network, not executed here)
+## Freeze (offline, not executed here)
 
-`freeze()` pins the selection to its exact members, reads each store's fingerprint, and returns a
-`FrozenCohort` with a deterministic `hash`. `write` saves it as JSON (large member lists go to a parquet
-sidecar); `FrozenCohort.load` restores it offline, without a catalog.
-
-```python
-# not executed
-from sddb import CohortDriftError, FrozenCohort
-
-frozen = cohort.freeze()
-frozen.write("cohort.json")
-frozen = FrozenCohort.load("cohort.json")  # offline reload
-frozen.hash, frozen.members
-```
-
-### Verify-on-read
-
-A `zarr_url` is a "latest" pointer, not a version-pinned one. So reading a frozen cohort's data
-(`frozen.to_anndata()`, `frozen.build(...)`) re-checks each object's fingerprint first and raises
-`CohortDriftError` if a store changed since the freeze. Pass `verify=False` to skip the check.
-A live `SpatialDataCohort.to_anndata()` is unfrozen and performs no such check.
+`freeze()` pins the selection to its exact members (full uids) and returns a `CohortManifest` with a
+deterministic `hash`. `write` saves it as JSON (large member lists go to a parquet sidecar);
+`CohortManifest.load` restores it offline, and `SpatialDataCohort.from_manifest` rebuilds the cohort
+without a catalog query.
 
 ```python
 # not executed
-adata = frozen.to_anndata()  # table=None: default table of each member
+from sddb import CohortManifest, SpatialDataCohort
+
+manifest = cohort.freeze()
+manifest.write("cohort.json")
+manifest = CohortManifest.load("cohort.json")  # offline reload
+cohort = SpatialDataCohort.from_manifest(manifest)
+manifest.hash
 ```
+
+### Liveness and updates
+
+A `zarr_url` is a "latest" pointer, not a version-pinned one. `cohort.verify()` checks that every pinned
+member still resolves, and `cohort.check_updates(catalog)` reports members that a newer catalog version
+supersedes. `download(strict=...)` controls whether a missing pinned store is an error.
 
 ## Split
 
 `split` assigns whole studies (`by="study_id"`) to one fold, so no study leaks across train, val and test.
 It is deterministic for a given `seed`, independent of row order, and refuses to create empty folds on
-tiny cohorts. The `SplitManifest` records the parent cohort hash, and can be written and loaded.
+tiny cohorts. It returns `{fold: SpatialDataCohort}`; each fold carries a `SplitManifest` (pinned to the
+parent cohort hash) as `.split_manifest`, which can be written and loaded.
 
 ```python
 # not executed
 from sddb import SplitManifest
 
-split = frozen.split(by="study_id", train=0.8, val=0.1, test=0.1, seed=42)
-split.write("split.json")
+folds = cohort.split(by="study_id", train=0.8, val=0.1, test=0.1, seed=42)
+folds["train"].split_manifest.write("split.json")
 split = SplitManifest.load("split.json")
 ```
 
-## Check and build with a task adapter
+## Task adapters
 
-A `TaskAdapter` (protocol in `sddb.adapter`) states what a task needs (`requirements`), validates metadata
-(`validate_meta`) and data (`validate`), and turns a store into a model input (`build`). Concrete adapters
-live in method repos, not in this client; `my_adapter` below stands for one of them.
-
-`check` reports compatibility from metadata (add `deep=True` to also open the stores). `build` returns a lazy
-task view; with `materialize=True` each member is built once and provenance is written to `out`. A `split`
-must derive from the same cohort, otherwise `ValueError` is raised.
-
-```python
-# not executed
-report = frozen.check(my_adapter)
-print(report)
-
-view = frozen.build(my_adapter, split=split, materialize=True, out="./task")
-for uid, load in view:
-    sdata = load()
-```
+A `TaskAdapter` (protocol in `sddb.adapter`) states what a task needs and turns a store into a model input.
+Concrete adapters and their execution live in method repos, not in this client. Use `cohort.sdatas` or
+`cohort.load(elements=[...])` to get the data to hand to an adapter.

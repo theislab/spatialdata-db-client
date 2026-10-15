@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pandas as pd
 import pytest
 
-from sddb.split import SplitManifest, _largest_remainder, make_split
+from sddb.split import _largest_remainder, make_split
 
 
 def _members(studies):

@@ -50,3 +50,8 @@ def test_empty_filter_is_empty_cohort_not_error():
     out = coh.filter(tissue="nonexistent")
     assert len(out) == 0
     out.summary()  # must not raise on an empty cohort
+
+
+def test_slice_preserves_filter():
+    coh = SpatialDataCohort(pd.DataFrame({"uid": ["a", "b", "c"], "zarr_url": ["x"] * 3}), filter={"tissue": "breast"})
+    assert coh[:2]._filter == {"tissue": "breast"}

@@ -103,9 +103,7 @@ class GeneIndex:
         cat = self._catalog.to_df()
         return cat if validation is None else cat[cat["validation_status"] == validation]
 
-    def ranked(
-        self, symbol: str, *, min_fraction: float | None = None, validation: str | None = None
-    ) -> pd.DataFrame:
+    def ranked(self, symbol: str, *, min_fraction: float | None = None, validation: str | None = None) -> pd.DataFrame:
         """Per-dataset ``uid``, ``fraction_obs_detected``, ``total_counts`` for ``symbol``, best detection first.
 
         The per-dataset detection profile for ``symbol``. Filters as in :meth:`where_expressed`; one row per

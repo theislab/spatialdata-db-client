@@ -45,10 +45,17 @@ def build_server() -> Any:
         return tools.query_tool(
             validation=validation,
             **_drop_none(
-                organism=organism, tissue=tissue, disease=disease,
-                technology=technology, assay=assay, tier=tier,
-                n_obs__gte=min_obs, n_features__gte=min_features,
-                expressing=expressing, min_fraction=min_fraction, search=search,
+                organism=organism,
+                tissue=tissue,
+                disease=disease,
+                technology=technology,
+                assay=assay,
+                tier=tier,
+                n_obs__gte=min_obs,
+                n_features__gte=min_features,
+                expressing=expressing,
+                min_fraction=min_fraction,
+                search=search,
             ),
         )
 
@@ -65,7 +72,9 @@ def build_server() -> Any:
         include_bronze: bool = True,
     ) -> list[dict[str, Any]]:
         return tools.genes_tool(
-            symbols, mode=mode, include_bronze=include_bronze,
+            symbols,
+            mode=mode,
+            include_bronze=include_bronze,
             **_drop_none(organism=organism, tissue=tissue, disease=disease, assay=assay),
         )
 
@@ -87,9 +96,15 @@ def build_server() -> Any:
         return tools.cite_tool(
             validation=validation,
             **_drop_none(
-                organism=organism, tissue=tissue, disease=disease,
-                technology=technology, assay=assay, tier=tier,
-                search=search, expressing=expressing, min_fraction=min_fraction,
+                organism=organism,
+                tissue=tissue,
+                disease=disease,
+                technology=technology,
+                assay=assay,
+                tier=tier,
+                search=search,
+                expressing=expressing,
+                min_fraction=min_fraction,
             ),
         )
 
@@ -107,11 +122,18 @@ def build_server() -> Any:
         download: bool = False,
     ) -> dict[str, Any]:
         return tools.download_tool(
-            validation=validation, download=download,
+            validation=validation,
+            download=download,
             **_drop_none(
-                organism=organism, tissue=tissue, disease=disease,
-                technology=technology, assay=assay, tier=tier,
-                search=search, expressing=expressing, min_fraction=min_fraction,
+                organism=organism,
+                tissue=tissue,
+                disease=disease,
+                technology=technology,
+                assay=assay,
+                tier=tier,
+                search=search,
+                expressing=expressing,
+                min_fraction=min_fraction,
             ),
         )
 
@@ -129,7 +151,9 @@ def build_server() -> Any:
     )(genes)
     server.tool(name="facets", description="List facet columns, or the distinct values of a facet field.")(facets)
     server.tool(name="cite", description="BibTeX for the studies of a filtered cohort.")(cite)
-    server.tool(name="download", description="Plan (sizes) or fetch a filtered cohort to the server download dir.")(download_cohort)
+    server.tool(name="download", description="Plan (sizes) or fetch a filtered cohort to the server download dir.")(
+        download_cohort
+    )
     return server
 
 

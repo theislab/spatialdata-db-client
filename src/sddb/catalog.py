@@ -290,9 +290,7 @@ class Catalog:
             self._df[mask.fillna(False).astype(bool)], matched=matched, source=self._source(), filter={"search": text}
         )
 
-    def cohort(
-        self, *, uids: list[str] | None = None, study_ids: list[str] | None = None
-    ) -> SpatialDataCohort:
+    def cohort(self, *, uids: list[str] | None = None, study_ids: list[str] | None = None) -> SpatialDataCohort:
         """Build a cohort from an explicit set of ``uids`` or ``study_ids`` (exactly one).
 
         Raises ``KeyError`` naming any id not in the catalog; a valid but empty result warns.

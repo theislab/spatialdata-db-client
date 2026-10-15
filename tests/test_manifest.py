@@ -107,11 +107,14 @@ def test_failed_entry_records_error(tmp_path, cohort, monkeypatch):
 
 def test_plan_sizes_local_store(tmp_path):
     import pandas as pd
+    from tests._fixtures import make_tiny_sdata_zarr
+
     from sddb.cohort import SpatialDataCohort
     from sddb.manifest import plan_sizes
-    from tests._fixtures import make_tiny_sdata_zarr
 
     store = make_tiny_sdata_zarr(tmp_path)
     res = SpatialDataCohort(pd.DataFrame({"uid": ["uidX"], "zarr_url": [store.as_uri()]}))
     sizes = plan_sizes(res)
-    assert len(sizes) == 1 and sizes[0][0] == "uidX" and sizes[0][1] > 0
+    assert len(sizes) == 1
+    assert sizes[0][0] == "uidX"
+    assert sizes[0][1] > 0

@@ -93,11 +93,40 @@ def make_fixture_catalog() -> pd.DataFrame:
 def make_fixture_collections() -> pd.DataFrame:
     """Build a valid synthetic collections table (one row per collection)."""
     rows = [
-        ("c-smith", "Smith2023", "Smith 2023 atlas", "publication", "EpCAM atlas",
-         "10.1/smith", "DOI", "Xenium", "human", "lung", 2, 2, 180_000, ["uid0001", "uid0002"],
-         *[None] * 7),  # abstract/study_* columns are optional: null here
-        ("c-lee", "Lee2022", "Lee 2022 brain", "replicates", None, None, None,
-         "Visium", "mouse", "brain", 1, 1, 4_000, ["uid0003"], *[None] * 7),
+        (
+            "c-smith",
+            "Smith2023",
+            "Smith 2023 atlas",
+            "publication",
+            "EpCAM atlas",
+            "10.1/smith",
+            "DOI",
+            "Xenium",
+            "human",
+            "lung",
+            2,
+            2,
+            180_000,
+            ["uid0001", "uid0002"],
+            *[None] * 7,
+        ),  # abstract/study_* columns are optional: null here
+        (
+            "c-lee",
+            "Lee2022",
+            "Lee 2022 brain",
+            "replicates",
+            None,
+            None,
+            None,
+            "Visium",
+            "mouse",
+            "brain",
+            1,
+            1,
+            4_000,
+            ["uid0003"],
+            *[None] * 7,
+        ),
     ]
     df = pd.DataFrame(rows, columns=list(COLLECTION_COLUMNS))
     return cast_scalars(df, COLLECTION_COLUMNS)

@@ -57,8 +57,12 @@ def query_tool(
     (+ optional ``min_fraction``) and ``search`` compose as in :meth:`Catalog.query`.
     """
     df = _query(
-        catalog_url, validation=validation, expressing=expressing,
-        min_fraction=min_fraction, search=search, **facets,
+        catalog_url,
+        validation=validation,
+        expressing=expressing,
+        min_fraction=min_fraction,
+        search=search,
+        **facets,
     ).to_df()
     rows = _records(df.head(MAX_ROWS))
     if len(df) > MAX_ROWS:
@@ -99,7 +103,11 @@ def genes_tool(
     """
     if isinstance(symbols, str):
         symbols = [symbols]
-    facets = {k: v for k, v in (("organism", organism), ("tissue", tissue), ("disease", disease), ("assay", assay)) if v is not None}
+    facets = {
+        k: v
+        for k, v in (("organism", organism), ("tissue", tissue), ("disease", disease), ("assay", assay))
+        if v is not None
+    }
     cohort = Catalog(catalog_url).query(
         expressing=symbols, mode=mode, validation=None if include_bronze else "pass", **facets
     )
@@ -123,8 +131,12 @@ def cite_tool(
 ) -> dict[str, Any]:
     """Return BibTeX text + entry count for the studies of a filtered cohort (empty cohort -> n=0)."""
     res = _query(
-        catalog_url, validation=validation, expressing=expressing,
-        min_fraction=min_fraction, search=search, **facets,
+        catalog_url,
+        validation=validation,
+        expressing=expressing,
+        min_fraction=min_fraction,
+        search=search,
+        **facets,
     )
     if len(res) == 0:
         return {"bibtex": "", "n": 0}
@@ -157,8 +169,12 @@ def download_tool(
     into the server download dir and returns the manifest path.
     """
     res = _query(
-        catalog_url, validation=validation, expressing=expressing,
-        min_fraction=min_fraction, search=search, **facets,
+        catalog_url,
+        validation=validation,
+        expressing=expressing,
+        min_fraction=min_fraction,
+        search=search,
+        **facets,
     )
     if not download:
         sizes = plan_sizes(res)

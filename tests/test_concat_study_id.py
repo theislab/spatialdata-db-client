@@ -1,6 +1,7 @@
 import anndata as ad
 import numpy as np
 import pandas as pd
+
 from sddb import concat
 
 
@@ -23,7 +24,8 @@ def test_to_anndata_adds_uid_and_study_id(monkeypatch):
         {"uid": ["u1", "u2"], "zarr_url": ["s3://b/1.zarr", "s3://b/2.zarr"], "study_id": ["s_a", "s_b"]}
     )
     out = concat.concat_tables(members)
-    assert "uid" in out.obs and "study_id" in out.obs
+    assert "uid" in out.obs
+    assert "study_id" in out.obs
     assert set(out.obs["study_id"].dropna()) == {"s_a", "s_b"}
 
 

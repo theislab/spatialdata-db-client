@@ -1,4 +1,5 @@
 import pandas as pd
+
 from sddb.cohort import SpatialDataCohort
 from sddb.dataset import Source
 from sddb.manifest import CohortManifest
@@ -7,7 +8,7 @@ from sddb.manifest import CohortManifest
 def _cohort(n=3):
     df = pd.DataFrame(
         {
-            "uid": [f"{'u'*12}{i:04d}0000" for i in range(n)],
+            "uid": [f"{'u' * 12}{i:04d}0000" for i in range(n)],
             "zarr_url": [f"s3://b/.lamindb/u{i}.zarr" for i in range(n)],
             "study_id": ["s"] * n,
             "technology": ["Visium HD"] * n,

@@ -21,4 +21,4 @@ def test_freeze_module_gone():
 
 
 def test_new_names_importable():
-    from sddb import CohortManifest, CohortDriftError, SpatialDataCohort, TaskAdapter  # noqa: F401
+    from sddb import CohortDriftError, CohortManifest, SpatialDataCohort, TaskAdapter  # noqa: F401

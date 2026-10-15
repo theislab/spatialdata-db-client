@@ -41,7 +41,8 @@ def test_query_by_license_and_noncommercial(cat):
     assert {d.uid for d in cat.query(license="CC-BY-NC-SA-4.0")} == {"uid0002"}
     # the headline filter: exclude NonCommercial (uid0002 is CC-BY-NC-SA)
     comm = {d.uid for d in cat.query(validation=None, noncommercial=False)}
-    assert "uid0002" not in comm and "uid0001" in comm
+    assert "uid0002" not in comm
+    assert "uid0001" in comm
     # keep only NonCommercial
     assert {d.uid for d in cat.query(noncommercial=True)} == {"uid0002"}
 

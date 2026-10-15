@@ -1,4 +1,5 @@
 import pandas as pd
+
 from sddb import _catalog_schema as schema
 from sddb.catalog import Catalog
 

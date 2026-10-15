@@ -74,8 +74,13 @@ def _stub_genes(tmp_path):
     ]
     df = pd.DataFrame(rows, columns=["symbol", "feature_id", "uid", "total_counts", "fraction_obs_detected"])
     df = df.astype(
-        {"symbol": "string", "feature_id": "string", "uid": "string", "total_counts": "Float64",
-         "fraction_obs_detected": "Float64"}
+        {
+            "symbol": "string",
+            "feature_id": "string",
+            "uid": "string",
+            "total_counts": "Float64",
+            "fraction_obs_detected": "Float64",
+        }
     )
     assert df["feature_id"].isna().sum() == 1
     df.to_parquet(tmp_path / "gene_index.parquet")
@@ -118,7 +123,8 @@ def test_legacy_symbol_only_no_crash(tmp_path):
 def test_backcompat_single_shape(tmp_path):
     g = _stub_genes(tmp_path)
     a, b = g.where_expressed("EPCAM").to_df(), g.datasets_with("EPCAM").to_df()
-    assert list(a.columns) == list(b.columns) and list(a["uid"]) == list(b["uid"])
+    assert list(a.columns) == list(b.columns)
+    assert list(a["uid"]) == list(b["uid"])
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +172,13 @@ def _canonical_gene_index():
     ]
     df = pd.DataFrame(rows, columns=["symbol", "feature_id", "uid", "total_counts", "fraction_obs_detected"])
     return df.astype(
-        {"symbol": "string", "feature_id": "string", "uid": "string", "total_counts": "Float64",
-         "fraction_obs_detected": "Float64"}
+        {
+            "symbol": "string",
+            "feature_id": "string",
+            "uid": "string",
+            "total_counts": "Float64",
+            "fraction_obs_detected": "Float64",
+        }
     )
 
 
