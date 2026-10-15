@@ -109,6 +109,34 @@ class SpatialDataCohort(Sequence[Dataset]):
         """A new cohort over ``df`` carrying this cohort's source (used by subsetting/splits)."""
         return SpatialDataCohort(df, matched=self.matched, source=self._source, filter=filter)
 
+    @property
+    def members(self) -> pd.DataFrame:
+        """The underlying catalog rows (a view; treat as read-only — use methods to derive new cohorts)."""
+        return self._df
+
+    def filter(self, **facets: Any) -> SpatialDataCohort:
+        """Return a new cohort keeping rows matching every ``column=value`` (a list/tuple/set means isin)."""
+        df = self._df
+        mask = pd.Series(True, index=df.index)
+        for col, val in facets.items():
+            if col not in df.columns:
+                raise ValueError(f"unknown column {col!r}; present: {list(df.columns)}")
+            mask &= df[col].isin(list(val) if isinstance(val, (list, tuple, set)) else [val])
+        return self._derive(df[mask.fillna(False).astype(bool)], {**self._filter, **facets})
+
+    def where(self, mask: pd.Series) -> SpatialDataCohort:
+        """Return a new cohort keeping rows where the boolean ``mask`` (aligned to ``members``) is True."""
+        return self._derive(self._df[mask.fillna(False).astype(bool)], self._filter)
+
+    def __or__(self, other: SpatialDataCohort) -> SpatialDataCohort:
+        """Union, deduped by uid (first occurrence wins). Provenance filter is dropped (no longer a pure facet set)."""
+        df = pd.concat([self._df, other._df]).drop_duplicates("uid", keep="first")
+        return self._derive(df, {})
+
+    def __sub__(self, other: SpatialDataCohort) -> SpatialDataCohort:
+        """Difference: drop any member whose uid is in ``other``."""
+        return self._derive(self._df[~self._df["uid"].isin(other._df["uid"])], self._filter)
+
     def citations(self, path: str | Path, *, bib_url: str | None = None) -> Path:
         """Write the BibTeX entries for the studies in this set to ``path``."""
         from sddb.citations import write_citations
