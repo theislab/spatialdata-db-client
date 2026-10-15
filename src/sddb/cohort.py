@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
 
 from sddb.dataset import Dataset, Source
+from sddb.remote import _open_fs
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -104,6 +107,50 @@ class SpatialDataCohort(Sequence[Dataset]):
         if catalog is not None:
             coh.check_updates(catalog, warn=True)
         return coh
+
+    def verify(self, *, workers: int = 8) -> None:
+        """Liveness check: raise ``CohortDriftError`` if any pinned store no longer resolves.
+
+        Immutable version-exact stores cannot drift, so existence is the only failure mode. Called by
+        :meth:`download`; not by cheap ops.
+        """
+        from sddb.manifest import CohortDriftError
+
+        pairs = [(str(r.uid), str(r.zarr_url)) for r in self._df.itertuples(index=False)]
+
+        def resolves(uid: str, url: str) -> tuple[str, bool]:
+            try:
+                fs, root = _open_fs(url)
+                return uid, bool(fs.exists(root))
+            except Exception:
+                return uid, False
+
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            results = list(pool.map(lambda p: resolves(*p), pairs))
+        missing = {uid: "store does not resolve" for uid, ok in results if not ok}
+        if missing:
+            raise CohortDriftError(missing)
+
+    def check_updates(self, catalog: Catalog, *, warn: bool = True) -> dict[str, str]:
+        """Return ``{pinned_uid: current_uid}`` for members a newer catalog version supersedes.
+
+        Matches each pinned ``uid[:16]`` (stem) against the catalog's current uid for that stem (the
+        catalog is latest-only). Warns once listing the superseded members when ``warn``.
+        """
+        current = catalog.to_df()
+        latest_by_stem = {str(u)[:16]: str(u) for u in current["uid"]}
+        superseded: dict[str, str] = {}
+        for u in self._df["uid"]:
+            u = str(u)
+            cur = latest_by_stem.get(u[:16])
+            if cur is not None and cur != u:
+                superseded[u] = cur
+        if superseded and warn:
+            warnings.warn(
+                f"{len(superseded)} member(s) superseded by a newer version: {sorted(superseded)}",
+                stacklevel=2,
+            )
+        return superseded
 
     def _derive(self, df: pd.DataFrame, filter: dict[str, Any]) -> SpatialDataCohort:
         """A new cohort over ``df`` carrying this cohort's source (used by subsetting/splits)."""
