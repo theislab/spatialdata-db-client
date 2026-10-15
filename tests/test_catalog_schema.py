@@ -164,3 +164,13 @@ def test_collection_columns_include_study_fields():
     assert all(cs.COLLECTION_COLUMNS[c] == "string" for c in expected)
     # not newly required
     assert expected.isdisjoint(set(cs.COLLECTION_REQUIRED))
+
+
+def test_new_imaging_columns_present():
+    from sddb import _catalog_schema as schema
+
+    assert schema.CATALOG_COLUMNS["mpp"] == "Float64"
+    assert schema.CATALOG_COLUMNS["image_width"] == "Int64"
+    assert schema.CATALOG_COLUMNS["image_height"] == "Int64"
+    assert schema.CATALOG_COLUMNS["magnification"] == "string"
+    assert "mpp" in schema.RANGE_COLUMNS
