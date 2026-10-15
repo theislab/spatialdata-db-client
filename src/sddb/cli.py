@@ -55,11 +55,7 @@ def query(
     validation: Annotated[str, typer.Option(help="'pass' (default) or 'all'.")] = "pass",
     gene: Annotated[
         list[str] | None,
-        typer.Option(
-            "--gene",
-            "--expressing",
-            help="Gene symbol or Ensembl id; repeat to require all (downloads the gene index once).",
-        ),
+        typer.Option("--gene", "--expressing", help="Gene symbol or Ensembl id; repeat to require all (downloads the gene index once)."),
     ] = None,
     min_fraction: Annotated[float | None, typer.Option(help="With --gene: min fraction_obs_detected.")] = None,
     search: Annotated[str | None, typer.Option(help="Free-text search over facet values.")] = None,
@@ -75,13 +71,8 @@ def query(
     try:
         cat = Catalog(catalog)
         res = cat.query(
-            validation=val,
-            search=search,
-            expressing=gene or None,
-            mode="all",
-            min_fraction=min_fraction,
-            **facets,
-            **ranges,
+            validation=val, search=search, expressing=gene or None, mode="all", min_fraction=min_fraction,
+            **facets, **ranges
         )
     except Exception as err:
         raise _fail(err) from err
