@@ -75,6 +75,7 @@ class SpatialDataCohort(Sequence[Dataset]):
         self.matched: dict[str, list[str]] = matched or {}
         self._source = source or Source()
         self._filter: dict[str, Any] = filter or {}
+        self.split_manifest: Any = None  # set when this cohort is a fold of a split()
 
     def freeze(self) -> CohortManifest:
         """Pin this selection to its exact members and a deterministic hash. Offline/cheap.
@@ -155,6 +156,28 @@ class SpatialDataCohort(Sequence[Dataset]):
     def _derive(self, df: pd.DataFrame, filter: dict[str, Any]) -> SpatialDataCohort:
         """A new cohort over ``df`` carrying this cohort's source (used by subsetting/splits)."""
         return SpatialDataCohort(df, matched=self.matched, source=self._source, filter=filter)
+
+    def split(
+        self, *, by: str = "study_id", train: float, val: float, test: float, seed: int, mode: str = "group"
+    ) -> dict[str, SpatialDataCohort]:
+        """Group-safe deterministic split into ``{fold: SpatialDataCohort}``.
+
+        Each returned cohort carries the derived ``SplitManifest`` as ``.split_manifest`` (pinned to
+        this cohort's hash).
+        """
+        from sddb.manifest import cohort_hash
+        from sddb.split import make_split
+
+        parent = cohort_hash(self._filter, self._df["uid"])
+        sm = make_split(self._df, parent, by=by, train=train, val=val, test=test, seed=seed, mode=mode)
+        uid_str = self._df["uid"].astype("string")
+        folds: dict[str, SpatialDataCohort] = {}
+        for fold in ("train", "val", "test"):
+            want = [u for u, f in sm.assignments.items() if f == fold]
+            sub = self._derive(self._df[uid_str.isin(want)], self._filter)
+            sub.split_manifest = sm
+            folds[fold] = sub
+        return folds
 
     @property
     def members(self) -> pd.DataFrame:
