@@ -39,12 +39,24 @@ def test_download_and_resume(tmp_path, cohort, monkeypatch):
     assert calls[2:] == ["uid0002.zarr.part"]
 
 
-def test_failed_entry_refetched(tmp_path, cohort):
-    df = cohort.to_df()
-    df.loc[1, "zarr_url"] = str(tmp_path / "missing.zarr")
-    m = SpatialDataCohort(df).download(tmp_path / "out")
+def test_failed_entry_refetched(tmp_path, cohort, monkeypatch):
+    # store exists (passes liveness) but the copy fails for one member -> recorded "failed", refetched later
+    real = manifest._copy_store
+    bad = str(cohort.to_df()["uid"].iloc[1]) + ".zarr.part"
+
+    def flaky(u, d):
+        if d.name == bad:
+            raise OSError("transient copy failure")
+        return real(u, d)
+
+    monkeypatch.setattr(manifest, "_copy_store", flaky)
+    dest = tmp_path / "out"
+    m = cohort.download(dest)
     assert [e.status for e in m.entries] == ["complete", "failed"]
-    assert not list((tmp_path / "out").glob("*.part"))
+    assert not list(dest.glob("*.part"))
+    monkeypatch.setattr(manifest, "_copy_store", real)
+    m2 = cohort.download(dest)
+    assert [e.status for e in m2.entries] == ["complete", "complete"]
 
 
 def test_version_mismatch_and_allow(tmp_path, cohort):

@@ -38,3 +38,14 @@ def test_fallback_resolves_latest_with_warning(monkeypatch, tmp_path):
         coh.download(tmp_path)
     assert captured["pairs"] == [(stem + "0000", "s3://b/latest.zarr")]
     assert any("fall" in str(x.message).lower() or "latest" in str(x.message).lower() for x in w)
+
+
+def test_missing_store_no_fallback_raises_nonstrict(monkeypatch, tmp_path):
+    monkeypatch.setattr(m, "_store_exists", lambda url: False)
+    coh = SpatialDataCohort(pd.DataFrame({"uid": ["u1"], "zarr_url": [str(tmp_path / "nope.zarr")]}))
+    with pytest.raises(m.CohortDriftError, match="u1"):
+        coh.download(tmp_path / "out")
+
+
+def test_latest_for_stem_no_url_returns_none():
+    assert m._latest_for_stem(Source(), "s" * 16) is None

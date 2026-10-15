@@ -228,9 +228,10 @@ def _latest_for_stem(source: Source, stem: str) -> tuple[str, str] | None:
     """
     from sddb.catalog import Catalog
 
+    if not source.url:
+        return None
     try:
-        cat = Catalog(source.url) if source.url else Catalog()
-        df = cat.to_df()
+        df = Catalog(source.url).to_df()
     except Exception:
         return None
     hit = df[df["uid"].astype("string").str[:16] == stem]
