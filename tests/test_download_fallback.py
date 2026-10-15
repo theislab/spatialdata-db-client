@@ -49,3 +49,26 @@ def test_missing_store_no_fallback_raises_nonstrict(monkeypatch, tmp_path):
 
 def test_latest_for_stem_no_url_returns_none():
     assert m._latest_for_stem(Source(), "s" * 16) is None
+
+
+def test_transient_liveness_error_does_not_fall_back(monkeypatch, tmp_path):
+    def boom(url):
+        raise OSError("connection reset")
+
+    monkeypatch.setattr(m, "_store_exists", boom)
+    monkeypatch.setattr(m, "_latest_for_stem", lambda s, st: pytest.fail("must not fall back"))
+    coh = _coh("u1", "s3://b/x.zarr")
+    with pytest.raises(RuntimeError, match="could not determine liveness of u1"):
+        coh.download(tmp_path)
+
+
+def test_complete_member_skips_liveness_on_resume(monkeypatch, tmp_path):
+    from tests._fixtures import make_tiny_sdata_zarr
+
+    z = make_tiny_sdata_zarr(tmp_path)
+    coh = _coh("u1", str(z))
+    coh.download(tmp_path / "out")
+    monkeypatch.setattr(m, "_store_exists", lambda url: False)
+    monkeypatch.setattr(m, "_latest_for_stem", lambda s, st: pytest.fail("must not fall back"))
+    res = coh.download(tmp_path / "out", strict=True)
+    assert [e.status for e in res.entries] == ["complete"]

@@ -211,13 +211,16 @@ def plan_sizes(results: SpatialDataCohort) -> list[tuple[str, int]]:
 
 
 def _store_exists(zarr_url: str) -> bool:
-    """Whether a store resolves on its filesystem (anon S3 or local)."""
+    """Whether a store resolves on its filesystem (anon S3 or local).
+
+    Only a confirmed non-existence returns False; transient/auth/network errors propagate.
+    """
     from sddb.remote import _open_fs
 
+    fs, root = _open_fs(zarr_url)
     try:
-        fs, root = _open_fs(zarr_url)
         return bool(fs.exists(root))
-    except Exception:
+    except FileNotFoundError:
         return False
 
 
@@ -280,9 +283,20 @@ def download(
             pinned = True
     pairs: list[tuple[str, str]] = []
     missing: dict[str, str] = {}
+    complete: dict[str, ManifestEntry] = {}
+    if mpath.exists():
+        complete = {e.uid: e for e in Manifest.read(mpath).entries if e.status == "complete"}
     for d in results:
         uid, url = str(d.uid), str(d.zarr_url)
-        if _store_exists(url):
+        prev = complete.get(uid)
+        if prev is not None and prev.zarr_url == url and (root / f"{uid}.zarr").is_dir():
+            pairs.append((uid, url))  # already complete locally: no liveness check, no fetch
+            continue
+        try:
+            alive = _store_exists(url)
+        except Exception as err:
+            raise RuntimeError(f"could not determine liveness of {uid} store at {url}: {err}") from err
+        if alive:
             pairs.append((uid, url))
             continue
         if strict:
