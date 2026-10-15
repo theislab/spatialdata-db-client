@@ -113,8 +113,8 @@ class SpatialDataCohort(Sequence[Dataset]):
     def verify(self, *, workers: int = 8) -> None:
         """Liveness check: raise ``CohortDriftError`` if any pinned store no longer resolves.
 
-        Immutable version-exact stores cannot drift, so existence is the only failure mode. Called by
-        :meth:`download`; not by cheap ops.
+        Immutable version-exact stores cannot drift, so existence is the only failure mode. Not called by
+        :meth:`download`, which runs its own inline liveness loop; not run by cheap ops.
         """
         from sddb.manifest import CohortDriftError
 
@@ -159,18 +159,18 @@ class SpatialDataCohort(Sequence[Dataset]):
         return SpatialDataCohort(df, matched=self.matched, source=self._source, filter=filter)
 
     def split(
-        self, *, by: str = "study_id", train: float, val: float, test: float, seed: int, mode: str = "group"
+        self, *, by: str = "study_id", train: float, val: float, test: float, seed: int
     ) -> dict[str, SpatialDataCohort]:
         """Group-safe deterministic split into ``{fold: SpatialDataCohort}``.
 
         Each returned cohort carries the derived ``SplitManifest`` as ``.split_manifest`` (pinned to
-        this cohort's hash).
+        this cohort's hash). Splitting is always group-safe (``mode="group"``).
         """
         from sddb.manifest import cohort_hash
         from sddb.split import make_split
 
         parent = cohort_hash(self._filter, self._df["uid"])
-        sm = make_split(self._df, parent, by=by, train=train, val=val, test=test, seed=seed, mode=mode)
+        sm = make_split(self._df, parent, by=by, train=train, val=val, test=test, seed=seed, mode="group")
         uid_str = self._df["uid"].astype("string")
         folds: dict[str, SpatialDataCohort] = {}
         for fold in ("train", "val", "test"):
@@ -189,11 +189,13 @@ class SpatialDataCohort(Sequence[Dataset]):
         """Return a new cohort keeping rows matching every ``column=value`` (a list/tuple/set means isin)."""
         df = self._df
         mask = pd.Series(True, index=df.index)
+        norm: dict[str, Any] = {}
         for col, val in facets.items():
             if col not in df.columns:
                 raise ValueError(f"unknown column {col!r}; present: {list(df.columns)}")
             mask &= df[col].isin(list(val) if isinstance(val, (list, tuple, set)) else [val])
-        return self._derive(df[mask.fillna(False).astype(bool)], {**self._filter, **facets})
+            norm[col] = sorted(val, key=str) if isinstance(val, (list, tuple, set)) else val
+        return self._derive(df[mask.fillna(False).astype(bool)], {**self._filter, **norm})
 
     def where(self, mask: pd.Series) -> SpatialDataCohort:
         """Return a new cohort keeping rows where the boolean ``mask`` (aligned to ``members``) is True."""

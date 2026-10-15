@@ -59,3 +59,26 @@ def test_manifest_roundtrip_large_uses_parquet_sidecar(tmp_path):
     back = CohortManifest.load(p)
     assert len(back.members) == 250
     assert back.hash == man.hash
+
+
+def test_empty_cohort_roundtrip_keeps_columns(tmp_path):
+    from sddb.cohort import SpatialDataCohort
+
+    coh = SpatialDataCohort(_members(3).iloc[0:0], source=Source("cat.parquet"))
+    man = coh.freeze()
+    back = CohortManifest.load(man.write(tmp_path / "e.json"))
+    assert list(back.members.columns) == list(man.members.columns)
+    assert SpatialDataCohort.from_manifest(back).freeze().hash == man.hash
+
+
+def test_set_filter_serializes_and_hash_is_stable(tmp_path):
+    from sddb.cohort import SpatialDataCohort
+
+    df = _members(3).assign(tissue=["a", "b", "c"])
+    hashes = {
+        SpatialDataCohort(df, source=Source("c.parquet")).filter(tissue={"b", "a"}).freeze().hash for _ in range(5)
+    }
+    assert len(hashes) == 1
+    man = SpatialDataCohort(df, source=Source("c.parquet")).filter(tissue={"b", "a"}).freeze()
+    assert man.filter == {"tissue": ["a", "b"]}
+    man.write(tmp_path / "s.json")

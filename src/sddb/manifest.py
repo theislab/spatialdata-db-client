@@ -1,4 +1,4 @@
-"""Resumable cohort download with a JSON manifest."""
+"""Cohort identity record (CohortManifest, cohort_hash, CohortDriftError) and resumable cohort download with a JSON manifest."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ class CohortDriftError(RuntimeError):
         super().__init__(f"{len(drifted)} member(s) no longer resolve: {sorted(drifted)}")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class CohortManifest:
     """Serializable cohort identity: filter, member snapshot (pinned full uids) and a deterministic hash."""
 
@@ -74,6 +74,7 @@ class CohortManifest:
             self.members.to_parquet(side)
             head["members_ref"] = side.name
         else:
+            head["members_columns"] = list(self.members.columns)
             head["members"] = json.loads(self.members.to_json(orient="records"))
         p.write_text(json.dumps(head, indent=2))
         return p
@@ -86,7 +87,7 @@ class CohortManifest:
         if "members_ref" in head:
             members = pd.read_parquet(p.parent / head["members_ref"])
         else:
-            members = pd.DataFrame(head["members"])
+            members = pd.DataFrame(head["members"], columns=head.get("members_columns"))
         src = Source(url=head["source"]["url"], version=head["source"]["version"])
         return cls(head["schema_version"], head["created_at"], src, head["filter"], head["hash"], members)
 
@@ -217,8 +218,8 @@ def _store_exists(zarr_url: str) -> bool:
     """
     from sddb.remote import _open_fs
 
-    fs, root = _open_fs(zarr_url)
     try:
+        fs, root = _open_fs(zarr_url)
         return bool(fs.exists(root))
     except FileNotFoundError:
         return False

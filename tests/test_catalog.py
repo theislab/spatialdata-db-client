@@ -324,3 +324,12 @@ def test_query_range_column_absent_from_catalog(tmp_path):
     df.to_parquet(p)
     with pytest.raises(ValueError, match="not present in this catalog"):
         Catalog(p.as_uri(), cache_dir=tmp_path / "cache").query(total_counts__gte=1)
+
+
+def test_search_ignores_doi_fragments(cat):
+    df = cat._df.copy()
+    df["doi"] = "10.1038/s41592-000"
+    cat._df = df
+    with pytest.warns(UserWarning, match="nothing matched"):
+        res = cat.search("10")
+    assert "doi" not in res.matched

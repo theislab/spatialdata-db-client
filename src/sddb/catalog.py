@@ -272,7 +272,7 @@ class Catalog:
         tokens = re.findall(r"\w+", text.lower())
         matched: dict[str, list[str]] = {}
         for col in schema.FACETS:
-            if col not in self._df.columns:
+            if col == "doi" or col not in self._df.columns:  # DOIs tokenize to "10" etc.
                 continue
             values = sorted(str(v) for v in self._df[col].dropna().unique())
             hits = [v for v in values if any(_token_matches(t, v) for t in tokens)]

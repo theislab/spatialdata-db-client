@@ -72,3 +72,15 @@ def test_complete_member_skips_liveness_on_resume(monkeypatch, tmp_path):
     monkeypatch.setattr(m, "_latest_for_stem", lambda s, st: pytest.fail("must not fall back"))
     res = coh.download(tmp_path / "out", strict=True)
     assert [e.status for e in res.entries] == ["complete"]
+
+
+def test_real_missing_local_store_strict_raises_drift(tmp_path):
+    coh = _coh("u1", str(tmp_path / "missing.zarr"), source_url=None)
+    with pytest.raises(m.CohortDriftError, match="u1"):
+        coh.download(tmp_path / "out", strict=True)
+
+
+def test_real_missing_local_store_nonstrict_no_fallback_raises_drift(tmp_path):
+    coh = SpatialDataCohort(pd.DataFrame({"uid": ["u1"], "zarr_url": [str(tmp_path / "missing.zarr")]}))
+    with pytest.raises(m.CohortDriftError, match="u1"):
+        coh.download(tmp_path / "out", strict=False)
