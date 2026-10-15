@@ -197,17 +197,29 @@ class SpatialDataCohort(Sequence[Dataset]):
         return citations_text(self, bib_url=bib_url)
 
     def download(
-        self, dest: str | Path, *, workers: int = 4, pin_versions: bool = False, allow_version_change: bool = False
+        self,
+        dest: str | Path,
+        *,
+        workers: int = 4,
+        pin_versions: bool = False,
+        allow_version_change: bool = False,
+        strict: bool = False,
     ) -> Manifest:
         """Download every store under ``dest`` (resumable) and return the manifest.
 
         Raises ``ManifestVersionMismatch`` if ``dest`` holds a manifest pinned to another catalog version
-        (unless ``allow_version_change``).
+        (unless ``allow_version_change``). A missing pinned store falls back to the latest version with a
+        loud warning unless ``strict=True`` (then it raises ``CohortDriftError``).
         """
         from sddb.manifest import download
 
         return download(
-            self, dest, workers=workers, pin_versions=pin_versions, allow_version_change=allow_version_change
+            self,
+            dest,
+            workers=workers,
+            pin_versions=pin_versions,
+            allow_version_change=allow_version_change,
+            strict=strict,
         )
 
     def to_anndata(self, *, table: str | None = None) -> AnnData:

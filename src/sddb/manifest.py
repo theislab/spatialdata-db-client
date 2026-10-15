@@ -6,6 +6,7 @@ import hashlib
 import json
 import shutil
 import threading
+import warnings
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
@@ -209,6 +210,36 @@ def plan_sizes(results: SpatialDataCohort) -> list[tuple[str, int]]:
     return out
 
 
+def _store_exists(zarr_url: str) -> bool:
+    """Whether a store resolves on its filesystem (anon S3 or local)."""
+    from sddb.remote import _open_fs
+
+    try:
+        fs, root = _open_fs(zarr_url)
+        return bool(fs.exists(root))
+    except Exception:
+        return False
+
+
+def _latest_for_stem(source: Source, stem: str) -> tuple[str, str] | None:
+    """Resolve the current ``(uid, zarr_url)`` for a uid stem from the cohort's source catalog.
+
+    Returns None if the catalog is unreachable or the stem is absent.
+    """
+    from sddb.catalog import Catalog
+
+    try:
+        cat = Catalog(source.url) if source.url else Catalog()
+        df = cat.to_df()
+    except Exception:
+        return None
+    hit = df[df["uid"].astype("string").str[:16] == stem]
+    if hit.empty:
+        return None
+    row = hit.iloc[0]
+    return str(row["uid"]), str(row["zarr_url"])
+
+
 def download(
     results: SpatialDataCohort,
     dest: str | Path,
@@ -216,6 +247,7 @@ def download(
     workers: int = 4,
     pin_versions: bool = False,
     allow_version_change: bool = False,
+    strict: bool = False,
 ) -> Manifest:
     """Download every dataset's store to ``dest/<uid>.zarr`` and write ``dest/manifest.json``.
 
@@ -226,6 +258,9 @@ def download(
     ``allow_version_change`` is True (then it is overwritten). Only the catalog version is pinned:
     per-dataset byte-level pinning across republishes is not implemented. The sha256 covers store
     file paths and sizes, not contents.
+
+    Each store's liveness is checked first: a missing pinned store raises :class:`CohortDriftError`
+    when ``strict``, else falls back to the latest version (via the source catalog) with a warning.
     """
     root = Path(dest)
     current = results._source.version
@@ -242,5 +277,26 @@ def download(
                 )
         elif recorded is not None:
             pinned = True
-    pairs = [(str(d.uid), str(d.zarr_url)) for d in results]
+    pairs: list[tuple[str, str]] = []
+    missing: dict[str, str] = {}
+    for d in results:
+        uid, url = str(d.uid), str(d.zarr_url)
+        if _store_exists(url):
+            pairs.append((uid, url))
+            continue
+        if strict:
+            missing[uid] = f"pinned store missing: {url}"
+            continue
+        latest = _latest_for_stem(results._source, uid[:16])
+        if latest is None:
+            missing[uid] = f"pinned store missing and no fallback resolvable: {url}"
+            continue
+        warnings.warn(
+            f"member {uid}: pinned store missing; FALLING BACK to latest {latest[0]} "
+            f"({latest[1]}) - bytes DIFFER from the pinned version",
+            stacklevel=2,
+        )
+        pairs.append((uid, latest[1]))
+    if missing:
+        raise CohortDriftError(missing)
     return _fetch_all(pairs, root, current if pinned else None, workers)
