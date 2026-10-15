@@ -6,18 +6,88 @@ import hashlib
 import json
 import shutil
 import threading
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import fsspec
+import pandas as pd
 
+from sddb.dataset import Source
 from sddb.remote import storage_options
 
 if TYPE_CHECKING:
     from sddb.cohort import SpatialDataCohort
+
+
+SCHEMA_VERSION = "2"
+_SIDECAR_THRESHOLD = 200  # members beyond this go to a parquet sidecar
+
+
+def cohort_hash(filter: dict[str, Any], uids: Iterable[Any]) -> str:
+    """sha256 over the canonical filter and the sorted full lamin uids (version is baked into the uid)."""
+    payload = json.dumps(
+        {"filter": filter, "uids": sorted(str(u) for u in uids)},
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return "sha256:" + hashlib.sha256(payload.encode()).hexdigest()
+
+
+class CohortDriftError(RuntimeError):
+    """A pinned cohort member no longer resolves; `drifted` maps uid -> reason."""
+
+    def __init__(self, drifted: dict[str, str]) -> None:
+        self.drifted = drifted
+        super().__init__(f"{len(drifted)} member(s) no longer resolve: {sorted(drifted)}")
+
+
+@dataclass(frozen=True)
+class CohortManifest:
+    """Serializable cohort identity: filter, member snapshot (pinned full uids) and a deterministic hash."""
+
+    schema_version: str
+    created_at: str
+    source: Source
+    filter: dict[str, Any]
+    hash: str
+    members: pd.DataFrame  # read-only by contract
+
+    def write(self, path: str | Path) -> Path:
+        """Write JSON to ``path``; members spill to a parquet sidecar when large. Returns the path."""
+        p = Path(path)
+        head: dict[str, Any] = {
+            "schema_version": self.schema_version,
+            "created_at": self.created_at,
+            "source": {"url": self.source.url, "version": self.source.version},
+            "filter": self.filter,
+            "hash": self.hash,
+            "n_members": len(self.members),
+        }
+        if len(self.members) > _SIDECAR_THRESHOLD:
+            side = p.with_suffix(".members.parquet")
+            self.members.to_parquet(side)
+            head["members_ref"] = side.name
+        else:
+            head["members"] = json.loads(self.members.to_json(orient="records"))
+        p.write_text(json.dumps(head, indent=2))
+        return p
+
+    @classmethod
+    def load(cls, path: str | Path) -> CohortManifest:
+        """Read a manifest written by :meth:`write`."""
+        p = Path(path)
+        head = json.loads(p.read_text())
+        if "members_ref" in head:
+            members = pd.read_parquet(p.parent / head["members_ref"])
+        else:
+            members = pd.DataFrame(head["members"])
+        src = Source(url=head["source"]["url"], version=head["source"]["version"])
+        return cls(head["schema_version"], head["created_at"], src, head["filter"], head["hash"], members)
 
 
 @dataclass
