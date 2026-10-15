@@ -62,6 +62,10 @@ CATALOG_COLUMNS: dict[str, str] = {
     "hne_image": "boolean",
     "if_image": "boolean",
     "ftu_annotation": "boolean",
+    "mpp": "Float64",
+    "image_width": "Int64",
+    "image_height": "Int64",
+    "magnification": "string",
     "publication_date": "string",
     # Publication verification (set by the engine's publication-verification gate): the resolved
     # paper identifiers + the verify status (verified / provisional / no_associated_publication).

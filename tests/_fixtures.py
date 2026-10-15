@@ -77,6 +77,11 @@ def make_fixture_catalog() -> pd.DataFrame:
             "study_id": [_STUDIES[i] if i < len(_STUDIES) else f"Study{i}" for i in range(n)],
             "vitessce_url": [f"s3://scverse-spatial-eu-central-1/.lamindb/{r[0]}_vitessce.json" for r in _ROWS],
             "flag_foo": [True] * n,  # unknown extra column
+            # imaging metadata (typed nulls: not populated by the fixture)
+            "mpp": [None] * n,
+            "image_width": [None] * n,
+            "image_height": [None] * n,
+            "magnification": [None] * n,
             # superset list columns, derived per-row so the fixture stays len(_ROWS)-agnostic
             "collections": [[f"c-{i}"] if i % 3 else [] for i in range(n)],
             "staining_method": [["H&E", "IF"] if i % 2 else None for i in range(n)],
