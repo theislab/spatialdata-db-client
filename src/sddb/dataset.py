@@ -63,7 +63,7 @@ class Dataset:
             return None
         raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
 
-    def load(self, *, lazy: bool = True, version: str | None = None) -> SpatialData:
+    def load(self, *, lazy: bool = True, elements: list[str] | None = None, version: str | None = None) -> SpatialData:
         """Open this dataset as SpatialData.
 
         Parameters
@@ -72,6 +72,9 @@ class Dataset:
             Open a local store in place (dask-backed). Remote stores cannot be opened lazily yet
             (spatialdata upstream limitation); for a remote dataset pass ``lazy=False`` to copy the
             store to the cache and open it, or use :meth:`elements` to inspect without downloading.
+        elements
+            Localize only the selected ``"kind/name"`` elements (e.g. ``["images/he",
+            "tables/square_016um"]``).
         version
             Reserved; version pinning is not implemented yet.
 
@@ -83,7 +86,7 @@ class Dataset:
         if version is not None:
             raise NotImplementedError("version pinning is not implemented yet")
         try:
-            return remote.open_sdata(self.zarr_url, lazy=lazy)
+            return remote.open_sdata(self.zarr_url, lazy=lazy, elements=elements)
         except NotImplementedError as e:
             if "remote" in str(e).lower() and "lazy" in str(e).lower():
                 raise NotImplementedError(

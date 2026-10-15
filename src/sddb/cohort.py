@@ -15,6 +15,7 @@ from sddb.remote import _open_fs
 
 if TYPE_CHECKING:
     from anndata import AnnData
+    from spatialdata import SpatialData
 
     from sddb.catalog import Catalog
     from sddb.manifest import CohortManifest, Manifest
@@ -274,6 +275,15 @@ class SpatialDataCohort(Sequence[Dataset]):
     def summary(self) -> dict[str, Any]:
         """Headline numbers for this set."""
         return summary(self._df)
+
+    @property
+    def sdatas(self) -> list[SpatialData]:
+        """Open every member as a full SpatialData (download-then-open; explicit and potentially large)."""
+        return [self[i].load(lazy=False) for i in range(len(self))]
+
+    def load(self, *, elements: list[str] | None = None) -> list[SpatialData]:
+        """Open every member, localizing only ``elements`` (``"kind/name"``) when given."""
+        return [self[i].load(lazy=False, elements=elements) for i in range(len(self))]
 
     def __len__(self) -> int:
         return len(self._df)
