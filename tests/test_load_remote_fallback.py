@@ -12,7 +12,7 @@ def test_load_remote_lazy_gives_helpful_error(monkeypatch):
     """Test that Dataset.load(lazy=True) on a remote URL gives a helpful error mentioning .download() and lazy=False."""
 
     # Monkeypatch remote.open_sdata to raise NotImplementedError like upstream spatialdata would
-    def mock_open_sdata(zarr_url: str, *, lazy: bool = True, cache_dir=None):
+    def mock_open_sdata(zarr_url: str, *, lazy: bool = True, cache_dir=None, elements=None):
         if lazy and zarr_url.startswith(("s3://", "http://", "https://")):
             raise NotImplementedError("Remote lazy/partial open is not supported")
         raise AssertionError(f"Unexpected call to mock_open_sdata: lazy={lazy}, zarr_url={zarr_url}")

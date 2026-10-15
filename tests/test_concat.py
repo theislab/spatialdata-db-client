@@ -20,7 +20,7 @@ def test_concat_reads_only_tables(tmp_path):
     members = pd.DataFrame(
         {"uid": ["a", "b"], "zarr_url": [a, b], "fingerprint": ["x", "y"], "default_table": ["table", "table"]}
     )
-    adata = concat_tables(members, verify=False)
+    adata = concat_tables(members)
     assert adata.n_obs == 10
     assert set(adata.obs["uid"]) == {"a", "b"}
 
@@ -29,26 +29,22 @@ def test_concat_missing_table_names_member(tmp_path):
     a = _store(tmp_path / "a.zarr", 4)
     members = pd.DataFrame({"uid": ["a"], "zarr_url": [a], "fingerprint": ["x"], "default_table": ["nope"]})
     with pytest.raises(KeyError) as ei:
-        concat_tables(members, verify=False)
+        concat_tables(members)
     assert "'a'" in str(ei.value)
 
 
 def test_concat_without_default_table_column(tmp_path):
     a = _store(tmp_path / "a.zarr", 2)
     members = pd.DataFrame({"uid": ["a"], "zarr_url": [a]})
-    assert concat_tables(members, verify=False).n_obs == 2
+    assert concat_tables(members).n_obs == 2
 
 
 def test_cohort_delegators(tmp_path):
     from sddb.cohort import SpatialDataCohort
-    from sddb.dataset import Source
-    from sddb.freeze import FrozenCohort
 
     a = _store(tmp_path / "a.zarr", 3)
     df = pd.DataFrame({"uid": ["a"], "zarr_url": [a], "fingerprint": ["x"]})
     assert SpatialDataCohort(df).to_anndata().n_obs == 3
-    fc = FrozenCohort("1", "now", Source(), {}, "sha256:h", df)
-    assert fc.to_anndata(verify=False).n_obs == 3
 
 
 @pytest.mark.network

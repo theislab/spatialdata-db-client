@@ -10,7 +10,7 @@ from geopandas import GeoDataFrame
 from shapely.geometry import Point
 from spatialdata.models import Image2DModel, ShapesModel, TableModel
 
-from sddb import adapter, remote
+from sddb import remote
 
 
 def _shapes(n):
@@ -162,109 +162,6 @@ def test_region_closure_autoincludes(vhd_store, tmp_path):
     assert out.tables["square_008um"].obs["region"].cat.categories.tolist() == ["s_square_008um"]
 
 
-def test_resolve_elements_one_each(vhd_store):
-    roles = [
-        {"role": "image", "select": "full_image"},
-        {"role": "table", "select": "square_008um"},
-        {"role": "shapes", "select": "square_008um"},
-    ]
-    got = adapter._resolve_elements(str(vhd_store), roles)
-    assert sorted(got) == ["images/s_full_image", "shapes/s_square_008um", "tables/square_008um"]
-
-
-def test_resolve_elements_suffix_rejects_sibling(tmp_path):
-    # suffix "square_016um" must NOT also match "square_016um_for_vitessce"
-    store = tmp_path / "s.zarr"
-    sd.SpatialData(
-        shapes={
-            "a_square_016um": _shapes(5),
-            "a_square_016um_for_vitessce": _shapes(5),
-        }
-    ).write(store)
-    got = adapter._resolve_elements(str(store), [{"role": "shapes", "select": "square_016um"}])
-    assert got == ["shapes/a_square_016um"]
-
-
-def test_resolve_elements_ambiguous_raises(vhd_store):
-    with pytest.raises(ValueError, match="matched 3"):
-        adapter._resolve_elements(str(vhd_store), [{"role": "table", "select": "um", "match": "substring"}])
-
-
-def test_resolve_elements_missing_raises(vhd_store):
-    with pytest.raises(ValueError, match="no element"):
-        adapter._resolve_elements(str(vhd_store), [{"role": "image", "select": "nope"}])
-
-
-class _FakeAdapter:
-    name, version, config = "fake", "0", {}
-
-    def requirements(self):
-        return {"elements": [
-            {"role": "image", "select": "full_image"},
-            {"role": "table", "select": "square_008um"},
-            {"role": "shapes", "select": "square_008um"},
-        ]}
-
-    def validate_meta(self, meta):
-        return []
-
-    def validate(self, sdata):
-        return [] if set(sdata.tables) == {"square_008um"} else ["wrong tables"]
-
-    def build(self, sdata):
-        return sorted(sdata.tables)
-
-
-def _members_df(vhd_store):
-    return pd.DataFrame([{
-        "uid": "u1", "zarr_url": str(vhd_store), "lamin_version": "1", "fingerprint": "fp",
-    }])
-
-
-def test_build_localizes_from_requirements(vhd_store, tmp_path, monkeypatch):
-    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
-    from sddb import adapter
-    view = adapter.build(_members_df(vhd_store), _FakeAdapter(), verify=False)
-    uid, thunk = view[0]
-    assert thunk() == ["square_008um"]
-
-
-def test_build_provenance_records_elements(vhd_store, tmp_path, monkeypatch):
-    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
-    out = tmp_path / "prov"
-    adapter.build(_members_df(vhd_store), _FakeAdapter(), materialize=True, out=out, verify=False)
-    prov = json.loads((out / "provenance.json").read_text())
-    assert prov["requirements"]["elements"][0]["role"] == "image"
-    member = prov["members"][0]
-    assert member["elements"] == ["images/s_full_image", "shapes/s_square_008um", "tables/square_008um"]
-
-
-class _Fake002Adapter(_FakeAdapter):
-    def requirements(self):
-        return {"elements": [
-            {"role": "image", "select": "full_image"},
-            {"role": "table", "select": "square_002um"},
-            {"role": "shapes", "select": "square_002um"},
-        ]}
-
-    def validate(self, sdata):
-        return []
-
-
-def test_provenance_differs_by_element_selector(vhd_store, tmp_path, monkeypatch):
-    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
-    members = _members_df(vhd_store)
-    out_a, out_b = tmp_path / "prov_a", tmp_path / "prov_b"
-    adapter.build(members, _FakeAdapter(), materialize=True, out=out_a, verify=False)
-    adapter.build(members, _Fake002Adapter(), materialize=True, out=out_b, verify=False)
-    a = json.loads((out_a / "provenance.json").read_text())
-    b = json.loads((out_b / "provenance.json").read_text())
-    assert a["members"][0]["elements"] == ["images/s_full_image", "shapes/s_square_008um", "tables/square_008um"]
-    assert b["members"][0]["elements"] == ["images/s_full_image", "shapes/s_square_002um", "tables/square_002um"]
-    assert a["members"][0]["elements"] != b["members"][0]["elements"]
-    assert a["requirements"]["elements"] != b["requirements"]["elements"]
-
-
 def test_close_region_tolerates_corrupt_table_metadata(tmp_path):
     import fsspec
 
@@ -272,51 +169,6 @@ def test_close_region_tolerates_corrupt_table_metadata(tmp_path):
     (tmp_path / "tables" / "t" / "zarr.json").write_text("{not json")
     fs = fsspec.filesystem("file")
     assert remote._close_region(fs, str(tmp_path), ["tables/t"]) == ["tables/t"]
-
-
-def test_open_member_verifies_then_opens(vhd_store, tmp_path, monkeypatch):
-    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
-    import sddb.freeze as fz
-    import sddb.remote as rem
-    from sddb.dataset import Source
-    from sddb.freeze import FrozenCohort
-
-    members = _members_df(vhd_store)
-    fc = FrozenCohort("1", "2026-10-08T00:00:00Z", Source(url=None, version=None), {}, "sha256:x", members)
-
-    calls = []
-    monkeypatch.setattr(fz, "verify_members", lambda m, **k: calls.append("verify"))
-    _orig = rem.open_sdata
-
-    def spy(*a, **k):
-        calls.append("open")
-        return _orig(*a, **k)
-
-    monkeypatch.setattr(rem, "open_sdata", spy)
-
-    sdata = fc.open_member("u1", elements=["tables/square_008um"])
-    assert calls == ["verify", "open"]
-    assert set(sdata.tables) == {"square_008um"}
-
-
-@pytest.mark.network
-def test_localize_oliveira_excludes_2um(tmp_path):
-    # Real Oliveira Visium HD store: localizing 8um + H&E must not download the 8.1M-row 2um table.
-    import sddb
-
-    cat = sddb.Catalog()
-    url = cat.to_df().set_index("uid").loc["4OgPqTscrYc4veqE0000", "zarr_url"]
-    roles = [
-        {"role": "image", "select": "full_image"},
-        {"role": "table", "select": "square_008um"},
-        {"role": "shapes", "select": "square_008um"},
-    ]
-    paths = adapter._resolve_elements(url, roles)
-    sdata = remote.open_sdata(url, lazy=False, elements=paths, cache_dir=tmp_path)
-    assert "square_002um" not in sdata.tables
-    assert any("square_008um" in t for t in sdata.tables)
-    cached = next(tmp_path.glob("*.zarr"))
-    assert not list(cached.glob("tables/*002um*"))  # 2um subtree never copied
 
 
 def test_same_basename_stores_get_distinct_cache_dirs(tmp_path):
@@ -338,60 +190,3 @@ def test_open_elements_partial_store_error_names_url(vhd_store, tmp_path, monkey
     monkeypatch.setattr(sd, "read_zarr", boom)
     with pytest.raises(FileNotFoundError, match="Cannot open SpatialData zarr.*bad read"):
         remote.open_sdata(str(vhd_store), lazy=False, elements=KEEP, cache_dir=tmp_path / "c")
-
-
-def test_resolve_elements_role_canonicalization(vhd_store):
-    url = str(vhd_store)
-    for role, want in [
-        ("shape", "shapes/s_square_008um"),
-        ("shapes", "shapes/s_square_008um"),
-        ("image", "images/s_full_image"),
-        ("images", "images/s_full_image"),
-        ("table", "tables/square_008um"),
-    ]:
-        select = "full_image" if "image" in role else "square_008um"
-        assert adapter._resolve_elements(url, [{"role": role, "select": select}]) == [want]
-
-
-class _NoRequirementsAdapter:
-    name, version, config = "noreq", "0", {}
-
-    def validate_meta(self, meta):
-        return []
-
-    def validate(self, sdata):
-        return []
-
-    def build(self, sdata):
-        return sorted(sdata.tables)
-
-
-def test_open_adapter_without_requirements(vhd_store, tmp_path, monkeypatch):
-    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
-    sdata = adapter._open(str(vhd_store), _NoRequirementsAdapter())
-    assert "square_002um" in sdata.tables  # whole store
-
-
-def test_materialize_adapter_without_requirements(vhd_store, tmp_path, monkeypatch):
-    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
-    out = tmp_path / "prov"
-    adapter.build(_members_df(vhd_store), _NoRequirementsAdapter(), materialize=True, out=out, verify=False)
-    prov = json.loads((out / "provenance.json").read_text())
-    assert prov["requirements"] == {}
-    assert prov["members"][0]["elements"] is None
-
-
-class _FakeTableOnlyAdapter(_FakeAdapter):
-    def requirements(self):
-        return {"elements": [{"role": "table", "select": "square_008um"}]}
-
-    def validate(self, sdata):
-        return []
-
-
-def test_provenance_reflects_region_closure(vhd_store, tmp_path, monkeypatch):
-    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
-    out = tmp_path / "prov"
-    adapter.build(_members_df(vhd_store), _FakeTableOnlyAdapter(), materialize=True, out=out, verify=False)
-    prov = json.loads((out / "provenance.json").read_text())
-    assert prov["members"][0]["elements"] == ["shapes/s_square_008um", "tables/square_008um"]
