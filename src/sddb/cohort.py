@@ -164,10 +164,10 @@ class SpatialDataCohort(Sequence[Dataset]):
         )
 
     def to_anndata(self, *, table: str | None = None) -> AnnData:
-        """Concatenate each member's table into one AnnData (no drift check: a live cohort is unfrozen)."""
+        """Concatenate each member's table into one AnnData (outer join, obs[uid]+obs[study_id])."""
         from sddb.concat import concat_tables
 
-        return concat_tables(self._df, table=table, verify=False)
+        return concat_tables(self._df, table=table)
 
     def to_df(self) -> pd.DataFrame:
         """Return the underlying rows as a DataFrame copy."""

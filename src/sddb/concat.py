@@ -15,30 +15,17 @@ def _table_name(row: Any) -> str:
     return str(dt) if isinstance(dt, str) and dt else "table"
 
 
-def concat_tables(members: pd.DataFrame, *, table: str | None = None, verify: bool = True) -> ad.AnnData:
-    """Concatenate one table per member into a single AnnData (outer join, ``obs["uid"]`` labels the member).
+def concat_tables(members: pd.DataFrame, *, table: str | None = None) -> ad.AnnData:
+    """Concatenate one table per member into one AnnData (outer join).
 
-    Only ``<zarr_url>/tables/<name>`` is opened, so images/shapes are never touched. Works for local
-    paths and (anonymous) remote URLs.
-
-    Parameters
-    ----------
-    members
-        DataFrame with ``uid`` and ``zarr_url`` (optionally ``default_table``, ``fingerprint``).
-    table
-        Table name to read from every member; defaults to each member's ``default_table`` else ``"table"``.
-    verify
-        If True, run :func:`sddb.freeze.verify_members` first (raises ``CohortDriftError`` on drift).
+    ``obs['uid']`` labels the member; ``obs['study_id']`` is added from the members frame (all-NA if
+    the column is absent). Only ``<zarr_url>/tables/<name>`` is opened — images/shapes are untouched.
 
     Raises
     ------
     KeyError
         If a member's table is absent or unreadable; the message names the member uid.
     """
-    if verify:
-        from sddb.freeze import verify_members
-
-        verify_members(members)
     parts: list[ad.AnnData] = []
     keys: list[str] = []
     for row in members.itertuples(index=False):
@@ -49,4 +36,11 @@ def concat_tables(members: pd.DataFrame, *, table: str | None = None, verify: bo
         except Exception as e:
             raise KeyError(f"member {row.uid!r}: table {name!r} not readable at {url}: {e}") from e
         keys.append(str(row.uid))
-    return ad.concat(parts, join="outer", label="uid", keys=keys, index_unique="-")
+    out = ad.concat(parts, join="outer", label="uid", keys=keys, index_unique="-")
+    study_by_uid = (
+        dict(zip(members["uid"].astype("string"), members["study_id"].astype("string"), strict=True))
+        if "study_id" in members.columns
+        else {}
+    )
+    out.obs["study_id"] = out.obs["uid"].astype("string").map(study_by_uid).astype("string")
+    return out
