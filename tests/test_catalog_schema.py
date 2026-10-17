@@ -179,3 +179,18 @@ def test_new_imaging_columns_present():
     assert schema.CATALOG_COLUMNS["image_height"] == "Int64"
     assert schema.CATALOG_COLUMNS["magnification"] == "string"
     assert "mpp" in schema.RANGE_COLUMNS
+
+
+def test_sdata_repr_column_present():
+    from sddb import _catalog_schema as schema
+
+    assert schema.CATALOG_COLUMNS["sdata_repr"] == "string"
+    assert "sdata_repr" not in schema.REQUIRED_COLUMNS
+
+
+def test_n_transcripts_column_present():
+    from sddb import _catalog_schema as schema
+
+    assert schema.CATALOG_COLUMNS["n_transcripts"] == "Int64"
+    assert "n_transcripts" not in schema.REQUIRED_COLUMNS
+    assert "n_transcripts" in schema.RANGE_COLUMNS
