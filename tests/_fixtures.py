@@ -82,6 +82,7 @@ def make_fixture_catalog() -> pd.DataFrame:
             "image_width": [None] * n,
             "image_height": [None] * n,
             "magnification": [None] * n,
+            "sdata_repr": [None] * n,
             # superset list columns, derived per-row so the fixture stays len(_ROWS)-agnostic
             "collections": [[f"c-{i}"] if i % 3 else [] for i in range(n)],
             "staining_method": [["H&E", "IF"] if i % 2 else None for i in range(n)],

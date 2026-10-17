@@ -179,3 +179,10 @@ def test_new_imaging_columns_present():
     assert schema.CATALOG_COLUMNS["image_height"] == "Int64"
     assert schema.CATALOG_COLUMNS["magnification"] == "string"
     assert "mpp" in schema.RANGE_COLUMNS
+
+
+def test_sdata_repr_column_present():
+    from sddb import _catalog_schema as schema
+
+    assert schema.CATALOG_COLUMNS["sdata_repr"] == "string"
+    assert "sdata_repr" not in schema.REQUIRED_COLUMNS
