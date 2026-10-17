@@ -68,6 +68,8 @@ CATALOG_COLUMNS: dict[str, str] = {
     "magnification": "string",
     # Plain-text `print(sdata)` of the converted SpatialData object (store path stripped).
     "sdata_repr": "string",
+    # Raw row count of the transcripts points element (imaging techs; null without points).
+    "n_transcripts": "Int64",
     "publication_date": "string",
     # Publication verification (set by the engine's publication-verification gate): the resolved
     # paper identifiers + the verify status (verified / provisional / no_associated_publication).
