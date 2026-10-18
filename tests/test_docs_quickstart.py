@@ -27,5 +27,5 @@ def test_citation_cff_is_valid():
     assert cff["cff-version"] == "1.2.0"
     assert cff["type"] == "software"
     assert cff["title"] == "spatialdata-db"
-    assert cff["authors"][0]["family-names"] == "Treis"
+    assert cff["authors"][0]["name"] == "Theis Lab"
     assert cff["license"] == "BSD-3-Clause"
