@@ -33,3 +33,16 @@ def test_fold_carries_split_manifest(tmp_path):
     sm = folds["train"].split_manifest
     assert isinstance(sm, SplitManifest)
     assert sm.write(tmp_path / "split.json").exists()
+
+
+def test_subset_of_fold_keeps_split_manifest():
+    fold = _coh(6).split(by="study_id", train=0.5, val=0.25, test=0.25, seed=0)["train"]
+    sm = fold.split_manifest
+    assert fold[:1].split_manifest is sm
+    assert fold.where(fold.members["uid"] != "").split_manifest is sm
+
+
+def test_union_keeps_manifest_only_within_one_split():
+    folds = _coh(6).split(by="study_id", train=0.5, val=0.25, test=0.25, seed=0)
+    assert (folds["train"] | folds["val"]).split_manifest is folds["train"].split_manifest
+    assert (folds["train"] | _coh(2)).split_manifest is None

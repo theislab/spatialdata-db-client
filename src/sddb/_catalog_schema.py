@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pandas as pd
 from pandas.api import types as pdt
 
@@ -149,7 +151,7 @@ class SchemaError(ValueError):
     """Raised when a catalog/gene-index DataFrame violates the schema contract."""
 
 
-def _is_null(v) -> bool:
+def _is_null(v: Any) -> bool:
     """A single cell is null — scalar NaN/NA/None. A list/array cell is never null."""
     return v is None or (not hasattr(v, "__iter__") and pd.isna(v))
 

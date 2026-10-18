@@ -99,7 +99,7 @@ def genes_tool(
     """
     if isinstance(symbols, str):
         symbols = [symbols]
-    facets = {k: v for k, v in (("organism", organism), ("tissue", tissue), ("disease", disease), ("assay", assay)) if v is not None}
+    facets: dict[str, Any] = {k: v for k, v in (("organism", organism), ("tissue", tissue), ("disease", disease), ("assay", assay)) if v is not None}
     cohort = Catalog(catalog_url).query(
         expressing=symbols, mode=mode, validation=None if include_bronze else "pass", **facets
     )

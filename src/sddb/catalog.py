@@ -297,7 +297,7 @@ class Catalog:
         """
         if (uids is None) == (study_ids is None):
             raise ValueError("pass exactly one of uids= or study_ids=")
-        col, want = ("uid", uids) if uids is not None else ("study_id", study_ids)
+        col, want = ("uid", uids) if uids is not None else ("study_id", study_ids or [])
         if col not in self._df.columns:
             raise ValueError(f"catalog has no {col!r} column")
         want = [str(x) for x in want]

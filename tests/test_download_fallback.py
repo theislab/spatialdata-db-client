@@ -38,6 +38,7 @@ def test_fallback_resolves_latest_with_warning(monkeypatch, tmp_path):
         coh.download(tmp_path)
     assert captured["pairs"] == [(stem + "0000", "s3://b/latest.zarr")]
     assert any("fall" in str(x.message).lower() or "latest" in str(x.message).lower() for x in w)
+    assert w[0].filename == __file__  # points at the caller, not sddb internals
 
 
 def test_missing_store_no_fallback_raises_nonstrict(monkeypatch, tmp_path):
