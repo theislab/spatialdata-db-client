@@ -72,6 +72,8 @@ CATALOG_COLUMNS: dict[str, str] = {
     "sdata_repr": "string",
     # Raw row count of the transcripts points element (imaging techs; null without points).
     "n_transcripts": "Int64",
+    # Visium HD capture-area size ("6.5 mm" / "11 mm"); fixes the bin grid (838² vs 1381² at 8 µm).
+    "capture_area": "string",
     "publication_date": "string",
     # Publication verification (set by the engine's publication-verification gate): the resolved
     # paper identifiers + the verify status (verified / provisional / no_associated_publication).
