@@ -3,15 +3,9 @@
 from __future__ import annotations
 
 import pandas as pd
+from sphinx.util import logging as _logging
 
-try:
-    from sphinx.util import logging as _logging
-
-    _log = _logging.getLogger(__name__)
-except ImportError:  # pragma: no cover - sphinx always present in docs builds
-    import logging
-
-    _log = logging.getLogger(__name__)
+_log = _logging.getLogger(__name__)
 
 # Technologies with a hand-written card on docs/intro/assays.md.
 DESCRIBED = frozenset({"Visium", "VisiumHD", "Xenium", "Atera", "SpatialTranscriptomics"})
@@ -29,7 +23,12 @@ def _token(tech: str) -> str:
     return "".join(w[:1].upper() + w[1:] for w in tech.split())
 
 
+def _datasets(n: int) -> str:
+    return f"{n} dataset" + ("" if n == 1 else "s")
+
+
 def catalog_stats(df: pd.DataFrame) -> dict[str, str]:
+    """Substitution values (counts, example links, ready-made prose) for the intro pages."""
     stats = {
         "n_datasets": str(len(df)),
         "n_studies": str(df["study_id"].nunique()),
@@ -45,15 +44,19 @@ def catalog_stats(df: pd.DataFrame) -> dict[str, str]:
         stats[f"example_{tok}"] = f"[{row['title']}]({_BASE}/{row['slug']}/)"
     for tok in DESCRIBED:
         if f"n_{tok}" in stats:
-            line = f"**{stats[f'n_{tok}']}** datasets in the catalog."
+            line = f"**{_datasets(int(stats[f'n_{tok}']))}** in the catalog."
             if f"example_{tok}" in stats:
                 line += f" Example: {stats[f'example_{tok}']}"
             stats[f"line_{tok}"] = line
-    stats["intro_count"] = f"The catalog currently holds {len(df)} datasets."
+    stats["intro_count"] = f"The catalog currently holds {_datasets(len(df))}."
     if "tier" in df:
-        tiers = df["tier"].fillna("unassigned").value_counts()
-        stats["tier_note"] = "This release holds " + ", ".join(f"{n} {t}" for t, n in tiers.items()) + " datasets."
-    rest = [f"- **{name}**: {n} datasets. No description yet." for name, n in assay_rows(df) if _token(name) not in DESCRIBED]
+        tiers = df["tier"].astype(object).where(df["tier"].notna(), "unassigned").value_counts()
+        stats["tier_note"] = "This release holds " + ", ".join(f"{_datasets(n)} ({t})" for t, n in tiers.items()) + "."
+    other: dict[str, list] = {}
+    for name, n in assay_rows(df):
+        if _token(name) not in DESCRIBED:
+            other.setdefault(_token(name), [name, 0])[1] += n
+    rest = [f"- **{name}**: {_datasets(n)}. No description yet." for name, n in other.values()]
     stats["other_assays"] = "**Other technologies**\n\n" + "\n".join(rest) if rest else ""
     return stats
 

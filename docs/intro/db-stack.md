@@ -44,8 +44,10 @@ sdata = cat.query(technology="Xenium")[0].load(lazy=False)
 
 ## Versioning and drift
 
-Store versions are immutable, so a pinned selection stays reproducible. Freeze a
-cohort to record its exact members and a hash, then check it later:
+A dataset uid pins a specific version, but the DB does not yet retain old store bytes: when a dataset
+is republished its store is replaced. `freeze()` records exactly which versions you used;
+`verify()` raises `CohortDriftError` when a pinned version no longer resolves, and `check_updates()`
+lists members a newer version supersedes. `download(..., pin_versions=True)` keeps your own copy.
 
 ```python
 cohort = cat.query(technology="Visium")
@@ -53,6 +55,3 @@ manifest = cohort.freeze()      # exact members + deterministic hash
 cohort.verify()                 # raises CohortDriftError if a pinned store no longer resolves
 cohort.check_updates(cat)       # {pinned_uid: current_uid} for members a newer version supersedes
 ```
-
-`CohortDriftError` signals that a pinned store is gone; `check_updates()` reports (and warns
-about) members that have newer versions without changing your pinned cohort.

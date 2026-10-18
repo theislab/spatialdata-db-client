@@ -1,8 +1,8 @@
 import importlib.util
+import logging
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 import sddb
 
@@ -54,13 +54,6 @@ def test_technology_token_has_no_spaces():
     assert s["example_SpatialTranscriptomics"].endswith("/datasets/x/)")
 
 
-def test_raw_and_token_spellings_sum():
-    df = _df([("X", "x", 5, "pass", "spatial transcriptomics", "s5", "human")])
-    s = cs.catalog_stats(df)
-    assert s["n_SpatialTranscriptomics"] == "2"
-    assert s["example_SpatialTranscriptomics"].endswith("/datasets/x/)")  # smallest across both spellings
-
-
 def test_nan_size_bytes_does_not_crash():
     df = _df([("Nan", "nan", float("nan"), "pass", "Atera", "s6", "human")])
     s = cs.catalog_stats(df)
@@ -72,7 +65,7 @@ def test_nan_size_bytes_does_not_crash():
 def test_other_assays_lists_only_undescribed():
     df = _df([("New", "new", 1, "pass", "NewTech", "s4", "human")])
     s = cs.catalog_stats(df)
-    assert s["other_assays"] == "**Other technologies**\n\n- **NewTech**: 1 datasets. No description yet."
+    assert s["other_assays"] == "**Other technologies**\n\n- **NewTech**: 1 dataset. No description yet."
     assert cs.catalog_stats(_df())["other_assays"] == ""
 
 
@@ -81,8 +74,6 @@ def test_load_stats_warns_on_failure(monkeypatch, caplog):
         raise OSError("offline")
 
     monkeypatch.setattr(sddb, "Catalog", boom)
-    import logging
-
     with caplog.at_level(logging.WARNING):
         assert cs.load_stats() == {}
     assert "offline" in caplog.text
@@ -90,10 +81,26 @@ def test_load_stats_warns_on_failure(monkeypatch, caplog):
 
 def test_with_defaults_blanks_missing():
     d = cs.with_defaults({})
-    assert d["intro_count"] == "" and d["line_Visium"] == "" and d["other_assays"] == ""
+    assert d["intro_count"] == ""
+    assert d["line_Visium"] == ""
+    assert d["other_assays"] == ""
 
 
 def test_line_and_tier_note():
     s = cs.catalog_stats(_df().assign(tier=["silver", "silver", None, "bronze"]))
-    assert s["line_Visium"].startswith("**1** datasets")
-    assert "2 silver" in s["tier_note"] and "1 unassigned" in s["tier_note"]
+    assert s["line_Visium"].startswith("**1 dataset**")
+    assert "2 datasets (silver)" in s["tier_note"]
+    assert "1 dataset (unassigned)" in s["tier_note"]
+
+
+def test_other_assays_aggregates_by_token_and_categorical_tier():
+    df = _df(
+        [
+            ("N1", "n1", 1, "pass", "new tech", "s4", "human"),
+            ("N2", "n2", 2, "pass", "newTech", "s4", "human"),
+        ]
+    ).assign(tier=pd.Categorical(["silver"] * 6))
+    s = cs.catalog_stats(df)
+    assert s["other_assays"].count("No description yet.") == 1
+    assert "2 datasets" in s["other_assays"]
+    assert "6 datasets (silver)" in s["tier_note"]

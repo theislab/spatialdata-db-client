@@ -3,7 +3,7 @@ from importlib.metadata import version as _version
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "_ext"))
-from catalog_stats import load_stats, with_defaults  # noqa: E402
+from catalog_stats import load_stats, with_defaults
 
 project = "spatialdata-db"
 author = "Tim Treis and the spatialdata-db authors"
