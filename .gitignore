@@ -17,3 +17,5 @@ docs/_build/
 .DS_Store
 .superpowers/
 docs/jupyter_execute/
+docs/reference/_catalog_columns.md
+docs/reference/generated/

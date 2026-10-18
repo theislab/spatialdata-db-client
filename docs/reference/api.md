@@ -1,0 +1,18 @@
+# API reference
+
+```{eval-rst}
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   sddb.Catalog
+   sddb.Dataset
+   sddb.SpatialDataCohort
+   sddb.TaskAdapter
+   sddb.Manifest
+   sddb.CohortManifest
+   sddb.SplitManifest
+   sddb.CohortDriftError
+   sddb.ManifestVersionMismatch
+   sddb.open_sdata
+```

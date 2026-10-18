@@ -5,6 +5,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "_ext"))
 from catalog_stats import load_stats, with_defaults
 
+from sddb._catalog_schema import CATALOG_COLUMNS, FACETS, RANGE_COLUMNS
+
+
+def _write_catalog_columns() -> None:
+    rows = ["| Column | Dtype | Facet | Range |", "|---|---|---|---|"]
+    for col, dtype in CATALOG_COLUMNS.items():
+        rows.append(f"| `{col}` | `{dtype}` | {'yes' if col in FACETS else ''} | {'yes' if col in RANGE_COLUMNS else ''} |")
+    (Path(__file__).parent / "reference" / "_catalog_columns.md").write_text("\n".join(rows) + "\n")
+
+
+_write_catalog_columns()
+
 project = "spatialdata-db"
 author = "Tim Treis and the spatialdata-db authors"
 copyright = "2026, Tim Treis and the spatialdata-db authors"
@@ -20,8 +32,11 @@ extensions = [
     "sphinx_copybutton",
     "sphinx_click",
 ]
-exclude_patterns = ["_build", "design", "superpowers"]
+exclude_patterns = ["_build", "design", "superpowers", "reference/_catalog_columns.md"]
 templates_path = ["_templates"]
+
+autosummary_generate = True
+napoleon_numpy_docstring = True
 
 nb_execution_mode = "off"
 myst_enable_extensions = ["colon_fence", "substitution", "deflist"]

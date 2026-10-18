@@ -15,11 +15,34 @@ cat = sddb.Catalog.from_file("catalog.parquet")  # local downloaded catalog
 
 ```{toctree}
 :maxdepth: 2
+:caption: Introduction
 
 intro/assays
 intro/db-stack
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Guides
+
 guides/find-and-load
 guides/cohorts
 guides/ml
 guides/cli-and-agents
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Reference
+
+reference/api
+reference/cli
+reference/mcp
+reference/catalog-columns
+```
+
+```{toctree}
+:maxdepth: 1
+
+changelog
 ```
