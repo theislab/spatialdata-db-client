@@ -18,6 +18,8 @@ cat = sddb.Catalog.from_file("catalog.parquet")  # local downloaded catalog
 
 intro/assays
 intro/db-stack
-tutorials/query_and_load
-tutorials/cohorts
+guides/find-and-load
+guides/cohorts
+guides/ml
+guides/cli-and-agents
 ```
