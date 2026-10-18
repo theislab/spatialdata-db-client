@@ -25,6 +25,7 @@ $ sddb-cli query --organism human --technology Visium --tissue lung --min-obs 50
 uid                   technology  organism  tissue  n_obs
 PntNMJy70YLUP8eq0000  Visium      human     lung    6195
 ```
+The match, [`PntNMJy70YLUP8eq0000`](https://spatialdata-db.com/datasets/visium-spatial-gene-expression-lung-pntnmjy70ylup8eq0000/), has a page on the DB site.
 
 Other options: `--assay`, `--disease`, `--tier`, `--search`, `--min-features`, `--min-fraction`. If a value
 matches nothing, the closest known value is suggested.
@@ -52,7 +53,8 @@ $ sddb-cli download gtLUT2zUAH9l9Uzi0002 --dest ./data
 ./data/manifest.json
 ```
 
-`--workers` sets the number of parallel downloads. The store lands in `./data/gtLUT2zUAH9l9Uzi0002.zarr`.
+`--workers` sets the number of parallel downloads. The store ([`gtLUT2zUAH9l9Uzi0002`](https://spatialdata-db.com/datasets/visium-spatial-gene-expression-lung-gtlut2zuah9l9uzi0002/)) lands in `./data/gtLUT2zUAH9l9Uzi0002.zarr`.
+
 
 ### viewer-url
 
@@ -62,12 +64,13 @@ Print the browser viewer link for one dataset. Nothing is downloaded.
 $ sddb-cli viewer-url xVK6T0rajFTgOKci0000
 https://vitessce.io#?edit=false&url=data:,%257B%2522version%2522...
 ```
+Dataset: [`xVK6T0rajFTgOKci0000`](https://spatialdata-db.com/datasets/visium-hd-bone-element-xvk6t0rajftgokci0000/).
 
 ### genes
 
 List datasets that express all the given genes (symbols or Ensembl ids). With one gene, datasets are ranked by
 the fraction of observations in which it is detected. The first call downloads the cross-dataset gene index
-(about 142 MB, cached afterwards).
+(about 260 MB, cached afterwards).
 
 ```
 $ sddb-cli genes EPCAM --limit 3
@@ -76,6 +79,7 @@ EVTMdgu8thDMETSm0000  1                      3.807e+04     pass               si
 bOgBgMqQm9TObx470000  0.9995                 3.615e+05     pass               silver
 TeLy8jHRRvoCrNMn0000  0.9989                 2.761e+05     pass               silver
 ```
+Datasets: [`EVTMdgu8thDMETSm0000`](https://spatialdata-db.com/datasets/visium-spatial-gene-expression-intestine-evtmdgu8thdmetsm0000/), [`bOgBgMqQm9TObx470000`](https://spatialdata-db.com/datasets/visium-spatial-gene-expression-intestine-bogbgmqqm9tobx470000/), [`TeLy8jHRRvoCrNMn0000`](https://spatialdata-db.com/datasets/visium-spatial-gene-expression-colon-tely8jhrrvocrnmn0000/).
 
 `genes` defaults to `--validation all`, so bronze datasets are included. Pass `--validation pass` to exclude them.
 

@@ -169,7 +169,7 @@ def genes(
 ) -> None:
     """List datasets expressing all GENES (one gene: ranked by fraction of observations detected).
 
-    The first call downloads the cross-dataset gene index (~105 MB, one-time; cached afterwards).
+    The first call downloads the cross-dataset gene index (~260 MB, one-time; cached afterwards).
     """
     val = _validation(validation)
     try:
