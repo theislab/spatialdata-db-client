@@ -55,3 +55,11 @@ def test_empty_filter_is_empty_cohort_not_error():
 def test_slice_preserves_filter():
     coh = SpatialDataCohort(pd.DataFrame({"uid": ["a", "b", "c"], "zarr_url": ["x"] * 3}), filter={"tissue": "breast"})
     assert coh[:2]._filter == {"tissue": "breast"}
+
+
+def test_set_ops_with_non_cohort_raise_typeerror():
+    coh = _coh(["a"], ["breast"])
+    with pytest.raises(TypeError):
+        coh | {"a"}
+    with pytest.raises(TypeError):
+        coh - ["a"]

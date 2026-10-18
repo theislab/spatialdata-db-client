@@ -310,7 +310,7 @@ def download(
         warnings.warn(
             f"member {uid}: pinned store missing; FALLING BACK to latest {latest[0]} "
             f"({latest[1]}) - bytes DIFFER from the pinned version",
-            stacklevel=2,
+            stacklevel=3,  # user -> SpatialDataCohort.download -> here
         )
         pairs.append((uid, latest[1]))
     if missing:

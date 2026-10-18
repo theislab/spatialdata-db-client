@@ -155,8 +155,10 @@ class SpatialDataCohort(Sequence[Dataset]):
         return superseded
 
     def _derive(self, df: pd.DataFrame, filter: dict[str, Any]) -> SpatialDataCohort:
-        """A new cohort over ``df`` carrying this cohort's source (used by subsetting/splits)."""
-        return SpatialDataCohort(df, matched=self.matched, source=self._source, filter=filter)
+        """A new cohort over ``df`` carrying this cohort's source and split manifest (used by subsetting/splits)."""
+        sub = SpatialDataCohort(df, matched=self.matched, source=self._source, filter=filter)
+        sub.split_manifest = self.split_manifest
+        return sub
 
     def split(
         self, *, by: str = "study_id", train: float, val: float, test: float, seed: int
@@ -201,13 +203,20 @@ class SpatialDataCohort(Sequence[Dataset]):
         """Return a new cohort keeping rows where the boolean ``mask`` (aligned to ``members``) is True."""
         return self._derive(self._df[mask.fillna(False).astype(bool)], self._filter)
 
-    def __or__(self, other: SpatialDataCohort) -> SpatialDataCohort:
+    def __or__(self, other: object) -> SpatialDataCohort:
         """Union, deduped by uid (first occurrence wins). Provenance filter is dropped (no longer a pure facet set)."""
+        if not isinstance(other, SpatialDataCohort):
+            return NotImplemented
         df = pd.concat([self._df, other._df]).drop_duplicates("uid", keep="first")
-        return self._derive(df, {})
+        out = self._derive(df, {})
+        if other.split_manifest is not self.split_manifest:
+            out.split_manifest = None  # mixes splits (or split + non-split): no single manifest applies
+        return out
 
-    def __sub__(self, other: SpatialDataCohort) -> SpatialDataCohort:
+    def __sub__(self, other: object) -> SpatialDataCohort:
         """Difference: drop any member whose uid is in ``other``."""
+        if not isinstance(other, SpatialDataCohort):
+            return NotImplemented
         return self._derive(self._df[~self._df["uid"].isin(other._df["uid"])], self._filter)
 
     def citations(self, path: str | Path, *, bib_url: str | None = None) -> Path:
@@ -296,7 +305,7 @@ class SpatialDataCohort(Sequence[Dataset]):
     def __getitem__(self, i: slice) -> SpatialDataCohort: ...
     def __getitem__(self, i: int | slice) -> Dataset | SpatialDataCohort:
         if isinstance(i, slice):
-            return SpatialDataCohort(self._df.iloc[i], matched=self.matched, source=self._source, filter=self._filter)
+            return self._derive(self._df.iloc[i], self._filter)
         return Dataset(self._df.iloc[i])
 
     def __iter__(self) -> Iterator[Dataset]:
