@@ -3,6 +3,7 @@ file_format: mystnb
 kernelspec:
   name: python3
   display_name: python3
+  language: python
 ---
 
 # Query the catalog and load a dataset
