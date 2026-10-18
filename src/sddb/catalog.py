@@ -23,9 +23,8 @@ if TYPE_CHECKING:
     from sddb.genes import GeneIndex
 
 _ROLLING_SUFFIX = "/catalog-latest/catalog.parquet"
-DEFAULT_CATALOG_URL = (
-    "https://github.com/theislab/spatialdata-db-client/releases/download/catalog-latest/catalog.parquet"
-)
+_RELEASE_BASE = "https://github.com/theislab/spatialdata-db-client/releases/download"
+DEFAULT_CATALOG_URL = _RELEASE_BASE + _ROLLING_SUFFIX
 _FUZZY_CUTOFF = 88
 _RANGE_OPS = {"gte": operator.ge, "gt": operator.gt, "lte": operator.le, "lt": operator.lt}
 
@@ -91,10 +90,14 @@ class Catalog:
         refresh
             Bypass the cache and re-download.
         """
+        version_applied = False
         if url is None:
             url = os.environ.get("SDDB_CATALOG_URL") or DEFAULT_CATALOG_URL
             if version is not None and url.endswith(_ROLLING_SUFFIX):
                 url = url.removesuffix(_ROLLING_SUFFIX) + f"/catalog-{version}/catalog.parquet"
+                version_applied = True
+        if version is not None and not version_applied:
+            warnings.warn(f"version={version!r} is ignored for catalog URL {url!r}", UserWarning, stacklevel=2)
         local = _local_path(url)
         if local is not None and not url.startswith("file://"):
             url = str(local.resolve())  # stable cache key regardless of cwd

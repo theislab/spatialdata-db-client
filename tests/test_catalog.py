@@ -363,12 +363,16 @@ def test_version_pins_dated_release(monkeypatch, no_fetch):
 
 
 def test_version_ignored_with_explicit_url(no_fetch):
-    assert Catalog("file:///x/catalog.parquet", version="2026-10-16").url == "file:///x/catalog.parquet"
+    with pytest.warns(UserWarning, match="ignored"):
+        cat = Catalog("file:///x/catalog.parquet", version="2026-10-16")
+    assert cat.url == "file:///x/catalog.parquet"
 
 
 def test_version_with_custom_env_url_unchanged(monkeypatch, no_fetch):
     monkeypatch.setenv("SDDB_CATALOG_URL", "https://example.org/c.parquet")
-    assert Catalog(version="2026-10-16").url == "https://example.org/c.parquet"
+    with pytest.warns(UserWarning, match="ignored"):
+        cat = Catalog(version="2026-10-16")
+    assert cat.url == "https://example.org/c.parquet"
 
 
 def test_version_pinned_siblings_share_release_dir(monkeypatch, no_fetch):

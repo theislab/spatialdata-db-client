@@ -1,0 +1,23 @@
+name: release-guard
+
+# A code release (v*) accidentally marked Latest would break old installs that read
+# releases/latest/download/catalog.parquet. Re-mark the newest dated catalog release as Latest.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  restore-latest:
+    if: startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag=$(gh release list --json tagName,createdAt --limit 100 \
+            --jq '[.[] | select(.tagName | startswith("catalog-2"))] | sort_by(.createdAt) | reverse | .[0].tagName')
+          gh release edit "$tag" --latest

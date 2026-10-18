@@ -36,4 +36,4 @@ Remote datasets: query the catalog, inspect with `elements()` (no download), or 
 
 ## Releasing
 
-Cut code releases with `gh release create vX.Y.Z --latest=false` so catalog releases keep resolving for older installs.
+Cut code releases with `gh release create vX.Y.Z --latest=false` so catalog releases keep resolving for older installs. The `release-guard` workflow re-marks the newest dated catalog release as Latest if one slips through.
