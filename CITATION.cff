@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "spatialdata-db"
+abstract: "Lean read client for the spatialdata-db spatial-omics collection."
+authors:
+  - name: "Theis Lab"
+repository-code: "https://github.com/theislab/spatialdata-db-client"
+license: BSD-3-Clause

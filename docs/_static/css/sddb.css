@@ -1,0 +1,142 @@
+/* SpatialData-DB brand for sphinx-book-theme.
+   Token values copied from spatialdata-db-web src/styles/global.css (lines 1-41). */
+
+html {
+  --sddb-font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --sddb-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --pst-font-family-base: var(--sddb-font-sans);
+  --pst-font-family-heading: var(--sddb-font-sans);
+  --pst-font-family-monospace: var(--sddb-font-mono);
+}
+
+html[data-theme="dark"] {
+  --sddb-bg: #0b0e1a;
+  --sddb-surface: #141a2e;
+  --sddb-surface-2: #1b2238;
+  --sddb-border: #262f49;
+  --sddb-fg: #e8eaf2;
+  --sddb-muted: #9aa3b8;
+  --sddb-cyan: #4fc3ea;
+  --sddb-gold: #e8d45a;
+  --sddb-green: #4fc96a;
+  --sddb-indigo: #8e91f0;
+  --sddb-primary-fg: #06121a;
+  --pst-color-primary: #4fc3ea;
+  --pst-color-secondary: #8e91f0;
+  --pst-color-background: #0b0e1a;
+  --pst-color-on-background: #141a2e;
+  --pst-color-surface: #141a2e;
+  --pst-color-on-surface: #1b2238;
+  --pst-color-border: #262f49;
+  --pst-color-text-base: #e8eaf2;
+  --pst-color-text-muted: #9aa3b8;
+  --pst-color-link: #4fc3ea;
+  --pst-color-link-hover: #8e91f0;
+  --pst-color-inline-code: #e8d45a;
+  --pst-color-target: #262f49;
+  --pst-color-info: #4fc3ea;
+  --pst-color-success: #4fc96a;
+  --pst-color-warning: #e8d45a;
+  --pst-color-attention: #e8d45a;
+  --pst-color-important: #8e91f0;
+}
+
+html[data-theme="light"] {
+  --sddb-bg: #f7f8fb;
+  --sddb-surface: #ffffff;
+  --sddb-surface-2: #eef1f7;
+  --sddb-border: #dfe4ef;
+  --sddb-fg: #131828;
+  --sddb-muted: #596178;
+  --sddb-cyan: #1484c0;
+  --sddb-gold: #a8831f;
+  --sddb-green: #2e9e52;
+  --sddb-indigo: #5b5ee0;
+  --sddb-primary-fg: #ffffff;
+  --pst-color-primary: #1484c0;
+  --pst-color-secondary: #5b5ee0;
+  --pst-color-background: #f7f8fb;
+  --pst-color-on-background: #ffffff;
+  --pst-color-surface: #ffffff;
+  --pst-color-on-surface: #eef1f7;
+  --pst-color-border: #dfe4ef;
+  --pst-color-text-base: #131828;
+  --pst-color-text-muted: #596178;
+  --pst-color-link: #1484c0;
+  --pst-color-link-hover: #5b5ee0;
+  --pst-color-inline-code: #a8831f;
+  --pst-color-target: #dfe4ef;
+  --pst-color-info: #1484c0;
+  --pst-color-success: #2e9e52;
+  --pst-color-warning: #a8831f;
+  --pst-color-attention: #a8831f;
+  --pst-color-important: #5b5ee0;
+}
+
+/* Wordmark */
+.sddb-brand { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.sddb-brand .logo__image { height: 2rem; width: auto; }
+.sddb-wordmark { font-weight: 700; font-size: 1.1rem; color: var(--pst-color-text-base); }
+.sddb-wordmark-db { color: var(--pst-color-text-muted); }
+.sddb-label { font-size: .7rem; font-weight: 600; color: var(--pst-color-text-muted);
+  text-transform: uppercase; letter-spacing: .04em; }
+
+/* Admonition accents: note = cyan, tip = green, warning = gold, important = indigo.
+   The theme colours borders/icons via --pst-color-{info,success,warning,attention}; those are set per mode above. */
+.admonition.important, div.admonition.important {
+  --pst-color-attention: var(--sddb-indigo);
+  --pst-color-attention-bg: color-mix(in srgb, var(--sddb-indigo) 12%, transparent);
+}
+
+/* One search only: the sidebar has it, so drop the (empty) top header bar on desktop */
+#pst-header .search-button-field { display: none; }
+@media (min-width: 960px) { #pst-header { display: none; } }
+
+/* Code blocks */
+div.highlight { border: 1px solid var(--sddb-border); border-radius: .7rem; background: var(--sddb-surface-2); }
+.highlight pre { background-color: var(--sddb-surface-2); color: var(--sddb-fg); font-family: var(--sddb-font-mono); }
+
+/* Code-token colours. Selectors carry html[data-theme] to out-rank pygments.css.
+   Light-mode hues are darkened versions of the site tokens (>= 4.5:1 on surface-2 #eef1f7). */
+html[data-theme="dark"] { --sddb-tk-kw: #4fc3ea; --sddb-tk-str: #4fc96a; --sddb-tk-num: #e8d45a;
+  --sddb-tk-fn: #8e91f0; --sddb-tk-cm: #9aa3b8; }
+html[data-theme="light"] { --sddb-tk-kw: #1473a8; --sddb-tk-str: #277b47; --sddb-tk-num: #846921;
+  --sddb-tk-fn: #5457d8; --sddb-tk-cm: #596178; }
+html[data-theme] .highlight :is(.k, .kn, .kd, .kr, .kp, .kt, .ow) { color: var(--sddb-tk-kw); font-weight: normal; }
+html[data-theme] .highlight :is(.s, .s1, .s2, .sa, .sb, .sc, .dl, .se, .sh, .si, .sx, .sr, .ss) { color: var(--sddb-tk-str); }
+html[data-theme] .highlight :is(.m, .mi, .mf, .mh, .mo, .mb, .il, .kc, .nb, .bp) { color: var(--sddb-tk-num); font-weight: normal; }
+html[data-theme] .highlight :is(.nf, .fm, .nc, .nn, .ne, .nd) { color: var(--sddb-tk-fn); font-weight: normal; }
+html[data-theme] .highlight :is(.c, .c1, .cm, .cp, .cs, .ch, .cpf, .sd) { color: var(--sddb-tk-cm); font-style: italic; }
+
+/* Components ported from the site: .sddb-pill, .sddb-badge, .sddb-btn */
+.sddb-pill { display: inline-flex; font-size: .82rem; padding: .3rem .7rem; border-radius: 999px;
+  border: 1px solid var(--sddb-border); background: var(--sddb-surface); color: var(--sddb-fg); }
+.sddb-pill:hover { border-color: var(--sddb-cyan); color: var(--sddb-cyan); }
+
+.sddb-badge {
+  --tag: var(--sddb-muted);
+  display: inline-flex; align-items: center; gap: .3rem;
+  font-size: .7rem; font-weight: 600; padding: .12rem .5rem; border-radius: 999px;
+  color: color-mix(in srgb, var(--tag) 55%, var(--sddb-muted));
+  background: color-mix(in srgb, var(--tag) 10%, var(--sddb-surface-2));
+  border: 1px solid color-mix(in srgb, var(--tag) 26%, var(--sddb-border));
+}
+.sddb-badge.tier { --tag: var(--sddb-gold); }
+.sddb-badge.hne { --tag: var(--sddb-cyan); }
+.sddb-badge.viz { --tag: var(--sddb-green); }
+
+.sddb-btn { display: inline-flex; align-items: center; gap: .4rem; font-weight: 600; font-size: .9rem;
+  padding: .55rem .9rem; border-radius: .6rem; border: 1px solid var(--sddb-border);
+  background: var(--sddb-surface); color: var(--sddb-fg); cursor: pointer; }
+.sddb-btn:hover { background: var(--sddb-surface-2); }
+.sddb-btn-primary { background: var(--pst-color-primary); color: var(--sddb-primary-fg); border-color: transparent; }
+.sddb-btn-primary:hover { background: color-mix(in srgb, var(--pst-color-primary) 85%, #fff); color: var(--sddb-primary-fg); }
+
+/* sphinx-design cards styled like the site's .item */
+.sd-card {
+  background-color: var(--sddb-surface); border: 1px solid var(--sddb-border);
+  border-radius: .75rem; box-shadow: none !important; transition: border-color .15s;
+}
+.sd-card:hover { border-color: color-mix(in srgb, var(--sddb-cyan) 55%, var(--sddb-border)); }
+.sd-card .sd-card-header, .sd-card .sd-card-footer { background-color: transparent; border-color: var(--sddb-border); }
+.sd-card-hover:hover { transform: none; }

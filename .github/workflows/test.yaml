@@ -39,9 +39,21 @@ jobs:
         with:
           use_oidc: true
 
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+      - name: Install
+        run: uv sync --group doc
+      - name: Build docs
+        run: uv run --group doc sphinx-build -W --keep-going -b html docs docs/_build/html
+
   check:
     if: always()
-    needs: [test]
+    needs: [test, docs]
     runs-on: ubuntu-latest
     steps:
       - uses: re-actors/alls-green@release/v1

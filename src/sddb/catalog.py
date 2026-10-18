@@ -195,7 +195,7 @@ class Catalog:
             was itself matched, so failed rows do not survive a ``search``.
         expressing
             Gene symbol or Ensembl id, or a list of them; keep datasets where they are expressed (see
-            ``genes.where_expressed``). The first use downloads the gene index (~142 MB, cached).
+            ``genes.where_expressed``). The first use downloads the gene index (~260 MB, cached).
         mode
             With several ``expressing`` genes: ``"all"`` (default, AND) or ``"any"`` (union).
         min_fraction
@@ -252,7 +252,7 @@ class Catalog:
             hits = self.search(search)
             matched = hits.matched or None
             keep &= df["uid"].isin(hits.to_df()["uid"])
-        if expressing is not None and keep.any():  # skip the ~142 MB gene index when nothing is left to filter
+        if expressing is not None and keep.any():  # skip the ~260 MB gene index when nothing is left to filter
             member = self.genes.where_expressed(expressing, mode=mode, min_fraction=min_fraction, validation=None)
             keep &= df["uid"].isin(set(member.to_df()["uid"]))
         params: dict[str, Any] = {
