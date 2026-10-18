@@ -9,9 +9,10 @@ pip install git+https://github.com/theislab/spatialdata-db-client
 ```python
 from sddb import Catalog
 
-hits = Catalog().query(technology="Xenium", tissue="heart")
+hits = Catalog().query(technology="Visium", tissue="lung")
 hits.summary()
-sdata = hits[0].load(lazy=False)  # copies the store (about 1.3 GB) to the local cache
+smallest = min(hits, key=lambda ds: ds.size_bytes)
+sdata = smallest.load(lazy=False)  # ~10 MB, copied to the local cache
 ```
 
 ::::{grid} 1 2 2 4

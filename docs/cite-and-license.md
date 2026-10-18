@@ -7,7 +7,7 @@ Every dataset belongs to a study. A cohort writes the BibTeX entries of the stud
 ```python
 from sddb import Catalog
 
-cohort = Catalog().query(technology="Xenium", tissue="heart")
+cohort = Catalog().query(technology="Visium", tissue="lung")
 cohort.citations("refs.bib")          # write BibTeX to a file
 bibtex, n_entries = cohort.citations_text()  # or get it as a string
 ```
@@ -15,7 +15,7 @@ bibtex, n_entries = cohort.citations_text()  # or get it as a string
 From the shell, `sddb-cli cite` takes the same facets as a query:
 
 ```bash
-sddb-cli cite --technology Xenium --tissue heart -o refs.bib
+sddb-cli cite --technology Visium --tissue lung -o refs.bib
 ```
 
 See {doc}`reference/cli` for all options.
@@ -42,7 +42,7 @@ Each dataset keeps the license of its source. The catalog records it in these co
 
 ```python
 cat = Catalog()
-cat.query(license_set=True)                       # drop datasets with an unknown license
+cat.query(license_set=True)                       # keep only datasets whose license is known
 cat.query(noncommercial=False)                    # only datasets cleared for commercial use
 cat.query(license_set=True, noncommercial=False)  # both
 cat.query(license="CC-BY-4.0")                    # one exact license id
