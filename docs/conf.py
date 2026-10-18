@@ -20,8 +20,8 @@ _write_catalog_columns()
 (Path(__file__).parent / "reference" / "_cli.md").write_text(cli_markdown())
 
 project = "spatialdata-db"
-author = "Tim Treis and the spatialdata-db authors"
-copyright = "2026, Tim Treis and the spatialdata-db authors"
+author = "Theis Lab"
+copyright = "2026, Theis Lab"
 release = _version("spatialdata-db")
 
 extensions = [
