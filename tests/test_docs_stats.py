@@ -76,6 +76,7 @@ def test_load_stats_warns_on_failure(monkeypatch, caplog):
     monkeypatch.setattr(sddb, "Catalog", boom)
     with caplog.at_level(logging.WARNING):
         assert cs.load_stats() == {}
+        cs.warn_if_unavailable()
     assert "offline" in caplog.text
 
 
@@ -127,3 +128,8 @@ def test_site_url_single_source():
             if "spatialdata-db" + ".com" in text:
                 hits.append(str(p))
     assert not hits, hits
+
+
+def test_example_label_uses_organism_and_tissue():
+    df = _df().assign(tissue="lung")
+    assert cs.catalog_stats(df)["example_Xenium"].startswith("[human lung](")

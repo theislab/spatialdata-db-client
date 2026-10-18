@@ -46,6 +46,7 @@ Full reference for the Python API.
 Using data from the DB? See {doc}`cite-and-license`.
 
 ```{toctree}
+:hidden:
 :maxdepth: 2
 :caption: Introduction
 
@@ -54,6 +55,7 @@ intro/db-stack
 ```
 
 ```{toctree}
+:hidden:
 :maxdepth: 2
 :caption: Guides
 
@@ -64,6 +66,7 @@ guides/cli-and-agents
 ```
 
 ```{toctree}
+:hidden:
 :maxdepth: 2
 :caption: Reference
 
@@ -74,6 +77,7 @@ reference/catalog-columns
 ```
 
 ```{toctree}
+:hidden:
 :maxdepth: 1
 
 cite-and-license

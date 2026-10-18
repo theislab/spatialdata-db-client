@@ -25,9 +25,9 @@ from most to least curated. Some rows have no tier assigned yet. Not every tier 
 silver = cat.query(tier="silver")
 ```
 
-## Licences
+## Licenses
 
-Datasets keep their original licence, in the `license` column. Two boolean columns make
+Datasets keep their original license, in the `license` column. Two boolean columns make
 filtering easy: `license_noncommercial` (use is restricted to non-commercial work) and
 `license_redistributable` (the data may be redistributed). Check them before reusing data
 in a product or republishing it.
@@ -39,7 +39,9 @@ Each row's `zarr_url` points to a SpatialData Zarr store on S3, readable anonymo
 [scverse/spatialdata-db](https://lamin.ai/scverse/spatialdata-db). Remote stores load eagerly:
 
 ```python
-sdata = cat.query(technology="Xenium")[0].load(lazy=False)
+hits = cat.query(technology="Visium", tissue="lung")
+smallest = min(hits, key=lambda ds: ds.size_bytes)
+sdata = smallest.load(lazy=False)  # ~10 MB
 ```
 
 ## Versioning and drift

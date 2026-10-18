@@ -7,7 +7,7 @@ pip install "spatialdata-db[mcp] @ git+https://github.com/theislab/spatialdata-d
 sddb-mcp
 ```
 
-Row-returning tools cap their output at `MAX_ROWS = 200` records. `download` writes only to a server-controlled directory: `$SDDB_MCP_DOWNLOAD_DIR`, or a cache subdirectory when unset.
+The `query` tool caps its output at `MAX_ROWS = 200` records; `genes` is not capped. `download` writes only to a server-controlled directory: `$SDDB_MCP_DOWNLOAD_DIR`, or a cache subdirectory when unset.
 
 | Tool | Description | Parameters |
 |---|---|---|

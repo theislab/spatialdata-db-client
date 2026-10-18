@@ -50,7 +50,7 @@ Copy stores by uid into a directory (resumable) and print the path of the manife
 
 ```
 $ sddb-cli download gtLUT2zUAH9l9Uzi0002 --dest ./data
-./data/manifest.json
+data/manifest.json
 ```
 
 `--workers` sets the number of parallel downloads. The store ([`gtLUT2zUAH9l9Uzi0002`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-lung-gtlut2zuah9l9uzi0002/)) lands in `./data/gtLUT2zUAH9l9Uzi0002.zarr`.
@@ -81,7 +81,7 @@ TeLy8jHRRvoCrNMn0000  0.9989                 2.761e+05     pass               si
 ```
 Datasets: [`EVTMdgu8thDMETSm0000`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-intestine-evtmdgu8thdmetsm0000/), [`bOgBgMqQm9TObx470000`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-intestine-bogbgmqqm9tobx470000/), [`TeLy8jHRRvoCrNMn0000`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-colon-tely8jhrrvocrnmn0000/).
 
-`genes` defaults to `--validation all`, so bronze datasets are included. Pass `--validation pass` to exclude them.
+`genes` defaults to `--validation all`, so datasets that failed validation are included. Pass `--validation pass` to exclude them. To restrict by tier, use `sddb-cli query --tier ...` or `Catalog().query(tier=...)`.
 
 ### cite
 

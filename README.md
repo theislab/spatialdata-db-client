@@ -7,7 +7,7 @@ Lean read client for the spatialdata-db spatial-omics collection: query the cata
 ## Install
 
 ```bash
-pip install spatialdata-db
+pip install git+https://github.com/theislab/spatialdata-db-client
 ```
 
 ## Usage

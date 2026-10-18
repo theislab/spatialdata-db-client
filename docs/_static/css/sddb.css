@@ -108,12 +108,12 @@ html[data-theme] .highlight :is(.m, .mi, .mf, .mh, .mo, .mb, .il, .kc, .nb, .bp)
 html[data-theme] .highlight :is(.nf, .fm, .nc, .nn, .ne, .nd) { color: var(--sddb-tk-fn); font-weight: normal; }
 html[data-theme] .highlight :is(.c, .c1, .cm, .cp, .cs, .ch, .cpf, .sd) { color: var(--sddb-tk-cm); font-style: italic; }
 
-/* Components ported from the site: .pill, .badge, .btn */
-.pill { display: inline-flex; font-size: .82rem; padding: .3rem .7rem; border-radius: 999px;
+/* Components ported from the site: .sddb-pill, .sddb-badge, .sddb-btn */
+.sddb-pill { display: inline-flex; font-size: .82rem; padding: .3rem .7rem; border-radius: 999px;
   border: 1px solid var(--sddb-border); background: var(--sddb-surface); color: var(--sddb-fg); }
-.pill:hover { border-color: var(--sddb-cyan); color: var(--sddb-cyan); }
+.sddb-pill:hover { border-color: var(--sddb-cyan); color: var(--sddb-cyan); }
 
-.badge {
+.sddb-badge {
   --tag: var(--sddb-muted);
   display: inline-flex; align-items: center; gap: .3rem;
   font-size: .7rem; font-weight: 600; padding: .12rem .5rem; border-radius: 999px;
@@ -121,16 +121,16 @@ html[data-theme] .highlight :is(.c, .c1, .cm, .cp, .cs, .ch, .cpf, .sd) { color:
   background: color-mix(in srgb, var(--tag) 10%, var(--sddb-surface-2));
   border: 1px solid color-mix(in srgb, var(--tag) 26%, var(--sddb-border));
 }
-.badge.tier { --tag: var(--sddb-gold); }
-.badge.hne { --tag: var(--sddb-cyan); }
-.badge.viz { --tag: var(--sddb-green); }
+.sddb-badge.tier { --tag: var(--sddb-gold); }
+.sddb-badge.hne { --tag: var(--sddb-cyan); }
+.sddb-badge.viz { --tag: var(--sddb-green); }
 
-.btn { display: inline-flex; align-items: center; gap: .4rem; font-weight: 600; font-size: .9rem;
+.sddb-btn { display: inline-flex; align-items: center; gap: .4rem; font-weight: 600; font-size: .9rem;
   padding: .55rem .9rem; border-radius: .6rem; border: 1px solid var(--sddb-border);
   background: var(--sddb-surface); color: var(--sddb-fg); cursor: pointer; }
-.btn:hover { background: var(--sddb-surface-2); }
-.btn-primary { background: var(--pst-color-primary); color: var(--sddb-primary-fg); border-color: transparent; }
-.btn-primary:hover { background: color-mix(in srgb, var(--pst-color-primary) 85%, #fff); color: var(--sddb-primary-fg); }
+.sddb-btn:hover { background: var(--sddb-surface-2); }
+.sddb-btn-primary { background: var(--pst-color-primary); color: var(--sddb-primary-fg); border-color: transparent; }
+.sddb-btn-primary:hover { background: color-mix(in srgb, var(--pst-color-primary) 85%, #fff); color: var(--sddb-primary-fg); }
 
 /* sphinx-design cards styled like the site's .item */
 .sd-card {

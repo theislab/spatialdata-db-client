@@ -5,7 +5,7 @@ from pathlib import Path
 from sddb._catalog_schema import CATALOG_COLUMNS, FACETS, RANGE_COLUMNS
 
 sys.path.insert(0, str(Path(__file__).parent / "_ext"))
-from catalog_stats import SITE_URL, load_stats, with_defaults
+from catalog_stats import SITE_URL, load_stats, warn_if_unavailable, with_defaults
 from cli_docs import cli_markdown
 
 
@@ -40,8 +40,15 @@ autosummary_generate = True
 napoleon_numpy_docstring = True
 
 nb_execution_mode = "off"
+copybutton_prompt_text = "$ "
+suppress_warnings = ["sddb.catalog"]
 myst_enable_extensions = ["colon_fence", "substitution", "deflist"]
 myst_substitutions = with_defaults(load_stats())
+
+
+def setup(app):
+    """Emit the deferred catalog warning once ``suppress_warnings`` is active."""
+    app.connect("config-inited", warn_if_unavailable)
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),

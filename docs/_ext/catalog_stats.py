@@ -6,6 +6,7 @@ import pandas as pd
 from sphinx.util import logging as _logging
 
 _log = _logging.getLogger(__name__)
+_failure: list[Exception] = []  # load_stats runs while conf.py is read, before warning filters exist
 
 # Technologies with a hand-written card on docs/intro/assays.md.
 DESCRIBED = frozenset({"Visium", "VisiumHD", "Xenium", "Atera", "SpatialTranscriptomics"})
@@ -22,6 +23,12 @@ def assay_rows(df: pd.DataFrame) -> list[tuple[str, int]]:
 def _token(tech: str) -> str:
     """Substitution-safe key: "spatial transcriptomics" -> "SpatialTranscriptomics"."""
     return "".join(w[:1].upper() + w[1:] for w in tech.split())
+
+
+def _label(row: pd.Series) -> str:
+    """Human link text "<organism> <tissue>", falling back to the title."""
+    parts = [str(row.get(k)) for k in ("organism", "tissue") if pd.notna(row.get(k)) and row.get(k)]
+    return " ".join(parts) if len(parts) == 2 else str(row["title"])
 
 
 def _datasets(n: int) -> str:
@@ -42,7 +49,7 @@ def catalog_stats(df: pd.DataFrame) -> dict[str, str]:
     passing = passing.dropna(subset=["size_bytes"])
     for tok, sub in passing.groupby("_tok"):
         row = sub.loc[sub["size_bytes"].idxmin()]
-        stats[f"example_{tok}"] = f"[{row['title']}]({_BASE}/{row['slug']}/)"
+        stats[f"example_{tok}"] = f"[{_label(row)}]({_BASE}/{row['slug']}/)"
     for tok in DESCRIBED:
         if f"n_{tok}" in stats:
             line = f"**{_datasets(int(stats[f'n_{tok}']))}** in the catalog."
@@ -80,5 +87,14 @@ def load_stats() -> dict[str, str]:
         stats["catalog_date"] = (cat.generated_at or "")[:10]
         return stats
     except Exception as exc:
-        _log.warning("catalog stats unavailable, building docs without numbers: %r", exc)
+        _failure.append(exc)
         return {}
+
+
+def warn_if_unavailable(app=None, config=None) -> None:
+    """Log the deferred load failure; run from ``setup`` so ``suppress_warnings`` is already in effect."""
+    for exc in _failure:
+        _log.warning(
+            "catalog stats unavailable, building docs without numbers: %r", exc, type="sddb", subtype="catalog"
+        )
+    _failure.clear()

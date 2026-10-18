@@ -113,7 +113,7 @@ class SpatialDataCohort(Sequence[Dataset]):
     def verify(self, *, workers: int = 8) -> None:
         """Liveness check: raise ``CohortDriftError`` if any pinned store no longer resolves.
 
-        Immutable version-exact stores cannot drift, so existence is the only failure mode. Not called by
+        A pinned version may stop resolving when a dataset is republished; this detects that. Not called by
         :meth:`download`, which runs its own inline liveness loop; not run by cheap ops.
         """
         from sddb.manifest import CohortDriftError
