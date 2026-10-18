@@ -4,10 +4,10 @@ from pathlib import Path
 CSS = Path(__file__).parent.parent / "docs" / "_static" / "css" / "sddb.css"
 
 
-def _block(css: str, selector: str) -> str:
-    m = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", css)
-    assert m, f"no {selector} block"
-    return m.group(1)
+def _block(css: str, selector: str, last: bool = False) -> str:
+    ms = re.findall(re.escape(selector) + r"\s*\{([^}]*)\}", css)
+    assert ms, f"no {selector} block"
+    return ms[-1] if last else ms[0]
 
 
 def _luminance(hex_color: str) -> float:
@@ -31,3 +31,12 @@ def test_css_has_both_modes():
 
 def test_dark_code_contrast():
     assert _contrast("#e8eaf2", "#1b2238") >= 4.5
+
+
+def test_light_code_contrast():
+    css = CSS.read_text()
+    block = _block(css, 'html[data-theme="light"]', last=True)
+    tokens = re.findall(r"--sddb-tk-[a-z]+: (#[0-9a-f]{6});", block)
+    assert len(tokens) == 5
+    for color in tokens:
+        assert _contrast(color, "#eef1f7") >= 4.5, color
