@@ -1,4 +1,9 @@
+import sys
 from importlib.metadata import version as _version
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "_ext"))
+from catalog_stats import load_stats  # noqa: E402
 
 project = "spatialdata-db"
 author = "Tim Treis and the spatialdata-db authors"
@@ -20,6 +25,7 @@ templates_path = ["_templates"]
 
 nb_execution_mode = "off"
 myst_enable_extensions = ["colon_fence", "substitution", "deflist"]
+myst_substitutions = load_stats()
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
