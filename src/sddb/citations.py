@@ -12,7 +12,7 @@ from sddb.genes import sibling_url
 if TYPE_CHECKING:
     from sddb.cohort import SpatialDataCohort
 
-DEFAULT_BIB_URL = "https://github.com/theislab/spatialdata-db-client/releases/latest/download/citations.bib"
+DEFAULT_BIB_URL = "https://github.com/theislab/spatialdata-db-client/releases/download/catalog-latest/citations.bib"
 
 
 def parse_bibtex(text: str) -> dict[str, str]:

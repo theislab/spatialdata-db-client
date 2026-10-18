@@ -22,7 +22,9 @@ from sddb.dataset import Source
 if TYPE_CHECKING:
     from sddb.genes import GeneIndex
 
-DEFAULT_CATALOG_URL = "https://github.com/theislab/spatialdata-db-client/releases/latest/download/catalog.parquet"
+_ROLLING_SUFFIX = "/catalog-latest/catalog.parquet"
+_RELEASE_BASE = "https://github.com/theislab/spatialdata-db-client/releases/download"
+DEFAULT_CATALOG_URL = _RELEASE_BASE + _ROLLING_SUFFIX
 _FUZZY_CUTOFF = 88
 _RANGE_OPS = {"gte": operator.ge, "gt": operator.gt, "lte": operator.le, "lt": operator.lt}
 
@@ -83,14 +85,19 @@ class Catalog:
         cache_dir
             Cache directory override.
         version
-            Dated snapshot; only used when ``url`` is None (ignored if an explicit url is given), selects ``catalog-<version>.parquet``.
+            Dated snapshot (e.g. ``"2026-10-16"``); selects the ``catalog-<version>`` release in place of ``catalog-latest``.
+            Ignored if an explicit ``url`` is given or the resolved URL is not the default rolling-release URL.
         refresh
             Bypass the cache and re-download.
         """
+        version_applied = False
         if url is None:
             url = os.environ.get("SDDB_CATALOG_URL") or DEFAULT_CATALOG_URL
-            if version is not None:
-                url = url.rsplit("/", 1)[0] + f"/catalog-{version}.parquet"
+            if version is not None and url.endswith(_ROLLING_SUFFIX):
+                url = url.removesuffix(_ROLLING_SUFFIX) + f"/catalog-{version}/catalog.parquet"
+                version_applied = True
+        if version is not None and not version_applied:
+            warnings.warn(f"version={version!r} is ignored for catalog URL {url!r}", UserWarning, stacklevel=2)
         local = _local_path(url)
         if local is not None and not url.startswith("file://"):
             url = str(local.resolve())  # stable cache key regardless of cwd
