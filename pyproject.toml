@@ -40,7 +40,7 @@ sddb-mcp = "sddb.mcp.server:main"
 [dependency-groups]
 test = [ "pytest", "coverage", "pytest-cov" ]
 typecheck = [ "mypy", "pandas-stubs" ]
-doc = [ "sphinx>=8.1", "sphinx-book-theme", "myst-nb>=1.1", "sphinx-design", "sphinx-copybutton", "sphinx-click", "ipykernel", "ipywidgets", "nbconvert" ]
+doc = [ "sphinx>=8.1", "sphinx-book-theme", "myst-nb>=1.1", "sphinx-design", "sphinx-copybutton", "ipykernel", "ipywidgets", "nbconvert" ]
 
 [tool.hatch.version]
 source = "vcs"

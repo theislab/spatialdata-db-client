@@ -2,10 +2,11 @@ import sys
 from importlib.metadata import version as _version
 from pathlib import Path
 
+from sddb._catalog_schema import CATALOG_COLUMNS, FACETS, RANGE_COLUMNS
+
 sys.path.insert(0, str(Path(__file__).parent / "_ext"))
 from catalog_stats import load_stats, with_defaults
-
-from sddb._catalog_schema import CATALOG_COLUMNS, FACETS, RANGE_COLUMNS
+from cli_docs import cli_markdown
 
 
 def _write_catalog_columns() -> None:
@@ -16,6 +17,7 @@ def _write_catalog_columns() -> None:
 
 
 _write_catalog_columns()
+(Path(__file__).parent / "reference" / "_cli.md").write_text(cli_markdown())
 
 project = "spatialdata-db"
 author = "Tim Treis and the spatialdata-db authors"
@@ -30,9 +32,8 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx_design",
     "sphinx_copybutton",
-    "sphinx_click",
 ]
-exclude_patterns = ["_build", "design", "superpowers", "reference/_catalog_columns.md"]
+exclude_patterns = ["_build", "design", "superpowers", "reference/_catalog_columns.md", "reference/_cli.md"]
 templates_path = ["_templates"]
 
 autosummary_generate = True
