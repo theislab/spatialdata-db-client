@@ -30,7 +30,7 @@ def test_stats_from_frame():
     assert s["n_studies"] == "3"
     assert s["n_organisms"] == "2"
     assert s["n_Xenium"] == "2"
-    assert s["example_Xenium"] == "[A small](https://spatialdata-db.com/datasets/small/)"
+    assert s["example_Xenium"] == "[A small](https://spatialdata-db-web.pages.dev/datasets/small/)"
 
 
 def test_unknown_technology_listed():
@@ -104,3 +104,26 @@ def test_other_assays_aggregates_by_token_and_categorical_tier():
     assert s["other_assays"].count("No description yet.") == 1
     assert "2 datasets" in s["other_assays"]
     assert "6 datasets (silver)" in s["tier_note"]
+
+
+def test_hero_line_with_and_without_number():
+    assert cs.catalog_stats(_df())["hero_line"] == "Query 4 spatial omics datasets and load them as SpatialData."
+    assert cs.with_defaults({})["hero_line"] == "Query spatial omics datasets and load them as SpatialData."
+
+
+def test_site_url_single_source():
+    assert cs.SITE_URL.startswith("https://")
+    root = Path(__file__).parent.parent
+    skip = {"design", "superpowers", "_build"}
+    hits = []
+    for base in (root / "docs", root / "tests"):
+        for p in base.rglob("*"):
+            if not p.is_file() or skip & set(p.relative_to(root).parts):
+                continue
+            try:
+                text = p.read_text()
+            except UnicodeDecodeError:
+                continue
+            if "spatialdata-db" + ".com" in text:
+                hits.append(str(p))
+    assert not hits, hits

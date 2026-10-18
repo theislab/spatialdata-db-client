@@ -9,7 +9,8 @@ _log = _logging.getLogger(__name__)
 
 # Technologies with a hand-written card on docs/intro/assays.md.
 DESCRIBED = frozenset({"Visium", "VisiumHD", "Xenium", "Atera", "SpatialTranscriptomics"})
-_BASE = "https://spatialdata-db.com/datasets"
+SITE_URL = "https://spatialdata-db-web.pages.dev"  # single source of truth for links to the DB website
+_BASE = f"{SITE_URL}/datasets"
 
 
 def assay_rows(df: pd.DataFrame) -> list[tuple[str, int]]:
@@ -48,6 +49,7 @@ def catalog_stats(df: pd.DataFrame) -> dict[str, str]:
             if f"example_{tok}" in stats:
                 line += f" Example: {stats[f'example_{tok}']}"
             stats[f"line_{tok}"] = line
+    stats["hero_line"] = f"Query {len(df)} spatial omics datasets and load them as SpatialData."
     stats["intro_count"] = f"The catalog currently holds {_datasets(len(df))}."
     if "tier" in df:
         tiers = df["tier"].astype(object).where(df["tier"].notna(), "unassigned").value_counts()
@@ -64,7 +66,8 @@ def catalog_stats(df: pd.DataFrame) -> dict[str, str]:
 def with_defaults(stats: dict[str, str]) -> dict[str, str]:
     """Blank values for every substitution the intro pages use, so a missing catalog renders cleanly."""
     keys = ["intro_count", "tier_note", "other_assays", *(f"line_{t}" for t in DESCRIBED)]
-    return {**dict.fromkeys(keys, ""), **stats}
+    fallback = {"hero_line": "Query spatial omics datasets and load them as SpatialData."}
+    return {**dict.fromkeys(keys, ""), **fallback, **stats}
 
 
 def load_stats() -> dict[str, str]:

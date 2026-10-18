@@ -5,7 +5,7 @@ from pathlib import Path
 from sddb._catalog_schema import CATALOG_COLUMNS, FACETS, RANGE_COLUMNS
 
 sys.path.insert(0, str(Path(__file__).parent / "_ext"))
-from catalog_stats import load_stats, with_defaults
+from catalog_stats import SITE_URL, load_stats, with_defaults
 from cli_docs import cli_markdown
 
 
@@ -61,7 +61,7 @@ html_theme_options = {
     "repository_url": "https://github.com/theislab/spatialdata-db-client",
     "use_repository_button": True,
     "icon_links": [
-        {"name": "Browse the DB", "url": "https://spatialdata-db.com", "icon": "fa-solid fa-globe"},
+        {"name": "Browse the DB", "url": SITE_URL, "icon": "fa-solid fa-globe"},
         {
             "name": "GitHub",
             "url": "https://github.com/theislab/spatialdata-db-client",

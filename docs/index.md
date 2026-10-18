@@ -1,17 +1,48 @@
 # spatialdata-db
 
-Lean read client for the spatialdata-db spatial-omics collection.
+{{ hero_line }}
 
-## Getting the catalog
-
-```python
-import sddb
-
-cat = sddb.Catalog()  # central published catalog (placeholder URL, not live yet)
-cat = sddb.Catalog.from_file("catalog.parquet")  # local downloaded catalog
+```bash
+pip install git+https://github.com/theislab/spatialdata-db-client
 ```
 
-`from_file` takes an absolute or relative path (or `file://` URL) and validates against the catalog schema.
+```python
+from sddb import Catalog
+
+hits = Catalog().query(technology="Xenium", tissue="heart")
+hits.summary()
+sdata = hits[0].load(lazy=False)  # copies the store (about 1.3 GB) to the local cache
+```
+
+::::{grid} 1 2 2 4
+:gutter: 3
+
+:::{grid-item-card} Find & load
+:link: guides/find-and-load
+:link-type: doc
+Filter the catalog by facets or free text and load datasets.
+:::
+
+:::{grid-item-card} Cohorts
+:link: guides/cohorts
+:link-type: doc
+Freeze, split and reproduce sets of datasets.
+:::
+
+:::{grid-item-card} Agents & CLI
+:link: guides/cli-and-agents
+:link-type: doc
+Use the catalog from the shell and from AI agents.
+:::
+
+:::{grid-item-card} API
+:link: reference/api
+:link-type: doc
+Full reference for the Python API.
+:::
+::::
+
+Using data from the DB? See {doc}`cite-and-license`.
 
 ```{toctree}
 :maxdepth: 2
@@ -44,5 +75,6 @@ reference/catalog-columns
 ```{toctree}
 :maxdepth: 1
 
+cite-and-license
 changelog
 ```
