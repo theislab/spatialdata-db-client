@@ -333,3 +333,47 @@ def test_search_ignores_doi_fragments(cat):
     with pytest.warns(UserWarning, match="nothing matched"):
         res = cat.search("10")
     assert "doi" not in res.matched
+
+
+_REL = "https://github.com/theislab/spatialdata-db-client/releases/download"
+
+
+def test_default_url_is_rolling_release():
+    from sddb.catalog import DEFAULT_CATALOG_URL
+    from sddb.citations import DEFAULT_BIB_URL
+
+    assert DEFAULT_CATALOG_URL.endswith("/releases/download/catalog-latest/catalog.parquet")
+    assert "releases/latest" not in DEFAULT_CATALOG_URL
+    assert DEFAULT_BIB_URL.endswith("/releases/download/catalog-latest/citations.bib")
+    assert "releases/latest" not in DEFAULT_BIB_URL
+
+
+@pytest.fixture
+def no_fetch(monkeypatch, tmp_path):
+    """Stub the network fetch: the constructor downloads, so serve a local fixture instead."""
+    import sddb.catalog as m
+
+    p = write_fixture_catalog(tmp_path / "fixture.parquet")
+    monkeypatch.setattr(m, "fetch_catalog", lambda url, **kw: p)
+
+
+def test_version_pins_dated_release(monkeypatch, no_fetch):
+    monkeypatch.delenv("SDDB_CATALOG_URL", raising=False)
+    assert Catalog(version="2026-10-16").url == f"{_REL}/catalog-2026-10-16/catalog.parquet"
+
+
+def test_version_ignored_with_explicit_url(no_fetch):
+    assert Catalog("file:///x/catalog.parquet", version="2026-10-16").url == "file:///x/catalog.parquet"
+
+
+def test_version_with_custom_env_url_unchanged(monkeypatch, no_fetch):
+    monkeypatch.setenv("SDDB_CATALOG_URL", "https://example.org/c.parquet")
+    assert Catalog(version="2026-10-16").url == "https://example.org/c.parquet"
+
+
+def test_version_pinned_siblings_share_release_dir(monkeypatch, no_fetch):
+    from sddb.genes import sibling_url
+
+    monkeypatch.delenv("SDDB_CATALOG_URL", raising=False)
+    url = Catalog(version="2026-10-16").url
+    assert sibling_url(url, "gene_index.parquet") == f"{_REL}/catalog-2026-10-16/gene_index.parquet"

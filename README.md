@@ -22,7 +22,7 @@ Either way you get a `Catalog` you can `query()`:
 
 ```python
 # (a) Default: the published catalog (DEFAULT_CATALOG_URL, or $SDDB_CATALOG_URL),
-#     served from this repo's latest GitHub release — live, anonymous, no account.
+#     served from this repo's rolling `catalog-latest` GitHub release — live, anonymous, no account.
 cat = sddb.Catalog()
 
 # (b) Local: download catalog.parquet, then point the client at it.
@@ -33,3 +33,7 @@ cat.query(organism="human")
 `from_file` accepts absolute or relative paths and `file://` URLs, and validates the file against the catalog schema.
 
 Remote datasets: query the catalog, inspect with `elements()` (no download), or load fully with `load(lazy=False)` (copies the store to the cache). Lazy/partial remote open is not supported yet (spatialdata upstream limitation); local stores open lazily.
+
+## Releasing
+
+Cut code releases with `gh release create vX.Y.Z --latest=false` so catalog releases keep resolving for older installs.
