@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
@@ -257,11 +257,29 @@ class SpatialDataCohort(Sequence[Dataset]):
             strict=strict,
         )
 
-    def to_anndata(self, *, table: str | None = None) -> AnnData:
-        """Concatenate each member's table into one AnnData (outer join, obs[uid]+obs[study_id])."""
+    def to_anndata(
+        self,
+        *,
+        table: str | None = None,
+        obs_columns: Sequence[str] = (),
+        elements: Sequence[str] | None = None,
+        transform: Callable[[AnnData, pd.Series], AnnData | None] | None = None,
+        max_workers: int = 8,
+    ) -> AnnData:
+        """Concatenate each member's table into one AnnData (outer join, obs[uid]+obs[study_id]).
+
+        See :func:`sddb.concat.concat_tables` for ``obs_columns``, ``elements``, ``transform`` and ``max_workers``.
+        """
         from sddb.concat import concat_tables
 
-        return concat_tables(self._df, table=table)
+        return concat_tables(
+            self._df,
+            table=table,
+            obs_columns=obs_columns,
+            elements=elements,
+            transform=transform,
+            max_workers=max_workers,
+        )
 
     def to_df(self) -> pd.DataFrame:
         """Return the underlying rows as a DataFrame copy."""

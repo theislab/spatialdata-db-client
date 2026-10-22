@@ -57,3 +57,48 @@ def test_concat_remote_catalog_objects():
     adata = cohort[:2].to_anndata()
     assert adata.n_obs > 0
     assert set(adata.obs["uid"]) == set(df["uid"].astype(str))
+
+
+def _members(tmp_path, sizes):
+    urls = [_store(tmp_path / f"{i}.zarr", n) for i, n in enumerate(sizes)]
+    return pd.DataFrame(
+        {
+            "uid": [f"u{i}" for i in range(len(sizes))],
+            "zarr_url": urls,
+            "organism": ["human", "mouse", "human"][: len(sizes)],
+        }
+    )
+
+
+def test_concat_obs_columns_follow_members_under_parallel_reads(tmp_path):
+    members = _members(tmp_path, [2, 3, 4])
+    adata = concat_tables(members, obs_columns=["organism"], max_workers=3)
+    by_uid = adata.obs.groupby("uid", observed=True)["organism"].first().to_dict()
+    assert by_uid == {"u0": "human", "u1": "mouse", "u2": "human"}
+    assert adata.obs["uid"].value_counts().to_dict() == {"u2": 4, "u1": 3, "u0": 2}
+    assert adata.obs["organism"].dtype == "category"
+
+
+def test_concat_unknown_obs_column_raises(tmp_path):
+    with pytest.raises(KeyError, match="tissue"):
+        concat_tables(_members(tmp_path, [2]), obs_columns=["tissue"])
+
+
+def test_concat_elements_skips_layers(tmp_path):
+    path = tmp_path / "l.zarr"
+    a = ad.AnnData(X=np.ones((2, 3), "float32"), layers={"counts": np.ones((2, 3), "float32")})
+    SpatialData(tables={"table": a}).write(path)
+    members = pd.DataFrame({"uid": ["l"], "zarr_url": [str(path)]})
+    assert "counts" in concat_tables(members).layers
+    assert "counts" not in concat_tables(members, elements=("X", "obs", "var")).layers
+
+
+def test_concat_transform_subsets_and_drops(tmp_path):
+    members = _members(tmp_path, [2, 3])
+
+    def keep_mouse_first_gene(adata, row):
+        return adata[:, :1].copy() if row["organism"] == "mouse" else None
+
+    adata = concat_tables(members, transform=keep_mouse_first_gene)
+    assert adata.shape == (3, 1)
+    assert set(adata.obs["uid"]) == {"u1"}
