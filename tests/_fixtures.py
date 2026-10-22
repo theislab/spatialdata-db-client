@@ -85,6 +85,9 @@ def make_fixture_catalog() -> pd.DataFrame:
             "sdata_repr": [None] * n,
             "n_transcripts": [None] * n,
             "capture_area": [None] * n,
+            # study + per-sample condition columns (optional; null in the base fixture)
+            **{c: [None] * n for c in ("sample_title", "timepoint", "timepoint_kind", "treatment", "genotype", "condition")},
+            "timepoint_days": [None] * n,
             # superset list columns, derived per-row so the fixture stays len(_ROWS)-agnostic
             "collections": [[f"c-{i}"] if i % 3 else [] for i in range(n)],
             "staining_method": [["H&E", "IF"] if i % 2 else None for i in range(n)],
@@ -111,8 +114,7 @@ def make_fixture_collections() -> pd.DataFrame:
             2,
             180_000,
             ["uid0001", "uid0002"],
-            *[None] * 7,
-        ),  # abstract/study_* columns are optional: null here
+        ),  # abstract/study_*/study-condition columns are optional: null here
         (
             "c-lee",
             "Lee2022",
@@ -128,10 +130,12 @@ def make_fixture_collections() -> pd.DataFrame:
             1,
             4_000,
             ["uid0003"],
-            *[None] * 7,
         ),
     ]
-    df = pd.DataFrame(rows, columns=list(COLLECTION_COLUMNS))
+    df = pd.DataFrame(rows, columns=list(COLLECTION_COLUMNS)[: len(rows[0])]).reindex(columns=list(COLLECTION_COLUMNS))
+    for c, t in COLLECTION_COLUMNS.items():
+        if t.startswith("list"):
+            df[c] = df[c].astype(object)  # all-null reindexed columns default to float64
     return cast_scalars(df, COLLECTION_COLUMNS)
 
 

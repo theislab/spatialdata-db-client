@@ -90,6 +90,14 @@ CATALOG_COLUMNS: dict[str, str] = {
     "dataset_url": "string",
     "thumbnail_url": "string",
     "collections": "list[string]",
+    # Per-sample study / condition metadata (optional; null when the source has none).
+    "sample_title": "string",
+    "timepoint": "string",
+    "timepoint_kind": "string",
+    "timepoint_days": "Float64",
+    "treatment": "string",
+    "genotype": "string",
+    "condition": "string",
 }
 
 REQUIRED_COLUMNS: tuple[str, ...] = ("uid", "technology", "assay", "organism", "validation_status", "zarr_url")
@@ -118,6 +126,21 @@ COLLECTION_COLUMNS: dict[str, str] = {
     "study_authors": "string",
     "study_year": "string",
     "study_journal": "string",
+    # Study-level collection metadata + facet roll-ups over members (all optional).
+    "overall_design": "string",
+    "pubmed_id": "string",
+    "source_url": "string",
+    "parent": "string",
+    "source": "string",
+    "year": "Int64",
+    "contrast_axes": "string",  # JSON object {axis: {value: count}}
+    "assays": "list[string]",
+    "modalities": "list[string]",
+    "organisms": "list[string]",
+    "tissues": "list[string]",
+    "diseases": "list[string]",
+    "timepoint_kinds": "list[string]",
+    "condition_values": "list[string]",
 }
 COLLECTION_REQUIRED: tuple[str, ...] = ("slug", "name", "members")
 
