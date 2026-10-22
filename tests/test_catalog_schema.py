@@ -201,3 +201,68 @@ def test_capture_area_column_present():
 
     assert schema.CATALOG_COLUMNS["capture_area"] == "string"
     assert "capture_area" not in schema.REQUIRED_COLUMNS
+
+
+_NEW_DATASET_COLUMNS = {
+    "sample_title": "string",
+    "timepoint": "string",
+    "timepoint_kind": "string",
+    "treatment": "string",
+    "genotype": "string",
+    "condition": "string",
+    "timepoint_days": "Float64",
+}
+_NEW_COLLECTION_COLUMNS = {
+    **{c: "string" for c in ("overall_design", "pubmed_id", "source_url", "parent", "source", "contrast_axes")},
+    "year": "Int64",
+    **{
+        c: "list[string]"
+        for c in ("assays", "modalities", "organisms", "tissues", "diseases", "timepoint_kinds", "condition_values")
+    },
+}
+
+
+def test_condition_dataset_columns_present_optional():
+    for col, dtype in _NEW_DATASET_COLUMNS.items():
+        assert cs.CATALOG_COLUMNS[col] == dtype
+        assert col not in cs.REQUIRED_COLUMNS
+    assert cs.CATALOG_COLUMNS["study_id"] == "string"
+    assert "timepoint_days" in cs.RANGE_COLUMNS
+
+
+def test_condition_collection_columns_present_optional():
+    for col, dtype in _NEW_COLLECTION_COLUMNS.items():
+        assert cs.COLLECTION_COLUMNS[col] == dtype
+        assert col not in cs.COLLECTION_REQUIRED
+
+
+def test_condition_columns_populated_roundtrip(tmp_path):
+    df = make_fixture_catalog()
+    df["timepoint"] = "day 7"
+    df["timepoint_days"] = 7.0
+    df = cs.cast_scalars(df, cs.CATALOG_COLUMNS)
+    p = tmp_path / "c.parquet"
+    df.to_parquet(p)
+    cs.validate(pd.read_parquet(p))
+
+    cdf = make_fixture_collections()
+    cdf["year"] = 2023
+    cdf["contrast_axes"] = '{"treatment": {"ctrl": 2, "drug": 3}}'
+    cdf["assays"] = [["Xenium"], ["Visium"]]
+    cdf["condition_values"] = [["ctrl", "drug"], None]
+    cdf = cs.cast_scalars(cdf, cs.COLLECTION_COLUMNS)
+    p = tmp_path / "coll.parquet"
+    cdf.to_parquet(p)
+    cs.validate(pd.read_parquet(p), kind="collections")
+
+
+def test_old_parquet_without_new_columns_loads(tmp_path):
+    new = set(_NEW_DATASET_COLUMNS)
+    df = make_fixture_catalog().drop(columns=list(new))
+    p = tmp_path / "old.parquet"
+    df.to_parquet(p)
+    cs.validate(pd.read_parquet(p))
+    cdf = make_fixture_collections().drop(columns=list(_NEW_COLLECTION_COLUMNS))
+    p = tmp_path / "old_coll.parquet"
+    cdf.to_parquet(p)
+    cs.validate(pd.read_parquet(p), kind="collections")
