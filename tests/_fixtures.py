@@ -133,6 +133,9 @@ def make_fixture_collections() -> pd.DataFrame:
         ),
     ]
     df = pd.DataFrame(rows, columns=list(COLLECTION_COLUMNS)[: len(rows[0])]).reindex(columns=list(COLLECTION_COLUMNS))
+    for c, t in COLLECTION_COLUMNS.items():
+        if t.startswith("list"):
+            df[c] = df[c].astype(object)  # all-null reindexed columns default to float64
     return cast_scalars(df, COLLECTION_COLUMNS)
 
 
