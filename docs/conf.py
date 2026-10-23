@@ -33,7 +33,7 @@ extensions = [
     "sphinx_design",
     "sphinx_copybutton",
 ]
-exclude_patterns = ["_build", "design", "superpowers", "reference/_catalog_columns.md", "reference/_cli.md"]
+exclude_patterns = ["_build", "design", "superpowers", "**/.pixi", "reference/_catalog_columns.md", "reference/_cli.md"]
 templates_path = ["_templates"]
 
 autosummary_generate = True

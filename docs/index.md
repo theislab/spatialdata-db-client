@@ -62,6 +62,7 @@ intro/db-stack
 guides/find-and-load
 guides/cohorts
 guides/ml
+guides/visium-atlas/visium-atlas
 guides/cli-and-agents
 ```
 

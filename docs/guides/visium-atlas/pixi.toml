@@ -1,0 +1,41 @@
+# GPU environment for the Visium atlas tutorial: linux-64, NVIDIA GPU, CUDA 13 driver (>= 580).
+# Follows rapids-singlecell's recommended conda env (conda/rsc_rapids_26.10_cuda13.yml): RAPIDS 26.10 from
+# conda plus the prebuilt rapids-singlecell-cu13 wheel, so nothing is compiled.
+# Run on a GPU node from this directory: `pixi run jupyter lab`
+[workspace]
+name = "sddb-visium-atlas"
+channels = ["rapidsai", "nvidia", "conda-forge"]
+platforms = ["linux-64"]
+# RAPIDS supports flexible priority; strict hides conda-forge's numba-cuda behind rapidsai's py3.10-only builds
+channel-priority = "disabled"
+
+[system-requirements]
+cuda = "13"
+
+[dependencies]
+python = "3.14.*"
+cuda-version = "13.3.*"
+# the RAPIDS libraries rapids-singlecell uses (the `rapids` metapackage's channel-pinned xgboost/ucx don't solve in pixi)
+cudf = "26.10.*"
+cuml = "26.10.*"
+cugraph = "26.10.*"
+cuvs = "26.10.*"
+rmm = "26.10.*"
+cupy = "*"
+scanpy = "*"
+jupyterlab = "*"
+# the client's I/O stack, solved by conda together with RAPIDS (pip would backtrack s3fs against conda's fsspec)
+spatialdata = "*"
+s3fs = "*"
+zarr = ">=3"
+rapidfuzz = "*"
+platformdirs = "*"
+universal_pathlib = "*"
+typer = "*"
+
+[pypi-dependencies]
+rapids-singlecell-cu13 = "*"
+spatialdata-db = { path = "../../..", editable = true }
+
+[activation.env]
+PYTHONNOUSERSITE = "1"  # keep ~/.local pip installs (e.g. stray nvidia-* wheels) from shadowing the env's CUDA libs
