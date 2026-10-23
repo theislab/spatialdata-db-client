@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from anndata import AnnData
     from spatialdata import SpatialData
 
+    from sddb.adapter import TableAdapter
     from sddb.catalog import Catalog
     from sddb.manifest import CohortManifest, Manifest
 
@@ -257,11 +258,29 @@ class SpatialDataCohort(Sequence[Dataset]):
             strict=strict,
         )
 
-    def to_anndata(self, *, table: str | None = None) -> AnnData:
-        """Concatenate each member's table into one AnnData (outer join, obs[uid]+obs[study_id])."""
+    def to_anndata(
+        self,
+        *,
+        table: str | None = None,
+        obs_columns: Sequence[str] = (),
+        elements: Sequence[str] | None = None,
+        adapter: TableAdapter | None = None,
+        max_workers: int = 8,
+    ) -> AnnData:
+        """Concatenate each member's table into one AnnData (outer join, obs[uid]+obs[study_id]).
+
+        See :func:`sddb.concat.concat_tables` for ``obs_columns``, ``elements``, ``adapter`` and ``max_workers``.
+        """
         from sddb.concat import concat_tables
 
-        return concat_tables(self._df, table=table)
+        return concat_tables(
+            self._df,
+            table=table,
+            obs_columns=obs_columns,
+            elements=elements,
+            adapter=adapter,
+            max_workers=max_workers,
+        )
 
     def to_df(self) -> pd.DataFrame:
         """Return the underlying rows as a DataFrame copy."""
