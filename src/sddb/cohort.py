@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from anndata import AnnData
     from spatialdata import SpatialData
 
+    from sddb.adapter import TableAdapter
     from sddb.catalog import Catalog
     from sddb.manifest import CohortManifest, Manifest
 
@@ -263,12 +264,12 @@ class SpatialDataCohort(Sequence[Dataset]):
         table: str | None = None,
         obs_columns: Sequence[str] = (),
         elements: Sequence[str] | None = None,
-        transform: Callable[[AnnData, pd.Series], AnnData | None] | None = None,
+        adapter: TableAdapter | None = None,
         max_workers: int = 8,
     ) -> AnnData:
         """Concatenate each member's table into one AnnData (outer join, obs[uid]+obs[study_id]).
 
-        See :func:`sddb.concat.concat_tables` for ``obs_columns``, ``elements``, ``transform`` and ``max_workers``.
+        See :func:`sddb.concat.concat_tables` for ``obs_columns``, ``elements``, ``adapter`` and ``max_workers``.
         """
         from sddb.concat import concat_tables
 
@@ -277,7 +278,7 @@ class SpatialDataCohort(Sequence[Dataset]):
             table=table,
             obs_columns=obs_columns,
             elements=elements,
-            transform=transform,
+            adapter=adapter,
             max_workers=max_workers,
         )
 

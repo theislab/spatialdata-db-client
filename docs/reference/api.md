@@ -9,6 +9,7 @@
    sddb.Dataset
    sddb.SpatialDataCohort
    sddb.TaskAdapter
+   sddb.TableAdapter
    sddb.Manifest
    sddb.CohortManifest
    sddb.SplitManifest

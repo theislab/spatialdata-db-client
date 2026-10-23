@@ -7,7 +7,7 @@ try:
 except PackageNotFoundError:  # pragma: no cover
     __version__ = "0.0.0"
 
-from sddb.adapter import TaskAdapter
+from sddb.adapter import TableAdapter, TaskAdapter
 from sddb.catalog import Catalog
 from sddb.cohort import SpatialDataCohort
 from sddb.dataset import Dataset
@@ -24,6 +24,7 @@ __all__ = [
     "ManifestVersionMismatch",
     "SpatialDataCohort",
     "SplitManifest",
+    "TableAdapter",
     "TaskAdapter",
     "__version__",
     "open_sdata",

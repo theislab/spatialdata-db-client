@@ -93,12 +93,57 @@ def test_concat_elements_skips_layers(tmp_path):
     assert "counts" not in concat_tables(members, elements=("X", "obs", "var")).layers
 
 
-def test_concat_transform_subsets_and_drops(tmp_path):
-    members = _members(tmp_path, [2, 3])
+class _MouseOnly:
+    """Skips non-mouse rows cheaply, tables without var names authoritatively, keeps one gene."""
 
-    def keep_mouse_first_gene(adata, row):
-        return adata[:, :1].copy() if row["organism"] == "mouse" else None
+    name = "mouse-only"
+    version = "1"
 
-    adata = concat_tables(members, transform=keep_mouse_first_gene)
+    def __init__(self, keep=True):
+        self.keep = keep
+
+    def requirements(self):
+        return {"elements": ("X", "obs", "var")}
+
+    def validate_meta(self, row):
+        return [] if row["organism"] == "mouse" else [f"organism is {row['organism']}"]
+
+    def validate(self, adata, row):
+        return [] if adata.n_vars else ["no genes"]
+
+    def build(self, adata, row):
+        return adata[:, :1].copy() if self.keep else None
+
+
+def test_concat_adapter_maps_and_reports_skips(tmp_path):
+    members = _members(tmp_path, [2, 3, 4])
+    members.loc[0, "zarr_url"] = str(tmp_path / "missing.zarr")  # skipped by validate_meta, so never read
+    adata = concat_tables(members, adapter=_MouseOnly())
     assert adata.shape == (3, 1)
     assert set(adata.obs["uid"]) == {"u1"}
+    assert adata.uns["sddb"] == {
+        "adapter": "mouse-only",
+        "adapter_version": "1",
+        "dropped": {"u0": "organism is human", "u2": "organism is human"},
+    }
+
+
+def test_concat_adapter_build_none_is_reported(tmp_path):
+    members = _members(tmp_path, [2, 3])
+    members["organism"] = "mouse"
+    with pytest.raises(ValueError, match="dropped by mouse-only.build"):
+        concat_tables(members, adapter=_MouseOnly(keep=False))
+
+
+def test_concat_adapter_requirements_select_elements(tmp_path):
+    path = tmp_path / "l.zarr"
+    a = ad.AnnData(X=np.ones((2, 3), "float32"), layers={"counts": np.ones((2, 3), "float32")})
+    SpatialData(tables={"table": a}).write(path)
+    members = pd.DataFrame({"uid": ["l"], "zarr_url": [str(path)], "organism": ["mouse"]})
+    assert "counts" not in concat_tables(members, adapter=_MouseOnly()).layers
+
+
+def test_table_adapter_protocol():
+    from sddb import TableAdapter
+
+    assert isinstance(_MouseOnly(), TableAdapter)
