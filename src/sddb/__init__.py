@@ -11,6 +11,7 @@ from sddb.adapter import TableAdapter, TaskAdapter
 from sddb.catalog import Catalog
 from sddb.cohort import SpatialDataCohort
 from sddb.dataset import Dataset
+from sddb.geometry import table_centroids
 from sddb.manifest import CohortDriftError, CohortManifest, Manifest, ManifestVersionMismatch
 from sddb.remote import open_sdata
 from sddb.split import SplitManifest
@@ -28,4 +29,5 @@ __all__ = [
     "TaskAdapter",
     "__version__",
     "open_sdata",
+    "table_centroids",
 ]

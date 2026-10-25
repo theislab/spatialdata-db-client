@@ -16,4 +16,5 @@
    sddb.CohortDriftError
    sddb.ManifestVersionMismatch
    sddb.open_sdata
+   sddb.table_centroids
 ```
