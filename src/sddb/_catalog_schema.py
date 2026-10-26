@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from pandas.api import types as pdt
 
@@ -218,18 +219,30 @@ def _all_null(series: pd.Series) -> bool:
 
 def cast_scalars(df: pd.DataFrame, columns: dict[str, str]) -> pd.DataFrame:
     """Cast ``df``'s scalar columns to their declared dtypes, leaving list<string> columns as object."""
-    scalar = {c: t for c, t in columns.items() if c in df.columns and not t.startswith("list")}
+    scalar = {c: t for c, t in columns.items() if c in df.columns and not t.startswith("list") and t != "binary"}
     return df.astype(scalar)
 
 
 def _compatible(series: pd.Series, dtype: str) -> bool:
     """Return whether ``series`` can be read as the declared pandas dtype."""
-    if dtype == "list[string]":
-        # parquet list<string> -> object column whose cells are None or a list/array of str.
+    if dtype.startswith("list["):
+        # parquet list<T> -> object column whose cells are None or a list/array of T (string or double).
+        elem = str if dtype == "list[string]" else (int, float, np.integer, np.floating)
+        if dtype not in ("list[string]", "list[double]"):
+            return False
         return pdt.is_object_dtype(series.dtype) and all(
-            _is_null(v) or (not isinstance(v, str) and hasattr(v, "__iter__") and all(isinstance(e, str) for e in v))
+            _is_null(v)
+            or (
+                not isinstance(v, str)
+                and hasattr(v, "__iter__")
+                and all(isinstance(e, elem) and not isinstance(e, bool) for e in v)
+            )
             for v in series
         )
+    if dtype == "binary":
+        return pdt.is_object_dtype(series.dtype) and all(isinstance(v, (bytes, bytearray)) for v in series.dropna())
+    if dtype == "int32":
+        return pdt.is_integer_dtype(series.dtype)
     if pdt.is_bool_dtype(series.dtype) and not pdt.is_object_dtype(series.dtype):
         return dtype == "boolean"
     if dtype == "string":
@@ -271,8 +284,14 @@ def validate(df: pd.DataFrame, *, kind: str = "catalog") -> None:
         columns, required = GENE_INDEX_COLUMNS, tuple(GENE_INDEX_COLUMNS)
     elif kind == "collections":
         columns, required = COLLECTION_COLUMNS, COLLECTION_REQUIRED
+    elif kind == "feature_index":
+        columns, required = FEATURE_INDEX_COLUMNS, tuple(FEATURE_INDEX_COLUMNS)
+    elif kind == "feature_search":
+        columns, required = FEATURE_SEARCH_COLUMNS, tuple(FEATURE_SEARCH_COLUMNS)
     else:
-        raise ValueError(f"unknown kind {kind!r}; expected 'catalog', 'gene_index' or 'collections'")
+        raise ValueError(
+            f"unknown kind {kind!r}; expected 'catalog', 'gene_index', 'collections', 'feature_index' or 'feature_search'"
+        )
 
     missing = [c for c in required if c not in df.columns]
     if missing:

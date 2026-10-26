@@ -381,3 +381,18 @@ def test_version_pinned_siblings_share_release_dir(monkeypatch, no_fetch):
     monkeypatch.delenv("SDDB_CATALOG_URL", raising=False)
     url = Catalog(version="2026-10-16").url
     assert sibling_url(url, "gene_index.parquet") == f"{_REL}/catalog-2026-10-16/gene_index.parquet"
+
+
+def test_list_valued_modalities_facet(tmp_path):
+    df = make_fixture_catalog()
+    df["modalities"] = [["rna", "protein"], ["rna"], ["rna", "msi"], None, ["rna"]]
+    p = tmp_path / "cat.parquet"
+    df.to_parquet(p)
+    cat = Catalog(p.as_uri(), cache_dir=tmp_path / "cache")
+    from sddb.catalog import facet_values
+
+    assert facet_values(cat.to_df(), "modalities") == ["msi", "protein", "rna"]
+    assert {d.uid for d in cat.query(modalities="msi")} == {"uid0003"}
+    assert {d.uid for d in cat.query(modalities=["protein", "msi"])} == {"uid0001", "uid0003"}
+    assert len(cat.query(organism="human")) == 3  # scalar facets unchanged
+    assert "uid0001" in {d.uid for d in cat.search("human lung")}  # search no longer crashes

@@ -53,6 +53,28 @@ def _token_matches(token: str, value: str) -> bool:
     return len(token) >= 4 and any(fuzz.ratio(token, w) >= _FUZZY_CUTOFF for w in words)
 
 
+def _is_list_col(series: pd.Series) -> bool:
+    """True if ``series`` holds list/array cells (a list-valued facet such as ``modalities``)."""
+    return any(not isinstance(v, str) and hasattr(v, "__iter__") for v in series.dropna())
+
+
+def _distinct(series: pd.Series) -> list[str]:
+    """Sorted distinct non-null values; list-valued columns are exploded element-wise."""
+    if _is_list_col(series):
+        return sorted({str(e) for v in series.dropna() for e in v})
+    return sorted(str(v) for v in series.dropna().unique())
+
+
+def _facet_isin(series: pd.Series, values: list[Any]) -> pd.Series:
+    """Row mask for facet membership; for list-valued columns, any element in ``values`` matches."""
+    if _is_list_col(series):
+        want = set(values)
+        return series.map(
+            lambda v: not (v is None or (not hasattr(v, "__iter__") and pd.isna(v))) and any(e in want for e in v)
+        )
+    return series.isin(values)
+
+
 def facet_values(df: pd.DataFrame, field: str | None = None) -> list[str]:
     """Facet columns present in ``df``, or the sorted distinct non-null values of ``field``.
 
@@ -62,7 +84,7 @@ def facet_values(df: pd.DataFrame, field: str | None = None) -> list[str]:
         return [c for c in schema.FACETS if c in df.columns]
     if field not in schema.FACETS or field not in df.columns:
         raise ValueError(f"unknown facet {field!r}; valid facets: {list(schema.FACETS)}")
-    return sorted(str(v) for v in df[field].dropna().unique())
+    return _distinct(df[field])
 
 
 class Catalog:
@@ -237,7 +259,7 @@ class Catalog:
         for col, val in equality.items():
             if col not in df.columns:
                 raise ValueError(f"facet column {col!r} is not present in this catalog (columns: {list(df.columns)})")
-            mask &= df[col].isin(list(val) if isinstance(val, (list, tuple, set)) else [val])
+            mask &= _facet_isin(df[col], list(val) if isinstance(val, (list, tuple, set)) else [val])
         for col, op, val in ranges:
             if isinstance(val, (list, tuple, set)):
                 raise ValueError(f"range value for {col}__{op} must be a scalar number, got {val!r}")
@@ -281,7 +303,7 @@ class Catalog:
         for col in schema.FACETS:
             if col == "doi" or col not in self._df.columns:  # DOIs tokenize to "10" etc.
                 continue
-            values = sorted(str(v) for v in self._df[col].dropna().unique())
+            values = _distinct(self._df[col])
             hits = [v for v in values if any(_token_matches(t, v) for t in tokens)]
             if hits:
                 matched[col] = hits
@@ -290,7 +312,7 @@ class Catalog:
             return SpatialDataCohort(self._df.iloc[0:0], source=self._source(), filter={"search": text})
         mask = pd.Series(True, index=self._df.index)
         for col, hits in matched.items():
-            mask &= self._df[col].isin(hits)
+            mask &= _facet_isin(self._df[col], hits)
         if "validation_status" not in matched:
             mask &= self._df["validation_status"] == "pass"
         return SpatialDataCohort(
