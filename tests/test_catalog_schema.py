@@ -266,3 +266,47 @@ def test_old_parquet_without_new_columns_loads(tmp_path):
     p = tmp_path / "old_coll.parquet"
     cdf.to_parquet(p)
     cs.validate(pd.read_parquet(p), kind="collections")
+
+
+def test_feature_index_columns():
+    assert cs.FEATURE_INDEX_COLUMNS == {
+        "raw_label": "string",
+        "feature_type": "string",
+        "modality": "string",
+        "uid": "string",
+        "total_counts": "Float64",
+        "fraction_obs_detected": "Float64",
+        "ref_ids": "list[string]",
+        "ref_id_types": "list[string]",
+        "ref_relations": "list[string]",
+        "ref_confidences": "list[double]",
+        "gene_xref": "list[string]",
+    }
+
+
+def test_feature_search_columns():
+    assert cs.FEATURE_SEARCH_COLUMNS == {
+        "entity_id": "string",
+        "entity_type": "string",
+        "id_type": "string",
+        "display": "string",
+        "feature_types": "list[string]",
+        "n_datasets": "int32",
+        "bitset": "binary",
+    }
+
+
+def test_modalities_column_and_facet():
+    assert cs.CATALOG_COLUMNS["modalities"] == "list[string]"
+    assert cs.CATALOG_COLUMNS["modality"] == "string"  # scalar kept for back-compat
+    assert "modalities" in cs.FACETS
+
+
+def test_gene_era_constants_unchanged():
+    assert cs.GENE_INDEX_COLUMNS == {
+        "symbol": "string",
+        "feature_id": "string",
+        "uid": "string",
+        "total_counts": "Float64",
+        "fraction_obs_detected": "Float64",
+    }

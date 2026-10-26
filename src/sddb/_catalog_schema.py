@@ -57,6 +57,8 @@ CATALOG_COLUMNS: dict[str, str] = {
     "pathological": "boolean",
     "product": "string",
     "modality": "string",
+    # All modalities present in the dataset (multimodal); scalar `modality` kept for back-compat.
+    "modalities": "list[string]",
     "biomaterial_type": "string",
     "chemistry_version": "string",
     "staining_method": "list[string]",
@@ -153,6 +155,7 @@ FACETS: tuple[str, ...] = (
     "development_stage",
     "technology",
     "assay",
+    "modalities",
     "tier",
     "validation_status",
     "license",
@@ -169,6 +172,33 @@ GENE_INDEX_COLUMNS: dict[str, str] = {
     "uid": "string",
     "total_counts": "Float64",
     "fraction_obs_detected": "Float64",
+}
+
+# Typed feature index (one row per dataset x feature). Parallel ref_* arrays (not nested structs)
+# keep it parquet/client-friendly; gene_xref carries the gene ids a non-gene feature maps to.
+FEATURE_INDEX_COLUMNS: dict[str, str] = {
+    "raw_label": "string",
+    "feature_type": "string",
+    "modality": "string",
+    "uid": "string",
+    "total_counts": "Float64",
+    "fraction_obs_detected": "Float64",
+    "ref_ids": "list[string]",
+    "ref_id_types": "list[string]",
+    "ref_relations": "list[string]",
+    "ref_confidences": "list[double]",
+    "gene_xref": "list[string]",
+}
+
+# Typed-search table (one row per searchable entity); bitset is a packed dataset-membership bitmap.
+FEATURE_SEARCH_COLUMNS: dict[str, str] = {
+    "entity_id": "string",
+    "entity_type": "string",
+    "id_type": "string",
+    "display": "string",
+    "feature_types": "list[string]",
+    "n_datasets": "int32",
+    "bitset": "binary",
 }
 
 
