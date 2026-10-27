@@ -79,7 +79,7 @@ class FeatureIndex:
         df = self._df
         mask = (self._lab == key).fillna(False).to_numpy(dtype=bool)
         mask |= df.index.isin(self._ref.index[(self._ref == key).to_numpy()])
-        return mask & self._type_mask(feature_type, modality)
+        return np.asarray(mask & self._type_mask(feature_type, modality), dtype=bool)
 
     def _type_mask(self, feature_type: str | None, modality: str | None) -> np.ndarray:
         df = self._df
@@ -93,7 +93,7 @@ class FeatureIndex:
     def _frac_mask(self, min_fraction: float | None) -> np.ndarray:
         if min_fraction is None:
             return np.ones(len(self._df), dtype=bool)
-        return (self._df["fraction_obs_detected"] >= min_fraction).fillna(False).to_numpy(dtype=bool)
+        return np.asarray((self._df["fraction_obs_detected"] >= min_fraction).fillna(False), dtype=bool)
 
     @staticmethod
     def _tokens(tokens: str | list[str]) -> list[str]:

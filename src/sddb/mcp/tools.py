@@ -139,11 +139,11 @@ def features_tool(
         df = df[df[col].isin(vals)]
     per_uid: dict[str, list[dict[str, str]]] = {}
     for f in features:
-        for hit in cat.features.resolve(f, feature_type=feature_type, modality=modality).itertuples():
-            for uid in hit.uids:
-                entry = {"raw_label": hit.raw_label, "feature_type": hit.feature_type, "modality": hit.modality}
-                if entry not in per_uid.setdefault(uid, []):
-                    per_uid[uid].append(entry)
+        for hit in cat.features.resolve(f, feature_type=feature_type, modality=modality).to_dict("records"):
+            entry = {k: str(hit[k]) for k in ("raw_label", "feature_type", "modality")}
+            for uid in hit["uids"]:
+                if entry not in per_uid.setdefault(str(uid), []):
+                    per_uid[str(uid)].append(entry)
     rows = _records(df)
     for row in rows:
         row["features"] = per_uid.get(row["uid"], [])
