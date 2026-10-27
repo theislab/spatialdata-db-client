@@ -1,34 +1,19 @@
-import inspect
 import json
 
 import pandas as pd
 import pytest
 from tests._fixtures import make_tiny_sdata_zarr
 
-from sddb import manifest, remote
+from sddb import cohort as cohort_mod
+from sddb import manifest
+from sddb.catalog import Catalog
 from sddb.cohort import SpatialDataCohort
-from sddb.dataset import Dataset
-
-
-def test_dataset_load_accepts_elements(monkeypatch):
-    seen = {}
-    monkeypatch.setattr(
-        remote,
-        "open_sdata",
-        lambda url, lazy=True, elements=None: seen.update(url=url, lazy=lazy, elements=elements) or "SD",
-    )
-    d = Dataset(pd.Series({"uid": "u1", "zarr_url": "s3://b/1.zarr"}))
-    assert d.load(lazy=False, elements=["images/he"]) == "SD"
-    assert seen == {"url": "s3://b/1.zarr", "lazy": False, "elements": ["images/he"]}
-
-
-def test_load_elements_param_present():
-    assert "elements" in inspect.signature(Dataset.load).parameters
 
 
 @pytest.fixture
 def cohort(tmp_path, monkeypatch):
     monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(cohort_mod, "_is_remote", lambda url: True)  # treat the local fixture store as remote
     z = str(make_tiny_sdata_zarr(tmp_path))
     df = pd.DataFrame({"uid": ["u10000", "u20000"], "zarr_url": [z, z], "sample_id": ["a", "a"]})
     return SpatialDataCohort(df)
@@ -44,6 +29,29 @@ def test_to_list_caches_by_uid_and_reuses(cohort, tmp_path, monkeypatch):
     assert sorted(p.name for p in (tmp_path / "cache" / "stores").iterdir()) == ["u10000.zarr", "u20000.zarr"]
     cohort.to_list()
     assert len(copies) == 2  # second call opens the cached stores, no copy
+
+
+def test_dataset_to_sdata_shares_the_cohort_cache(cohort, tmp_path):
+    cohort[0].to_sdata()
+    assert [p.name for p in (tmp_path / "cache" / "stores").iterdir()] == ["u10000.zarr"]
+
+
+def test_catalog_dataset(tmp_path):
+    p = tmp_path / "c.parquet"
+    pd.DataFrame(
+        {
+            "uid": ["u1"],
+            "technology": ["Visium"],
+            "assay": ["a"],
+            "organism": ["human"],
+            "validation_status": ["pass"],
+            "zarr_url": ["s3://b/1.zarr"],
+        }
+    ).to_parquet(p)
+    cat = Catalog.from_file(p)
+    assert cat.dataset("u1").zarr_url == "s3://b/1.zarr"
+    with pytest.raises(KeyError, match="u9"):
+        cat.dataset("u9")
 
 
 def test_to_dict_keys(cohort):

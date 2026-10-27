@@ -15,7 +15,7 @@ import pandas as pd
 
 from sddb._cache import cache_dir
 from sddb.dataset import Dataset, Source
-from sddb.remote import _localize_to_cache, _open_fs
+from sddb.remote import _is_remote, _localize_to_cache, _open_fs
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -339,8 +339,8 @@ class SpatialDataCohort(Sequence[Dataset]):
     ) -> list[SpatialData]:
         """Open every member as a SpatialData, in member order.
 
-        Stores are fetched in parallel and reused on later calls: into the sddb cache (keyed by full uid,
-        so a republished version is fetched afresh), or with ``dest`` into ``dest/<uid>.zarr`` plus a
+        Remote stores are fetched in parallel and reused on later calls: into the sddb cache (keyed by full
+        uid, so a republished version is fetched afresh; local stores open in place), or with ``dest`` into ``dest/<uid>.zarr`` plus a
         manifest, exactly as :meth:`download`. ``elements`` (``"kind/name"``) copies only those elements
         (cache only).
         """
@@ -379,10 +379,12 @@ class SpatialDataCohort(Sequence[Dataset]):
                 raise RuntimeError(f"download failed for {failed}; see {Path(dest) / 'manifest.json'}")
             return [Path(dest) / f"{uid}.zarr" for uid in self._df["uid"]]
         root = cache_dir() / "stores"
+
+        def local(uid: str, url: str) -> Path:
+            return _cached_store(uid, url, root) if _is_remote(url) else Path(url)  # local stores open in place
+
         with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-            return list(
-                pool.map(lambda p: _cached_store(*p, root), zip(self._df["uid"].astype(str), urls, strict=False))
-            )
+            return list(pool.map(lambda p: local(*p), zip(self._df["uid"].astype(str), urls, strict=True)))
 
     def __len__(self) -> int:
         return len(self._df)

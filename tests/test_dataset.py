@@ -33,15 +33,15 @@ def test_dataset_attrs():
         _ = d.nonsense
 
 
-def test_load_and_elements(tmp_path):
+def test_to_sdata_and_elements(tmp_path, monkeypatch):
+    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
     zarr_path = make_tiny_sdata_zarr(tmp_path)
     df = make_fixture_catalog().iloc[:1].copy()
     df["zarr_url"] = str(zarr_path)
     d = SpatialDataCohort(df)[0]
-    assert "img" in d.load(lazy=True).images
+    assert "img" in d.to_sdata().images
+    assert not (tmp_path / "cache" / "stores").exists()  # a local store opens in place
     assert d.elements()["images/img"]["shape"] == (3, 8, 8)
-    with pytest.raises(NotImplementedError):
-        d.load(version="x")
 
 
 def test_ndarray_cell():

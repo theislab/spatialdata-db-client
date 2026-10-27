@@ -12,7 +12,7 @@ from sddb import Catalog
 hits = Catalog().query(technology="Visium", tissue="lung")
 hits.summary()
 smallest = min(hits, key=lambda ds: ds.size_bytes)
-sdata = smallest.load(lazy=False)  # ~10 MB, copied to the local cache
+sdata = smallest.to_sdata()  # ~10 MB, copied to the local cache once
 ```
 
 ::::{grid} 1 2 2 4

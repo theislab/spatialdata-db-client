@@ -63,38 +63,16 @@ class Dataset:
             return None
         raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
 
-    def load(self, *, lazy: bool = True, elements: list[str] | None = None, version: str | None = None) -> SpatialData:
-        """Open this dataset as SpatialData.
+    def to_sdata(self, *, elements: list[str] | None = None, dest: str | Path | None = None) -> SpatialData:
+        """Open this dataset as SpatialData, fetched and cached like :meth:`SpatialDataCohort.to_list`.
 
-        Parameters
-        ----------
-        lazy
-            Open a local store in place (dask-backed). Remote stores cannot be opened lazily yet
-            (spatialdata upstream limitation); for a remote dataset pass ``lazy=False`` to copy the
-            store to the cache and open it, or use :meth:`elements` to inspect without downloading.
-        elements
-            Localize only the selected ``"kind/name"`` elements (e.g. ``["images/he",
-            "tables/square_016um"]``).
-        version
-            Reserved; version pinning is not implemented yet.
-
-        Raises
-        ------
-        NotImplementedError
-            If the dataset is remote and ``lazy=True`` (the default).
+        A remote store is copied once into the cache (keyed by full uid) and reused; a local store opens in
+        place. ``dest`` keeps the store in ``dest/<uid>.zarr`` (the ``download()`` layout); ``elements``
+        (``"kind/name"``) copies only those elements.
         """
-        if version is not None:
-            raise NotImplementedError("version pinning is not implemented yet")
-        try:
-            return remote.open_sdata(self.zarr_url, lazy=lazy, elements=elements)
-        except NotImplementedError as e:
-            if "remote" in str(e).lower() and "lazy" in str(e).lower():
-                raise NotImplementedError(
-                    "Remote lazy open isn't supported upstream (spatialdata). "
-                    "Download first: `SpatialDataCohort.download(dest)` then open the local store, "
-                    "or use `load(lazy=False)` to materialise."
-                ) from e
-            raise
+        from sddb.cohort import SpatialDataCohort
+
+        return SpatialDataCohort(self._row.to_frame().T).to_list(elements=elements, dest=dest, workers=1)[0]
 
     def elements(self) -> dict[str, dict[str, Any]]:
         """Return element shapes/dtypes without loading data."""
@@ -132,7 +110,7 @@ class Dataset:
         from sddb import viz
 
         if mode == "sdata":
-            return viz.render_sdata(self.load())
+            return viz.render_sdata(self.to_sdata())
         if mode != "config":
             raise ValueError(f"mode must be 'config' or 'sdata', got {mode!r}")
         url: str | None = self.vitessce_url
