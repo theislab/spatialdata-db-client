@@ -330,6 +330,19 @@ class Catalog:
             self._df[mask.fillna(False).astype(bool)], matched=matched, source=self._source(), filter={"search": text}
         )
 
+    def collection(self, slug: str) -> SpatialDataCohort:
+        """The members of one collection as a cohort, by its slug (the last part of its web page URL).
+
+        Members are the catalog rows listing ``slug`` in their ``collections`` column, in catalog order.
+        Raises ``KeyError`` if no row lists it.
+        """
+        if "collections" not in self._df.columns:
+            raise ValueError("catalog has no 'collections' column")
+        sub = self._df[_facet_isin(self._df["collections"], [slug]).fillna(False).astype(bool)]
+        if sub.empty:
+            raise KeyError(f"unknown collection {slug!r}: no catalog row lists it")
+        return SpatialDataCohort(sub, source=self._source(), filter={"collection": slug})
+
     def cohort(self, *, uids: list[str] | None = None, study_ids: list[str] | None = None) -> SpatialDataCohort:
         """Build a cohort from an explicit set of ``uids`` or ``study_ids`` (exactly one).
 

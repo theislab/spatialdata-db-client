@@ -14,6 +14,7 @@ def _cat(tmp_path):
             "organism": ["human"] * 3,
             "validation_status": ["pass"] * 3,
             "zarr_url": ["s3://b/1.zarr", "s3://b/2.zarr", "s3://b/3.zarr"],
+            "collections": [["c-x", "c-y"], None, ["c-y"]],
         }
     )
     p = tmp_path / "catalog.parquet"
@@ -42,3 +43,11 @@ def test_cohort_requires_exactly_one_selector(tmp_path):
         cat.cohort()
     with pytest.raises(ValueError, match="exactly one"):
         cat.cohort(uids=["u1"], study_ids=["s_a"])
+
+
+def test_collection(tmp_path):
+    cat = _cat(tmp_path)
+    assert list(cat.collection("c-y").to_df()["uid"]) == ["u1", "u3"]
+    assert cat.collection("c-x").freeze().filter == {"collection": "c-x"}
+    with pytest.raises(KeyError, match="c-z"):
+        cat.collection("c-z")

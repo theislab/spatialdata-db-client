@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import threading
 import warnings
 from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -10,8 +13,9 @@ from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
 
+from sddb._cache import cache_dir
 from sddb.dataset import Dataset, Source
-from sddb.remote import _open_fs
+from sddb.remote import _localize_to_cache, _open_fs
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -64,6 +68,26 @@ def summary(df: pd.DataFrame) -> dict[str, Any]:
         "n_studies": int(df["study_id"].astype("string").fillna("unknown").nunique()) if "study_id" in df else None,
         "technologies": sorted(df["technology"].dropna().unique()) if "technology" in df else [],
     }
+
+
+def _cached_store(uid: str, url: str, root: Path) -> Path:
+    """``root/<uid>.zarr``, copied once via a ``.part`` dir renamed on success, so a present store is complete."""
+    from sddb.manifest import _copy_store
+
+    final = root / f"{uid}.zarr"
+    if final.is_dir():
+        return final
+    root.mkdir(parents=True, exist_ok=True)
+    part = root / f"{uid}.zarr.part-{os.getpid()}-{threading.get_ident()}"
+    shutil.rmtree(part, ignore_errors=True)
+    try:
+        _copy_store(url, part)
+        part.rename(final)
+    except OSError:
+        shutil.rmtree(part, ignore_errors=True)
+        if not final.is_dir():  # a concurrent caller finishing first is fine; anything else is an error
+            raise
+    return final
 
 
 class SpatialDataCohort(Sequence[Dataset]):
@@ -310,14 +334,55 @@ class SpatialDataCohort(Sequence[Dataset]):
         """Headline numbers for this set."""
         return summary(self._df)
 
-    @property
-    def sdatas(self) -> list[SpatialData]:
-        """Open every member as a full SpatialData (download-then-open; explicit and potentially large)."""
-        return [self[i].load(lazy=False) for i in range(len(self))]
+    def to_list(
+        self, *, elements: Sequence[str] | None = None, dest: str | Path | None = None, workers: int = 4
+    ) -> list[SpatialData]:
+        """Open every member as a SpatialData, in member order.
 
-    def load(self, *, elements: list[str] | None = None) -> list[SpatialData]:
-        """Open every member, localizing only ``elements`` (``"kind/name"``) when given."""
-        return [self[i].load(lazy=False, elements=elements) for i in range(len(self))]
+        Stores are fetched in parallel and reused on later calls: into the sddb cache (keyed by full uid,
+        so a republished version is fetched afresh), or with ``dest`` into ``dest/<uid>.zarr`` plus a
+        manifest, exactly as :meth:`download`. ``elements`` (``"kind/name"``) copies only those elements
+        (cache only).
+        """
+        from spatialdata import read_zarr
+
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            return list(pool.map(read_zarr, self._local_stores(elements, dest, workers)))
+
+    def to_dict(
+        self,
+        *,
+        key: str = "uid",
+        elements: Sequence[str] | None = None,
+        dest: str | Path | None = None,
+        workers: int = 4,
+    ) -> dict[str, SpatialData]:
+        """Like :meth:`to_list`, keyed by the ``key`` column (default the full uid), which must be unique and set."""
+        if key not in self._df.columns:
+            raise KeyError(f"no such column: {key!r}")
+        keys = self._df[key]
+        if keys.isna().any() or keys.duplicated().any():
+            raise ValueError(f"column {key!r} is missing or repeats values in this cohort; pick a unique key")
+        return dict(zip(keys.astype(str), self.to_list(elements=elements, dest=dest, workers=workers), strict=True))
+
+    def _local_stores(self, elements: Sequence[str] | None, dest: str | Path | None, workers: int) -> list[Path]:
+        urls = [str(u) for u in self._df["zarr_url"]]
+        if elements is not None:
+            if dest is not None:
+                raise ValueError("elements= copies into the cache; it cannot be combined with dest=")
+            root = cache_dir()
+            with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+                return list(pool.map(lambda u: _localize_to_cache(u, list(elements), root), urls))
+        if dest is not None:
+            failed = [e.uid for e in self.download(dest, workers=workers).entries if e.status != "complete"]
+            if failed:
+                raise RuntimeError(f"download failed for {failed}; see {Path(dest) / 'manifest.json'}")
+            return [Path(dest) / f"{uid}.zarr" for uid in self._df["uid"]]
+        root = cache_dir() / "stores"
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            return list(
+                pool.map(lambda p: _cached_store(*p, root), zip(self._df["uid"].astype(str), urls, strict=False))
+            )
 
     def __len__(self) -> int:
         return len(self._df)
