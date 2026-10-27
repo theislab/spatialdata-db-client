@@ -134,14 +134,19 @@ def _resolve(cat: Catalog, uids: list[str]) -> SpatialDataCohort:
 
 @app.command()
 def download(
-    uids: Annotated[list[str], typer.Argument(help="Dataset uid(s).")],
+    uids: Annotated[list[str] | None, typer.Argument(help="Dataset uid(s).")] = None,
+    collection: Annotated[str | None, typer.Option(help="A collection slug instead of uids.")] = None,
     dest: Annotated[Path, typer.Option(help="Destination directory.")] = Path("."),
     catalog: _CatalogOpt = None,
     workers: Annotated[int, typer.Option(help="Parallel downloads.")] = 4,
 ) -> None:
-    """Download datasets to DEST and print the manifest path."""
+    """Download datasets (by uid, or every member of --collection) to DEST and print the manifest path."""
+    if bool(uids) == (collection is not None):
+        raise _fail(ValueError("pass dataset uid(s) or --collection, not both or neither"))
     try:
-        manifest = _resolve(Catalog(catalog), uids).download(dest, workers=workers)
+        cat = Catalog(catalog)
+        cohort = cat.collection(collection) if collection is not None else _resolve(cat, uids or [])
+        manifest = cohort.download(dest, workers=workers)
     except Exception as err:
         raise _fail(err) from err
     failed = [e.uid for e in manifest.entries if e.status != "complete"]

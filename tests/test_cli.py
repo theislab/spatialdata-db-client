@@ -84,6 +84,11 @@ def test_download(tmp_path):
     m = json.loads((dest / "manifest.json").read_text())
     assert [e["status"] for e in m["entries"]] == ["complete", "complete"]
     assert (dest / "uid0001.zarr").is_dir()
+    col = tmp_path / "col"
+    r = runner.invoke(app, ["download", "--collection", "c-1", "--dest", str(col), "--catalog", p.as_uri()])
+    assert r.exit_code == 0, r.output
+    assert [e["uid"] for e in json.loads((col / "manifest.json").read_text())["entries"]] == ["uid0002"]  # fixture row 1
+    assert runner.invoke(app, ["download", "--catalog", p.as_uri()]).exit_code == 1
 
 
 def test_query_expressing_and_range_flags(tmp_path):
