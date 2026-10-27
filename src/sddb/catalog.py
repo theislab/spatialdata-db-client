@@ -17,7 +17,7 @@ from rapidfuzz import fuzz
 from sddb import _catalog_schema as schema
 from sddb._cache import _local_path, fetch_catalog
 from sddb.cohort import SpatialDataCohort
-from sddb.dataset import Source
+from sddb.dataset import Dataset, Source
 
 if TYPE_CHECKING:
     from sddb.features import FeatureIndex
@@ -329,6 +329,13 @@ class Catalog:
         return SpatialDataCohort(
             self._df[mask.fillna(False).astype(bool)], matched=matched, source=self._source(), filter={"search": text}
         )
+
+    def dataset(self, uid: str) -> Dataset:
+        """The catalog row for one full ``uid`` (as on its web page). Raises ``KeyError`` if absent."""
+        hit = self._df[self._df["uid"] == uid]
+        if hit.empty:
+            raise KeyError(f"uid not in catalog: {uid!r}")
+        return Dataset(hit.iloc[0])
 
     def collection(self, slug: str) -> SpatialDataCohort:
         """The members of one collection as a cohort, by its slug (the last part of its web page URL).

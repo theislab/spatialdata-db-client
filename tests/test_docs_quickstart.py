@@ -14,9 +14,9 @@ def test_quickstart_api_exists():
     assert len(hits) >= 1
     assert hasattr(hits, "summary")
     assert min(hits, key=lambda ds: ds.size_bytes) is not None
-    assert "lazy" in inspect.signature(type(hits[0]).load).parameters
+    assert "dest" in inspect.signature(type(hits[0]).to_sdata).parameters
     index = (_ROOT / "docs" / "index.md").read_text()
-    assert "load(lazy=False)" in index
+    assert ".to_sdata()" in index
     assert "min(hits, key=lambda ds: ds.size_bytes)" in index
     assert "pip install git+https://github.com/theislab/spatialdata-db-client" in index
 

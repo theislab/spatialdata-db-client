@@ -36,12 +36,12 @@ in a product or republishing it.
 
 Each row's `zarr_url` points to a SpatialData Zarr store on S3, readable anonymously
 (no credentials). Stores are registered in the Lamin instance
-[scverse/spatialdata-db](https://lamin.ai/scverse/spatialdata-db). Remote stores load eagerly:
+[scverse/spatialdata-db](https://lamin.ai/scverse/spatialdata-db). Remote stores are copied to the local cache once, then reused:
 
 ```python
 hits = cat.query(technology="Visium", tissue="lung")
 smallest = min(hits, key=lambda ds: ds.size_bytes)
-sdata = smallest.load(lazy=False)  # ~10 MB
+sdata = smallest.to_sdata()  # ~10 MB
 ```
 
 ## Versioning and drift
