@@ -49,11 +49,11 @@ zebrafish
 Copy stores by uid into a directory (resumable) and print the path of the manifest it wrote.
 
 ```
-$ sddb-cli download gtLUT2zUAH9l9Uzi0002 --dest ./data
+$ sddb-cli download h1okQyQN4GJd0I1l0000 --dest ./data
 data/manifest.json
 ```
 
-`--workers` sets the number of parallel downloads. The store ([`gtLUT2zUAH9l9Uzi0002`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-lung-gtlut2zuah9l9uzi0002/)) lands in `./data/gtLUT2zUAH9l9Uzi0002.zarr`.
+`--workers` sets the number of parallel downloads. The store ([`h1okQyQN4GJd0I1l0000`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-trunk-h1okqyqn4gjd0i1l0000/)) lands in `./data/h1okQyQN4GJd0I1l0000.zarr`.
 
 
 ### viewer-url
