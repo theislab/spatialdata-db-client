@@ -69,6 +69,22 @@ def build_server() -> Any:
             **_drop_none(organism=organism, tissue=tissue, disease=disease, assay=assay),
         )
 
+    def features(
+        features: list[str],
+        modality: str | None = None,
+        mode: str = "all",
+        feature_type: str | None = None,
+        organism: str | None = None,
+        tissue: str | None = None,
+        disease: str | None = None,
+        assay: str | None = None,
+        include_bronze: bool = True,
+    ) -> list[dict[str, Any]]:
+        return tools.features_tool(
+            features, modality=modality, mode=mode, feature_type=feature_type, include_bronze=include_bronze,
+            **_drop_none(organism=organism, tissue=tissue, disease=disease, assay=assay),
+        )
+
     def facets(field: str | None = None) -> list[str]:
         return tools.facets_tool(field)
 
@@ -127,6 +143,14 @@ def build_server() -> Any:
             "optionally filtered by organism/tissue/disease/assay. Bronze datasets are included by default."
         ),
     )(genes)
+    server.tool(
+        name="features",
+        description=(
+            "Datasets measuring one or more features of any modality (genes, protein targets, metabolites; "
+            "labels or ids; mode all=AND, any=union), optionally filtered by modality/feature_type and "
+            "organism/tissue/disease/assay. Each row lists the typed feature hits."
+        ),
+    )(features)
     server.tool(name="facets", description="List facet columns, or the distinct values of a facet field.")(facets)
     server.tool(name="cite", description="BibTeX for the studies of a filtered cohort.")(cite)
     server.tool(name="download", description="Plan (sizes) or fetch a filtered cohort to the server download dir.")(download_cohort)

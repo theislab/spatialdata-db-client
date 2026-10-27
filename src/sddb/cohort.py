@@ -28,7 +28,11 @@ def group_counts(df: pd.DataFrame, field: str) -> pd.DataFrame:
     """Count rows per value of ``field``; missing values form an explicit ``"unknown"`` row."""
     if field not in df.columns:
         raise KeyError(f"no such field: {field!r}")
-    key = df[field].astype("string").fillna("unknown")
+    col = df[field]
+    if any(not isinstance(v, str) and hasattr(v, "__iter__") for v in col.dropna()):  # list-valued facet
+        col = col.map(lambda v: list(v) if v is not None and hasattr(v, "__iter__") and not isinstance(v, str) else v)
+        col = col.map(lambda v: v if isinstance(v, list) and v else [None]).explode()
+    key = col.astype("string").fillna("unknown")
     out = key.value_counts(dropna=False).rename_axis(field).reset_index(name="n")
     return out.sort_values("n", ascending=False, ignore_index=True)
 

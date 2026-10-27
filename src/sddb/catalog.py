@@ -20,6 +20,7 @@ from sddb.cohort import SpatialDataCohort
 from sddb.dataset import Source
 
 if TYPE_CHECKING:
+    from sddb.features import FeatureIndex
     from sddb.genes import GeneIndex
 
 _ROLLING_SUFFIX = "/catalog-latest/catalog.parquet"
@@ -128,6 +129,7 @@ class Catalog:
         self._cache_dir = cache_dir
         self._refresh = refresh
         self._genes: GeneIndex | None = None
+        self._features: FeatureIndex | None = None
         self._path = fetch_catalog(url, cache_dir=cache_dir, refresh=refresh)
         try:
             df = pd.read_parquet(self._path)
@@ -176,6 +178,15 @@ class Catalog:
 
             self._genes = GeneIndex(self)
         return self._genes
+
+    @property
+    def features(self) -> FeatureIndex:
+        """Cross-dataset multi-modal feature index bound to this catalog (loaded lazily)."""
+        if self._features is None:
+            from sddb.features import FeatureIndex
+
+            self._features = FeatureIndex(self)
+        return self._features
 
     def to_df(self) -> pd.DataFrame:
         """Return the full catalog as a DataFrame copy."""

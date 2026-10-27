@@ -106,6 +106,50 @@ def genes_tool(
     return _records(cohort.to_df())
 
 
+def features_tool(
+    features: list[str] | str,
+    modality: str | None = None,
+    mode: str = "all",
+    feature_type: str | None = None,
+    organism: str | None = None,
+    tissue: str | None = None,
+    disease: str | None = None,
+    assay: str | None = None,
+    include_bronze: bool = True,
+    catalog_url: str | None = None,
+) -> list[dict[str, Any]]:
+    """Catalog rows of datasets measuring ``features`` (genes, protein targets, metabolites; ``mode`` all/any).
+
+    ``features`` are labels or reference ids (symbol, Ensembl, UniProt, HMDB...). ``modality``/``feature_type``
+    restrict the matched features. Each row carries ``features``: the typed hits
+    (``raw_label``/``feature_type``/``modality``) that matched in that dataset. Bronze datasets are included by
+    default; ``organism``/``tissue``/``disease``/``assay`` narrow the result.
+    """
+    if isinstance(features, str):
+        features = [features]
+    facets: dict[str, Any] = {k: v for k, v in (("organism", organism), ("tissue", tissue), ("disease", disease), ("assay", assay)) if v is not None}
+    cat = Catalog(catalog_url)
+    cohort = cat.features.where_measured(
+        features, mode=mode, feature_type=feature_type, modality=modality,
+        validation=None if include_bronze else "pass",
+    )
+    df = cohort.to_df()
+    for col, val in facets.items():
+        vals = val if isinstance(val, list) else [val]
+        df = df[df[col].isin(vals)]
+    per_uid: dict[str, list[dict[str, str]]] = {}
+    for f in features:
+        for hit in cat.features.resolve(f, feature_type=feature_type, modality=modality).itertuples():
+            for uid in hit.uids:
+                entry = {"raw_label": hit.raw_label, "feature_type": hit.feature_type, "modality": hit.modality}
+                if entry not in per_uid.setdefault(uid, []):
+                    per_uid[uid].append(entry)
+    rows = _records(df)
+    for row in rows:
+        row["features"] = per_uid.get(row["uid"], [])
+    return rows
+
+
 def facets_tool(field: str | None = None, catalog_url: str | None = None) -> list[str]:
     """List facet columns present in the catalog, or the sorted distinct values of ``field``."""
     return facet_values(Catalog(catalog_url).to_df(), field)

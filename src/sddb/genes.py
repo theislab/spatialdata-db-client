@@ -9,18 +9,14 @@ import pandas as pd
 from sddb import _catalog_schema as schema
 from sddb._cache import fetch_catalog
 from sddb.cohort import SpatialDataCohort
+from sddb.features import FeatureIndex, sibling_url
 
 if TYPE_CHECKING:
     from sddb.catalog import Catalog
 
 
-def sibling_url(url: str, name: str) -> str:
-    """Return ``url`` with its last path component replaced by ``name``."""
-    return url.rsplit("/", 1)[0] + "/" + name if "/" in url else name
-
-
 class GeneIndex:
-    """Reader over ``gene_index.parquet``, bound to a Catalog for uid -> Dataset resolution."""
+    """Reader over ``gene_index.parquet``: a gene-only view over :class:`~sddb.features.FeatureIndex`."""
 
     def __init__(self, catalog: Catalog, url: str | None = None) -> None:
         self._catalog = catalog
@@ -42,8 +38,18 @@ class GeneIndex:
             raise schema.SchemaError(f"gene index at {self.url} is invalid: {err}") from err
         self._df = df
         # Casefold the token columns once (the index is ~11M rows) so resolve() is a cheap per-token mask.
-        self._sym = df["symbol"].str.casefold()
-        self._fid = df["feature_id"].str.casefold()  # may hold pd.NA (legacy rows): compare vectorised only
+        sym = df["symbol"].str.casefold()
+        fid = df["feature_id"].str.casefold()  # may hold pd.NA (legacy rows)
+        ref = fid.dropna()
+        feats = pd.DataFrame(
+            {
+                "feature_type": "gene",
+                "uid": df["uid"],
+                "total_counts": df["total_counts"],
+                "fraction_obs_detected": df["fraction_obs_detected"],
+            }
+        )
+        self._fi = FeatureIndex._from_parts(catalog, self.url, feats, sym, ref, ref)
 
     def resolve(self, tokens: str | list[str], *, min_fraction: float | None = None) -> dict[str, set[str]]:
         """Map each token to the uids of datasets expressing it.
@@ -52,21 +58,7 @@ class GeneIndex:
         an ambiguous symbol therefore unions all its feature ids. Unmatched tokens map to an empty set.
         Keys keep the original token spelling.
         """
-        df = self._df
-        base = (
-            (df["fraction_obs_detected"] >= min_fraction).fillna(False).astype(bool)
-            if min_fraction is not None
-            else None
-        )
-        sym, fid = self._sym, self._fid
-        out: dict[str, set[str]] = {}
-        for tok in [tokens] if isinstance(tokens, str) else tokens:
-            key = tok.strip().casefold()
-            mask = ((sym == key) | (fid == key)).fillna(False).astype(bool)
-            if base is not None:
-                mask &= base
-            out[tok] = {str(u) for u in df.loc[mask, "uid"].dropna()}
-        return out
+        return self._fi._uid_sets(tokens, min_fraction=min_fraction)
 
     def where_expressed(
         self,
@@ -90,18 +82,12 @@ class GeneIndex:
             Keep datasets with this ``validation_status``; the default ``None`` includes bronze/non-pass
             datasets (flagged via the cohort's ``validation_status``/``tier`` columns).
         """
-        if mode not in ("all", "any"):
-            raise ValueError(f"mode must be 'all' or 'any', got {mode!r}")
-        sets = list(self.resolve(genes, min_fraction=min_fraction).values())
-        uids = (set.intersection(*sets) if mode == "all" else set.union(*sets)) if sets else set()
-        cat = self._catalog_df(validation)
-        return SpatialDataCohort(cat[cat["uid"].isin(uids)], source=self._catalog._source())
+        return self._fi.where_measured(genes, mode=mode, min_fraction=min_fraction, validation=validation)
 
     datasets_with = where_expressed  # backward-compatible alias (MCP + existing callers)
 
     def _catalog_df(self, validation: str | None) -> pd.DataFrame:
-        cat = self._catalog.to_df()
-        return cat if validation is None else cat[cat["validation_status"] == validation]
+        return self._fi._catalog_df(validation)
 
     def ranked(
         self, symbol: str, *, min_fraction: float | None = None, validation: str | None = None
@@ -111,13 +97,4 @@ class GeneIndex:
         The per-dataset detection profile for ``symbol``. Filters as in :meth:`where_expressed`; one row per
         catalog dataset (max over matching features). ``symbol`` may be a symbol or an Ensembl feature id.
         """
-        df = self._df
-        key = symbol.strip().casefold()
-        mask = ((self._sym == key) | (self._fid == key)).fillna(False).astype(bool)
-        if min_fraction is not None:
-            mask &= df["fraction_obs_detected"] >= min_fraction
-        cols = ["uid", "fraction_obs_detected", "total_counts"]
-        hit = df.loc[mask.fillna(False).astype(bool), cols].dropna(subset=["uid"])
-        hit = hit[hit["uid"].isin(set(self._catalog_df(validation)["uid"]))].groupby("uid", as_index=False).max()
-        by = ["fraction_obs_detected", "total_counts"]
-        return hit.sort_values(by, ascending=False, kind="stable").reset_index(drop=True)
+        return self._fi.ranked(symbol, min_fraction=min_fraction, validation=validation)
