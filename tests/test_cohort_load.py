@@ -1,8 +1,11 @@
 import inspect
+import json
 
 import pandas as pd
+import pytest
+from tests._fixtures import make_tiny_sdata_zarr
 
-from sddb import remote
+from sddb import manifest, remote
 from sddb.cohort import SpatialDataCohort
 from sddb.dataset import Dataset
 
@@ -19,20 +22,42 @@ def test_dataset_load_accepts_elements(monkeypatch):
     assert seen == {"url": "s3://b/1.zarr", "lazy": False, "elements": ["images/he"]}
 
 
-def test_cohort_load_and_sdatas(monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        remote, "open_sdata", lambda url, lazy=True, elements=None: calls.append((url, lazy, elements)) or url
-    )
-    coh = SpatialDataCohort(pd.DataFrame({"uid": ["u1", "u2"], "zarr_url": ["s3://b/1.zarr", "s3://b/2.zarr"]}))
-    out = coh.load(elements=["tables/t"])
-    assert out == ["s3://b/1.zarr", "s3://b/2.zarr"]
-    assert all(lazy is False for _, lazy, _ in calls)
-    assert all(el == ["tables/t"] for *_, el in calls)
-    calls.clear()
-    assert coh.sdatas == ["s3://b/1.zarr", "s3://b/2.zarr"]
-    assert all(lazy is False and el is None for _, lazy, el in calls)
-
-
 def test_load_elements_param_present():
     assert "elements" in inspect.signature(Dataset.load).parameters
+
+
+@pytest.fixture
+def cohort(tmp_path, monkeypatch):
+    monkeypatch.setenv("SDDB_CACHE_DIR", str(tmp_path / "cache"))
+    z = str(make_tiny_sdata_zarr(tmp_path))
+    df = pd.DataFrame({"uid": ["u10000", "u20000"], "zarr_url": [z, z], "sample_id": ["a", "a"]})
+    return SpatialDataCohort(df)
+
+
+def test_to_list_caches_by_uid_and_reuses(cohort, tmp_path, monkeypatch):
+    copies = []
+    real = manifest._copy_store
+    monkeypatch.setattr(manifest, "_copy_store", lambda url, dest: copies.append(dest) or real(url, dest))
+    first = cohort.to_list()
+    assert len(first) == 2
+    assert "img" in first[0].images
+    assert sorted(p.name for p in (tmp_path / "cache" / "stores").iterdir()) == ["u10000.zarr", "u20000.zarr"]
+    cohort.to_list()
+    assert len(copies) == 2  # second call opens the cached stores, no copy
+
+
+def test_to_dict_keys(cohort):
+    assert list(cohort.to_dict()) == ["u10000", "u20000"]
+    with pytest.raises(ValueError, match="sample_id"):
+        cohort.to_dict(key="sample_id")  # repeats
+    with pytest.raises(KeyError, match="nope"):
+        cohort.to_dict(key="nope")
+
+
+def test_to_list_dest_writes_download_layout(cohort, tmp_path):
+    out = cohort.to_list(dest=tmp_path / "data")
+    assert len(out) == 2
+    entries = json.loads((tmp_path / "data" / "manifest.json").read_text())["entries"]
+    assert [e["status"] for e in entries] == ["complete", "complete"]
+    with pytest.raises(ValueError, match="dest"):
+        cohort.to_list(elements=["images/img"], dest=tmp_path / "data")
