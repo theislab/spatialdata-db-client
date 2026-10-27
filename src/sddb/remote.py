@@ -66,7 +66,8 @@ def open_sdata(
         (``s3://``, ``http(s)://``): spatialdata's remote ``read_zarr`` is broken upstream. If False,
         copy the store (remote or local) into the cache directory and open the local copy.
     elements
-        Element paths (``"<kind>/<name>"``) to localize; only these are copied and opened. ``None``
+        Element paths (``"<kind>/<name>"``) to localize; only these are copied and opened (cached by URL,
+        which carries no version: prefer ``Dataset.to_sdata(elements=...)``, cached per uid). ``None``
         opens the whole store. Requires ``lazy=False``.
     cache_dir
         Cache directory override (only used when ``lazy=False``).

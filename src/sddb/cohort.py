@@ -370,9 +370,12 @@ class SpatialDataCohort(Sequence[Dataset]):
         if elements is not None:
             if dest is not None:
                 raise ValueError("elements= copies into the cache; it cannot be combined with dest=")
-            root = cache_dir()
+            # per-uid root: zarr_url carries no version, so a republish must not reuse an older partial copy
+            roots = [cache_dir() / "elements" / str(uid) for uid in self._df["uid"]]
             with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-                return list(pool.map(lambda u: _localize_to_cache(u, list(elements), root), urls))
+                return list(
+                    pool.map(lambda p: _localize_to_cache(p[0], list(elements), p[1]), zip(urls, roots, strict=True))
+                )
         if dest is not None:
             failed = [e.uid for e in self.download(dest, workers=workers).entries if e.status != "complete"]
             if failed:
