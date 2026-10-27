@@ -9,7 +9,7 @@ import pandas as pd
 import typer
 from rapidfuzz import fuzz, process
 
-from sddb.catalog import Catalog, facet_values
+from sddb.catalog import Catalog, _distinct, facet_values
 from sddb.citations import parse_bibtex
 from sddb.cohort import SpatialDataCohort
 
@@ -103,7 +103,7 @@ def _suggest(cat: Catalog, facets: dict[str, Any]) -> None:
     for col, val in facets.items():
         if col not in df.columns or isinstance(val, (list, tuple, set)):
             continue
-        known = {str(v) for v in df[col].dropna().unique()}
+        known = set(_distinct(df[col]))
         if str(val) in known:
             continue
         best = process.extractOne(val, list(known), processor=_norm, scorer=fuzz.ratio, score_cutoff=70)

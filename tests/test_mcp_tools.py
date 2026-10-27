@@ -96,7 +96,7 @@ def test_server_registers_tools():
     from sddb.mcp.server import build_server
 
     names = {t.name for t in asyncio.run(build_server().list_tools())}
-    assert names == {"query", "describe", "genes", "facets", "cite", "download"}
+    assert names == {"query", "describe", "genes", "features", "facets", "cite", "download"}
 
 
 def test_server_tools_hide_catalog_url():
@@ -227,7 +227,7 @@ def test_server_query_forwards_new_params(monkeypatch):
 
     monkeypatch.setattr(server, "_server_class", lambda: FakeServer)
     server.build_server()
-    assert {"query", "describe", "genes", "facets", "cite", "download"} <= set(registered)
+    assert {"query", "describe", "genes", "features", "facets", "cite", "download"} <= set(registered)
     registered["query"](organism="human", expressing="EPCAM", search="liver", min_obs=1000)
     assert seen["expressing"] == "EPCAM"
     assert seen["search"] == "liver"

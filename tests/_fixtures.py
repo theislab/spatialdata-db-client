@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from sddb._catalog_schema import CATALOG_COLUMNS, COLLECTION_COLUMNS, cast_scalars
+from sddb._catalog_schema import CATALOG_COLUMNS, COLLECTION_COLUMNS, FEATURE_INDEX_COLUMNS, cast_scalars
 
 # study_id per fixture row (first len(_ROWS) used; pairs share a study for the citation tests)
 _STUDIES = ("Smith2023", "Smith2023", "Lee2022", "Lee2022", "Wong2021")
@@ -209,3 +209,32 @@ def make_tiny_sdata_zarr(tmp_path: Path) -> Path:
     path = tmp_path / "tiny.zarr"
     sdata.write(path)
     return path
+
+
+def make_fixture_feature_index() -> pd.DataFrame:
+    """Small multi-modal feature index keyed to the fixture catalog uids."""
+    rows = [
+        # raw_label, type, modality, uid, counts, frac, ref_ids, ref_id_types, ref_relations, ref_conf, gene_xref
+        ("EPCAM", "gene", "rna", "uid0001", 5000.0, 0.4, ["ENSG00000119888"], ["ensembl_gene"], ["is"], [1.0], ["ENSG00000119888"]),
+        ("EPCAM", "gene", "rna", "uid0002", 3000.0, 0.3, ["ENSG00000119888"], ["ensembl_gene"], ["is"], [1.0], ["ENSG00000119888"]),
+        ("anti-EpCAM", "protein", "protein", "uid0003", 90.0, 0.8, ["P16422"], ["uniprot"], ["targets"], [0.9], ["ENSG00000119888"]),
+        ("EPCAM", "gene_activity", "atac", "uid0005", 10.0, 0.1, ["ENSG00000119888"], ["ensembl_gene"], ["is"], [1.0], ["ENSG00000119888"]),
+        ("KRT8", "gene", "rna", "uid0001", 9000.0, 0.6, ["ENSG00000170421"], ["ensembl_gene"], ["is"], [1.0], ["ENSG00000170421"]),
+        ("Glucose", "metabolite", "msi", "uid0004", 500.0, 0.9, ["HMDB0000122"], ["hmdb"], ["is"], [1.0], []),
+    ]
+    cols = list(FEATURE_INDEX_COLUMNS)
+    df = pd.DataFrame(
+        [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10]) for r in rows], columns=cols
+    )
+    for c in ("raw_label", "feature_type", "modality", "uid"):
+        df[c] = df[c].astype("string")
+    for c in ("total_counts", "fraction_obs_detected"):
+        df[c] = df[c].astype("Float64")
+    return df
+
+
+def write_fixture_feature_index(path: str | Path) -> Path:
+    """Write the fixture feature index to parquet and return its path."""
+    p = Path(path)
+    make_fixture_feature_index().to_parquet(p)
+    return p
