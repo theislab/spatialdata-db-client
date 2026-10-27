@@ -69,3 +69,9 @@ def test_to_list_dest_writes_download_layout(cohort, tmp_path):
     assert [e["status"] for e in entries] == ["complete", "complete"]
     with pytest.raises(ValueError, match="dest"):
         cohort.to_list(elements=["images/img"], dest=tmp_path / "data")
+
+
+def test_elements_cache_is_per_version(cohort, tmp_path):
+    cohort.to_list(elements=["tables/table"])
+    roots = sorted(p.name for p in (tmp_path / "cache" / "elements").iterdir())
+    assert roots == ["u10000", "u20000"]  # same zarr_url, two uids: two partial copies, never shared
