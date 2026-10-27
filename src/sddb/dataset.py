@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import webbrowser
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -11,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from sddb import remote
+from sddb.roles import resolve as _resolve_roles
 
 if TYPE_CHECKING:
     from spatialdata import SpatialData
@@ -77,6 +79,10 @@ class Dataset:
     def elements(self) -> dict[str, dict[str, Any]]:
         """Return element shapes/dtypes without loading data."""
         return remote.elements(self.zarr_url)
+
+    def resolve(self, roles: Mapping[str, str]) -> dict[str, str]:
+        """Resolve role regexes to this store's element paths (``"kind/name"``); see :func:`sddb.roles.resolve`."""
+        return _resolve_roles(self.elements().keys(), roles)
 
     def viewer_url(self) -> str:
         """Build a vitessce.io viewer link from this row's ``vitessce_url`` (pure string transform).
