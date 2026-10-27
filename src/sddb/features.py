@@ -14,12 +14,14 @@ from sddb.cohort import SpatialDataCohort
 if TYPE_CHECKING:
     from sddb.catalog import Catalog
 
-FEATURE_TYPES = ("gene", "protein", "metabolite", "gene_activity")
-
-
 def sibling_url(url: str, name: str) -> str:
     """Return ``url`` with its last path component replaced by ``name``."""
     return url.rsplit("/", 1)[0] + "/" + name if "/" in url else name
+
+
+def _aslist(v: object) -> list[str]:
+    """List cell -> list; a null cell (schema-valid) -> empty list."""
+    return [] if v is None or (not hasattr(v, "__iter__") and pd.isna(v)) else list(v)  # type: ignore[call-overload]
 
 
 def _explode_fold(series: pd.Series) -> pd.Series:
@@ -128,7 +130,7 @@ class FeatureIndex:
             first = g.iloc[0]
             uids = sorted({str(u) for u in g["uid"].dropna()})
             rows.append(
-                (label, ftype, mod, list(first["ref_ids"]), list(first["ref_id_types"]), list(first["gene_xref"]),
+                (label, ftype, mod, _aslist(first["ref_ids"]), _aslist(first["ref_id_types"]), _aslist(first["gene_xref"]),
                  uids, len(uids))
             )
         return pd.DataFrame(rows, columns=cols)

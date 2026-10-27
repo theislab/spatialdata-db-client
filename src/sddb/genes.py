@@ -36,7 +36,6 @@ class GeneIndex:
             schema.validate(df, kind="gene_index")
         except schema.SchemaError as err:
             raise schema.SchemaError(f"gene index at {self.url} is invalid: {err}") from err
-        self._df = df
         # Casefold the token columns once (the index is ~11M rows) so resolve() is a cheap per-token mask.
         sym = df["symbol"].str.casefold()
         fid = df["feature_id"].str.casefold()  # may hold pd.NA (legacy rows)

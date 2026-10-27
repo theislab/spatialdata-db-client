@@ -81,3 +81,19 @@ def test_group_counts_explodes_list_column():
     df = pd.DataFrame({"modalities": [["rna", "protein"], ["rna"], None, []]})
     out = dict(zip(group_counts(df, "modalities")["modalities"], group_counts(df, "modalities")["n"], strict=True))
     assert out == {"rna": 2, "protein": 1, "unknown": 2}
+
+
+def test_resolve_tolerates_null_list_cells(tmp_path):
+    from tests._fixtures import make_fixture_feature_index
+
+    cat_p = write_fixture_catalog(tmp_path / "catalog.parquet")
+    df = make_fixture_feature_index()
+    df["gene_xref"] = df["gene_xref"].astype(object)
+    df.at[5, "gene_xref"] = None
+    df.at[5, "ref_ids"] = None
+    df.at[5, "ref_id_types"] = None
+    df.to_parquet(tmp_path / "feature_index.parquet")
+    cat = Catalog(cat_p.as_uri(), cache_dir=tmp_path / "cache")
+    hit = cat.features.resolve("glucose")
+    assert hit.iloc[0]["gene_xref"] == [] and hit.iloc[0]["ref_ids"] == []
+    assert hit.iloc[0]["uids"] == ["uid0004"]
