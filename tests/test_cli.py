@@ -87,7 +87,8 @@ def test_download(tmp_path):
     col = tmp_path / "col"
     r = runner.invoke(app, ["download", "--collection", "c-1", "--dest", str(col), "--catalog", p.as_uri()])
     assert r.exit_code == 0, r.output
-    assert [e["uid"] for e in json.loads((col / "manifest.json").read_text())["entries"]] == ["uid0002"]  # fixture row 1
+    entries = json.loads((col / "manifest.json").read_text())["entries"]
+    assert [e["uid"] for e in entries] == ["uid0002"]  # fixture row 1
     assert runner.invoke(app, ["download", "--catalog", p.as_uri()]).exit_code == 1
 
 
