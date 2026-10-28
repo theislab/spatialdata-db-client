@@ -70,7 +70,9 @@ class Dataset:
 
         A remote store is copied once into the cache (keyed by full uid) and reused; a local store opens in
         place. ``dest`` keeps the store in ``dest/<uid>.zarr`` (the ``download()`` layout); ``elements``
-        (``"kind/name"``) copies only those elements.
+        (``"kind/name"``) copies only those elements. Both together copy only those elements into
+        ``dest/<uid>.zarr`` and record them in ``dest/manifest.json`` as a ``"partial"`` entry; a later
+        ``download(dest)`` fetches the whole store.
         """
         from sddb.cohort import SpatialDataCohort
 

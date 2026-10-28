@@ -101,9 +101,10 @@ class ManifestEntry:
     zarr_url: str
     dest: str
     size_bytes: int | None
-    status: str  # "complete" | "failed"
+    status: str  # "complete" | "failed" | "partial" (only ``elements`` were copied)
     sha256: str | None
     error: str | None = None  # why a failed download failed ("<ExceptionType>: <message>")
+    elements: list[str] | None = None  # the requested element paths of a partial copy
 
 
 @dataclass
@@ -124,11 +125,17 @@ class Manifest:
         """Re-download exactly the stores recorded in this manifest to ``dest`` (reproducible re-fetch).
 
         Uses the recorded ``zarr_url`` of each entry, not the current catalog, and keeps the recorded
-        ``catalog_version``. Completed stores already in ``dest`` are skipped. Only URLs are replayed:
-        a store republished at the same URL is not detected.
+        ``catalog_version``. Completed stores already in ``dest`` are skipped. A partial entry copies its
+        recorded ``elements`` again, not the whole store. Only URLs are replayed: a store republished at
+        the same URL is not detected.
         """
-        pairs = [(e.uid, e.zarr_url) for e in self.entries]
-        return _fetch_all(pairs, Path(dest), self.catalog_version, workers)
+        root = Path(dest)
+        pairs = [(e.uid, e.zarr_url) for e in self.entries if e.status != "partial"]
+        _fetch_all(pairs, root, self.catalog_version, workers)
+        for e in self.entries:
+            if e.status == "partial":
+                _localize_all([(e.uid, e.zarr_url)], e.elements or [], root, workers)
+        return Manifest.read(root / "manifest.json")
 
     def write(self, path: str | Path) -> Path:
         """Write the manifest as JSON and return the path."""
@@ -216,6 +223,60 @@ def _fetch_all(
             list(pool.map(lambda p: fetch(*p), pairs))
     save()
     return manifest
+
+
+def _localize_all(pairs: list[tuple[str, str]], elements: list[str], root: Path, workers: int) -> list[Path]:
+    """Copy only ``elements`` of each ``(uid, zarr_url)`` to ``root/<uid>.zarr``, recorded as ``"partial"`` in the manifest.
+
+    A complete store already in ``root`` is opened as it is. A partial copy is reused when it holds the requested
+    elements; otherwise its recorded elements plus the requested ones are copied again.
+    """
+    from sddb.remote import _localize_to_cache, _missing
+
+    root.mkdir(parents=True, exist_ok=True)
+    mpath = root / "manifest.json"
+    prev = {e.uid: e for e in Manifest.read(mpath).entries} if mpath.exists() else {}
+    full = reusable(root)
+
+    def old(uid: str, url: str) -> list[str] | None:
+        """The recorded elements of a partial copy of ``url`` in ``root``, else None."""
+        e = prev.get(uid)
+        return e.elements or [] if e is not None and e.status == "partial" and e.zarr_url == url else None
+
+    def want(uid: str, url: str) -> list[str]:
+        return (
+            sorted({*elements, *(old(uid, url) or [])}) if elements else []
+        )  # empty stays empty: the usual ValueError
+
+    todo = {
+        u
+        for u, url in pairs
+        if full.get(u) != url and (old(u, url) is None or _missing(root / f"{u}.zarr", want(u, url)))
+    }
+    order = {u: i for i, (u, _) in enumerate(pairs)}  # entries in member order, as download() writes them
+    lock = threading.Lock()
+
+    def local(uid: str, url: str) -> Path:
+        final = root / f"{uid}.zarr"
+        if uid not in todo:
+            return final
+        if old(uid, url) is None:
+            shutil.rmtree(final, ignore_errors=True)  # not a copy this manifest vouches for
+        paths = want(uid, url)
+        _localize_to_cache(url, paths, root, final)
+        size, sha = _digest(final)
+        with lock:
+            m = Manifest.read(mpath) if mpath.exists() else Manifest("", None, [])
+            m.generated_at = datetime.now(UTC).isoformat()
+            entry = ManifestEntry(uid, url, str(final), size, "partial", sha, elements=paths)
+            m.entries = sorted([e for e in m.entries if e.uid != uid] + [entry], key=lambda e: order.get(e.uid, -1))
+            m.write(mpath)
+            bar.update(size)
+        return final
+
+    with _progress(len(todo), 0) as bar:
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            return list(pool.map(lambda p: local(*p), pairs))
 
 
 def plan_sizes(results: SpatialDataCohort) -> list[tuple[str, int]]:

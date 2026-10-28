@@ -181,14 +181,17 @@ def _zm_key_kept(key: str, kept: set[str]) -> bool:
     return len(parts) == 1 or f"{parts[0]}/{parts[1]}" in kept
 
 
-def _localize_to_cache(zarr_url: str, elements: list[str], dest_root: Path) -> Path:
-    """Copy only ``elements`` (``"kind/name"``) + store metadata into a subset-keyed cache dir, pruned."""
+def _localize_to_cache(zarr_url: str, elements: list[str], dest_root: Path, dest: Path | None = None) -> Path:
+    """Copy only ``elements`` (``"kind/name"``) + store metadata into a subset-keyed cache dir, pruned.
+
+    ``dest`` (inside ``dest_root``) replaces the subset-keyed name, e.g. ``dest_root/<uid>.zarr`` for a download folder.
+    """
     paths = sorted(set(elements))
     if not paths:
         raise ValueError("pass element paths in `elements`, or None for the whole store")
     stem = _store_stem(zarr_url)
     key = zarr_url.rstrip("/") + "\n" + "\n".join(paths)
-    dest = dest_root / f"{stem}__{hashlib.sha1(key.encode()).hexdigest()[:12]}.zarr"  # cache key, not security
+    dest = dest or dest_root / f"{stem}__{hashlib.sha1(key.encode()).hexdigest()[:12]}.zarr"  # cache key, not security
 
     fs, root = _open_fs(zarr_url)
     if dest.exists() and not _missing(dest, paths):  # keyed on the request, before region closure

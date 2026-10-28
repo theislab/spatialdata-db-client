@@ -342,8 +342,12 @@ class SpatialDataCohort(Sequence[Dataset]):
 
         Remote stores are fetched in parallel and reused on later calls: into the sddb cache (keyed by full
         uid, so a republished version is fetched afresh; local stores open in place), or with ``dest`` into ``dest/<uid>.zarr`` plus a
-        manifest, exactly as :meth:`download`. ``elements`` (``"kind/name"``) copies only those elements
-        (cache only).
+        manifest, exactly as :meth:`download`. ``elements`` (``"kind/name"``) copies only those elements, plus
+        the store metadata and the shapes or labels a kept table annotates. With ``dest`` they go to
+        ``dest/<uid>.zarr``, recorded in the manifest as ``"partial"`` with the element list. A later call
+        reuses that copy when it holds the requested elements and otherwise copies them together with the
+        recorded ones. A later :meth:`download` replaces a partial copy with the whole store. A store that
+        is already complete in ``dest`` opens whole.
         """
         from spatialdata import read_zarr
 
@@ -358,7 +362,11 @@ class SpatialDataCohort(Sequence[Dataset]):
         dest: str | Path | None = None,
         workers: int = 4,
     ) -> dict[str, SpatialData]:
-        """Like :meth:`to_list`, keyed by the ``key`` column (default the full uid), which must be unique and set."""
+        """Like :meth:`to_list`, keyed by the ``key`` column (default the full uid), which must be unique and set.
+
+        ``elements`` with ``dest`` copies only those elements into ``dest/<uid>.zarr`` and records each copy in
+        ``dest/manifest.json`` as ``"partial"``, as described in :meth:`to_list`.
+        """
         if key not in self._df.columns:
             raise KeyError(f"no such column: {key!r}")
         keys = self._df[key]
@@ -370,7 +378,10 @@ class SpatialDataCohort(Sequence[Dataset]):
         urls = [str(u) for u in self._df["zarr_url"]]
         if elements is not None:
             if dest is not None:
-                raise ValueError("elements= copies into the cache; it cannot be combined with dest=")
+                from sddb.manifest import _localize_all
+
+                pairs = list(zip(self._df["uid"].astype(str), urls, strict=True))
+                return _localize_all(pairs, list(elements), Path(dest), workers)
             # per-uid root: zarr_url carries no version, so a republish must not reuse an older partial copy
             roots = [cache_dir() / "elements" / str(uid) for uid in self._df["uid"]]
             with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
