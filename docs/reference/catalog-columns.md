@@ -5,6 +5,13 @@ Every column of the catalog schema. "Facet" columns are categorical filters (`Ca
 ```{include} _catalog_columns.md
 ```
 
+## Quality columns
+
+| Column | Description |
+|---|---|
+| `validation_status` | Result of schema validation, `pass` or `fail`. In the current catalog every dataset passes validation, so this filter changes nothing yet. Filter on `tier` (`silver`, `bronze`) for quality. |
+| `tier` | Curation tier: `gold`, `silver` or `bronze`, from most to least curated. Some datasets have no tier yet. |
+
 ## Study and condition columns
 
 All optional: older catalogs without them still load, and they are null when the source has no such metadata.

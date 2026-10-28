@@ -218,6 +218,8 @@ class Catalog:
         ----------
         validation
             Keep rows with this ``validation_status`` (default ``"pass"``); ``None`` disables.
+            In the current catalog every dataset passes validation, so this filter changes nothing yet.
+            Filter on ``tier`` (``silver``, ``bronze``) for quality.
         license_set
             If True, keep only rows with a known license (``license_unknown`` is False); False behaves like None.
         noncommercial

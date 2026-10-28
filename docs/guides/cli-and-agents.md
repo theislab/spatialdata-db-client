@@ -16,7 +16,7 @@ published catalog). Errors go to stderr with exit code 1.
 ### query
 
 List datasets that match facets, ranges, a gene or free text. `--validation all` includes datasets that did
-not pass validation, `--json` emits records instead of a table, and `--gene` (repeatable, requires all) uses the
+not pass validation (in the current catalog every dataset passes, so this changes nothing yet; filter on `tier` for quality), `--json` emits records instead of a table, and `--gene` (repeatable, requires all) uses the
 gene index.
 
 ```
