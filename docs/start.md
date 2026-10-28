@@ -49,6 +49,21 @@ sdata_by_uid = cohort.to_dict()  # {uid: SpatialData}, downloaded once into the 
 
 `licenses()` returns a table with the columns `license` and `n`. Members whose license is not known are counted under `unknown`. To keep the `.zarr` stores in a folder of your own instead of the cache, call `cohort.download("data/")`. See {doc}`guides/cohorts` for freezing, splitting and reproducing a cohort.
 
+(from-uids)=
+## From a list of uids
+
+If you already know which datasets you want, for example from a paper's supplement or a previous analysis, pass their uids to `Catalog().cohort()`. Use `study_ids=` instead of `uids=` to take every dataset of the given studies. Pass exactly one of the two.
+
+```python
+from sddb import Catalog
+
+cohort = Catalog().cohort(uids=["{{ small_uid }}", "<another uid>"])
+print(cohort.members[["uid", "study_id"]])  # one row per dataset
+sdata_by_uid = cohort.to_dict()  # {uid: SpatialData}, downloaded once into the cache
+```
+
+Replace `<another uid>` with a uid from a dataset page. `cohort()` needs full uids, and it raises a `KeyError` that names every uid or study id that is not in the catalog, so a typo fails before anything is downloaded. See {doc}`guides/cohorts` for freezing, splitting and reproducing the cohort.
+
 (cli)=
 ## Command line
 

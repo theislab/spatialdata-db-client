@@ -212,6 +212,8 @@ class Catalog:
     ) -> SpatialDataCohort:
         """Filter the catalog.
 
+        To start from known uids or study ids, use :meth:`Catalog.cohort`.
+
         Parameters
         ----------
         validation
