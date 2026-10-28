@@ -57,12 +57,12 @@ If you already know which datasets you want, for example from a paper's suppleme
 ```python
 from sddb import Catalog
 
-cohort = Catalog().cohort(uids=["{{ small_uid }}", "<another uid>"])
+cohort = Catalog().cohort(uids=["{{ small_uid }}"])  # add more uids to the list
 print(cohort.members[["uid", "study_id"]])  # one row per dataset
 sdata_by_uid = cohort.to_dict()  # {uid: SpatialData}, downloaded once into the cache
 ```
 
-Replace `<another uid>` with a uid from a dataset page. `cohort()` needs full uids, and it raises a `KeyError` that names every uid or study id that is not in the catalog, so a typo fails before anything is downloaded. See {doc}`guides/cohorts` for freezing, splitting and reproducing the cohort.
+Add the uids you want, each copied from the chip on a dataset page. `cohort()` needs full uids, and it raises a `KeyError` that names every uid or study id that is not in the catalog, so a typo fails before anything is downloaded. See {doc}`guides/cohorts` for freezing, splitting and reproducing the cohort.
 
 (cli)=
 ## Command line
