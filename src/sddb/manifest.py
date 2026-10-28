@@ -101,9 +101,10 @@ class ManifestEntry:
     zarr_url: str
     dest: str
     size_bytes: int | None
-    status: str  # "complete" | "failed"
+    status: str  # "complete" | "failed" | "partial" (only ``elements`` were copied)
     sha256: str | None
     error: str | None = None  # why a failed download failed ("<ExceptionType>: <message>")
+    elements: list[str] | None = None  # the requested element paths of a partial copy
 
 
 @dataclass
@@ -124,16 +125,26 @@ class Manifest:
         """Re-download exactly the stores recorded in this manifest to ``dest`` (reproducible re-fetch).
 
         Uses the recorded ``zarr_url`` of each entry, not the current catalog, and keeps the recorded
-        ``catalog_version``. Completed stores already in ``dest`` are skipped. Only URLs are replayed:
-        a store republished at the same URL is not detected.
+        ``catalog_version``. Completed stores already in ``dest`` are skipped. A partial entry copies its
+        recorded ``elements`` again, not the whole store. Only URLs are replayed: a store republished at
+        the same URL is not detected.
         """
-        pairs = [(e.uid, e.zarr_url) for e in self.entries]
-        return _fetch_all(pairs, Path(dest), self.catalog_version, workers)
+        root = Path(dest)
+        pairs = [(e.uid, e.zarr_url) for e in self.entries if e.status != "partial"]
+        _fetch_all(pairs, root, self.catalog_version, workers)
+        for e in self.entries:
+            if e.status == "partial":
+                _localize_all([(e.uid, e.zarr_url)], e.elements or [], root, workers)
+        return Manifest.read(root / "manifest.json")
 
     def write(self, path: str | Path) -> Path:
         """Write the manifest as JSON and return the path."""
         p = Path(path)
-        p.write_text(json.dumps(asdict(self), indent=2))
+        doc = asdict(self)
+        for e in doc["entries"]:
+            if e["elements"] is None:
+                del e["elements"]  # so clients without the field still read manifests of complete stores
+        p.write_text(json.dumps(doc, indent=2))
         return p
 
 
@@ -218,6 +229,70 @@ def _fetch_all(
     return manifest
 
 
+def _localize_all(pairs: list[tuple[str, str]], elements: list[str], root: Path, workers: int) -> list[Path]:
+    """Copy only ``elements`` of each ``(uid, zarr_url)`` to ``root/<uid>.zarr``, recorded as ``"partial"`` in the manifest.
+
+    A complete store already in ``root`` is opened as it is. A partial copy is reused when it holds the requested
+    elements; otherwise its recorded elements plus the requested ones are copied again.
+    """
+    from sddb.remote import _localize_to_cache, _missing
+
+    if not elements:
+        raise ValueError("pass element paths in `elements`, or None for the whole store")
+    if bad := [p for p in elements if not p.partition("/")[2]]:
+        raise ValueError(f"element path must be 'kind/name', got {bad[0]!r}")
+    root.mkdir(parents=True, exist_ok=True)
+    mpath = root / "manifest.json"
+    prev = {e.uid: e for e in Manifest.read(mpath).entries} if mpath.exists() else {}
+    full = reusable(root)
+
+    def old(uid: str, url: str) -> list[str] | None:
+        """The recorded elements of a partial copy of ``url`` in ``root``, else None."""
+        e = prev.get(uid)
+        if e is None or e.status != "partial" or e.zarr_url != url:
+            return None
+        return e.elements or []
+
+    def want(uid: str, url: str) -> list[str]:
+        return sorted({*elements, *(old(uid, url) or [])})
+
+    todo = {
+        u
+        for u, url in pairs
+        if full.get(u) != url and (old(u, url) is None or _missing(root / f"{u}.zarr", want(u, url)))
+    }
+    order = {u: i for i, (u, _) in enumerate(pairs)}  # entries in member order, as download() writes them
+    lock = threading.Lock()
+
+    def record(uid: str, entry: ManifestEntry | None) -> None:
+        """Replace (or with ``None`` drop) the manifest entry for ``uid``."""
+        with lock:
+            m = Manifest.read(mpath) if mpath.exists() else Manifest("", None, [])
+            m.generated_at = datetime.now(UTC).isoformat()
+            kept = [e for e in m.entries if e.uid != uid] + ([entry] if entry else [])
+            m.entries = sorted(kept, key=lambda e: order.get(e.uid, -1))
+            m.write(mpath)
+
+    def local(uid: str, url: str) -> Path:
+        final = root / f"{uid}.zarr"
+        if uid not in todo:
+            return final
+        if old(uid, url) is None:  # not a copy this manifest vouches for: unlist it before removing it
+            if uid in prev:
+                record(uid, None)
+            shutil.rmtree(final, ignore_errors=True)
+        paths = want(uid, url)
+        _localize_to_cache(url, paths, root, final)
+        size, sha = _digest(final)
+        record(uid, ManifestEntry(uid, url, str(final), size, "partial", sha, elements=paths))
+        bar.update(size)
+        return final
+
+    with _progress(len(todo), 0) as bar:
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            return list(pool.map(lambda p: local(*p), pairs))
+
+
 def plan_sizes(results: SpatialDataCohort) -> list[tuple[str, int]]:
     """Per-store ``(uid, total bytes)`` from a LIST/``du`` on each store — no data is copied."""
     out: list[tuple[str, int]] = []
@@ -275,6 +350,28 @@ def reusable(root: str | Path) -> dict[str, str]:
     return {e.uid: e.zarr_url for e in entries if e.status == "complete" and (root / f"{e.uid}.zarr").is_dir()}
 
 
+def _check_pin(
+    mpath: Path,
+    current: str | None,
+    allow_version_change: bool,
+    *,
+    hint: str = "pass allow_version_change=True to overwrite",
+) -> bool:
+    """Whether the manifest at ``mpath`` is pinned to ``current``; raise if it is pinned to another version.
+
+    A mismatch raises :class:`ManifestVersionMismatch` unless ``allow_version_change`` (then False: not pinned).
+    """
+    recorded = Manifest.read(mpath).catalog_version if mpath.exists() else None
+    if recorded is None or recorded == current:
+        return recorded is not None
+    if not allow_version_change:
+        raise ManifestVersionMismatch(
+            f"manifest at {mpath} is pinned to catalog version {recorded!r}, "
+            f"but the current catalog version is {current!r}; {hint}"
+        )
+    return False
+
+
 def download(
     results: SpatialDataCohort,
     dest: str | Path,
@@ -300,18 +397,7 @@ def download(
     root = Path(dest)
     current = results._source.version
     mpath = root / "manifest.json"
-    pinned = pin_versions
-    if mpath.exists():
-        recorded = Manifest.read(mpath).catalog_version
-        if recorded is not None and recorded != current:
-            if not allow_version_change:
-                raise ManifestVersionMismatch(
-                    f"manifest at {mpath} is pinned to catalog version {recorded!r}, "
-                    f"but the current catalog version is {current!r}; "
-                    "pass allow_version_change=True to overwrite"
-                )
-        elif recorded is not None:
-            pinned = True
+    pinned = _check_pin(mpath, current, allow_version_change) or pin_versions
     pairs: list[tuple[str, str]] = []
     missing: dict[str, str] = {}
     present = reusable(root)

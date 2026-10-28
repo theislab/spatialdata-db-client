@@ -34,6 +34,16 @@ sdata = ds.to_sdata()  # copied to the local cache on the first call, then reuse
 
 The uid in this example is the smallest dataset in the catalog, so it is a quick one to try. A download prints its progress on stderr, and nothing is printed when the store is already cached. Check `ds.license` before you reuse the data, and see {doc}`cite-and-license` for what the license columns mean. {doc}`guides/find-and-load` covers filtering and loading in more detail.
 
+### Only some elements, in a folder of your choice
+
+`elements` copies only the elements you name, as `"kind/name"` paths from `ds.elements()`. With `dest`, the copy goes to `dest/<uid>.zarr` instead of the cache, and `dest/manifest.json` records it as a partial copy with its element list.
+
+```python
+sdata = ds.to_sdata(elements=["tables/table"], dest="data/")
+```
+
+The client adds the shapes or labels that a kept table annotates. A second call with the same elements opens the copy without fetching anything. A later `download("data/")` of a cohort with this dataset fetches the whole store.
+
 (one-collection)=
 ## One collection
 
