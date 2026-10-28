@@ -378,8 +378,9 @@ class SpatialDataCohort(Sequence[Dataset]):
         urls = [str(u) for u in self._df["zarr_url"]]
         if elements is not None:
             if dest is not None:
-                from sddb.manifest import _localize_all
+                from sddb.manifest import _check_pin, _localize_all
 
+                _check_pin(Path(dest) / "manifest.json", self._source.version, allow_version_change=False)
                 pairs = list(zip(self._df["uid"].astype(str), urls, strict=True))
                 return _localize_all(pairs, list(elements), Path(dest), workers)
             # per-uid root: zarr_url carries no version, so a republish must not reuse an older partial copy

@@ -9,6 +9,7 @@ from sddb import cohort as cohort_mod
 from sddb import manifest
 from sddb.catalog import Catalog
 from sddb.cohort import SpatialDataCohort
+from sddb.dataset import Source
 
 
 @pytest.fixture
@@ -130,6 +131,29 @@ def test_elements_dest_reuses_and_extends_the_copy(cohort, tmp_path, capsys):
     assert e.elements == ["images/img", "tables/table"]
 
 
+def test_elements_dest_subset_reuses_the_larger_copy(cohort, tmp_path, capsys):
+    d = tmp_path / "data"
+    cohort[0].to_sdata(elements=["images/img", "tables/table"], dest=d)
+    ino = (d / "u10000.zarr").stat().st_ino
+    capsys.readouterr()
+    cohort[0].to_sdata(elements=["tables/table"], dest=d)
+    assert capsys.readouterr().err == ""
+    assert (d / "u10000.zarr").stat().st_ino == ino
+    (e,) = manifest.Manifest.read(d / "manifest.json").entries
+    assert e.elements == ["images/img", "tables/table"]
+
+
+def test_elements_dest_respects_the_catalog_version_pin(cohort, tmp_path):
+    d = tmp_path / "data"
+    SpatialDataCohort(cohort.members, source=Source(version="v1"))[:1].download(d, pin_versions=True)
+    with pytest.raises(manifest.ManifestVersionMismatch, match="v1"):
+        SpatialDataCohort(cohort.members, source=Source(version="v2")).to_list(elements=["images/img"], dest=d)
+    SpatialDataCohort(cohort.members, source=Source(version="v1")).to_list(elements=["images/img"], dest=d)
+    m = manifest.Manifest.read(d / "manifest.json")
+    assert m.catalog_version == "v1"
+    assert [e.status for e in m.entries] == ["complete", "partial"]
+
+
 def test_full_download_replaces_a_partial_copy(cohort, tmp_path):
     d = tmp_path / "data"
     cohort.to_list(elements=["images/img"], dest=d)
@@ -155,6 +179,8 @@ def test_elements_dest_bad_path_raises_and_keeps_the_copy(cohort, tmp_path):
         cohort[0].to_sdata(elements=["images/nope"], dest=d)
     with pytest.raises(ValueError, match="kind/name"):
         cohort[0].to_sdata(elements=["img"], dest=d)
+    with pytest.raises(ValueError, match="pass element paths"):
+        cohort[0].to_sdata(elements=[], dest=d)  # raises even though a copy is there to reuse
     assert (d / "u10000.zarr" / "images" / "img").is_dir()
     assert manifest.Manifest.read(d / "manifest.json").entries[0].elements == ["images/img"]
 
@@ -172,3 +198,23 @@ def test_manifest_without_elements_field_loads(tmp_path):
     p.write_text(json.dumps({"generated_at": "t", "catalog_version": None, "entries": [entry]}))
     (e,) = manifest.Manifest.read(p).entries
     assert (e.status, e.elements) == ("complete", None)
+
+
+def test_manifest_writes_elements_only_for_partial_entries(cohort, tmp_path):
+    d = tmp_path / "data"
+    cohort[:1].download(d)
+    cohort[1].to_sdata(elements=["images/img"], dest=d)
+    raw = json.loads((d / "manifest.json").read_text())["entries"]
+    assert ["elements" in e for e in raw] == [False, True]  # older clients still read complete entries
+    m = manifest.Manifest.read(d / "manifest.json")
+    assert manifest.Manifest.read(m.write(tmp_path / "copy.json")) == m
+
+
+def test_failed_partial_copy_leaves_no_complete_entry(cohort, tmp_path):
+    d = tmp_path / "data"
+    cohort[:1].download(d)
+    (tmp_path / "other").mkdir()
+    moved = cohort.members.iloc[:1].assign(zarr_url=str(make_tiny_sdata_zarr(tmp_path / "other")))
+    with pytest.raises(FileNotFoundError):
+        SpatialDataCohort(moved).to_list(elements=["images/nope"], dest=d)
+    assert manifest.reusable(d) == {}  # the manifest never vouches for a store it no longer has

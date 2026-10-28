@@ -72,7 +72,8 @@ class Dataset:
         place. ``dest`` keeps the store in ``dest/<uid>.zarr`` (the ``download()`` layout); ``elements``
         (``"kind/name"``) copies only those elements. Both together copy only those elements into
         ``dest/<uid>.zarr`` and record them in ``dest/manifest.json`` as a ``"partial"`` entry; a later
-        ``download(dest)`` fetches the whole store.
+        ``download(dest)`` fetches the whole store. If ``dest`` already holds the complete store, ``elements``
+        opens it whole.
         """
         from sddb.cohort import SpatialDataCohort
 
