@@ -152,7 +152,7 @@ If `sddb-mcp` is not on the `PATH` of the app, use its absolute path as `command
 | `query` | Filter datasets by facets, ranges (`min_obs`, `min_features`), gene (`expressing`, `min_fraction`) and free-text `search`. |
 | `describe` | Catalog row and element shapes for one dataset `uid`. |
 | `genes` | Datasets expressing one or more genes (`mode` `all` or `any`), optionally filtered by organism, tissue, disease or assay. Bronze datasets are included by default. |
-| `features` | Datasets measuring one or more features of any modality (genes, protein targets, metabolites; labels or ids; `mode` `all` or `any`), optionally filtered by `modality`, `feature_type`, organism, tissue, disease or assay. Each row lists the typed feature hits. |
+| `features` | Datasets measuring one or more features of any modality (genes, protein targets, metabolites; labels or ids; `mode` `all` or `any`), optionally filtered by `modality`, `feature_type`, organism, tissue, disease or assay. Each row lists the typed feature hits. Bronze datasets are included by default. |
 | `facets` | List the facet columns, or the distinct values of one field. |
 | `cite` | BibTeX for the studies of a filtered cohort. |
 | `download` | Plan a download (per-store and total sizes) or, with `download=true`, fetch the cohort into the server download directory. |

@@ -47,9 +47,9 @@ def _examples(df: pd.DataFrame) -> dict[str, str]:
         out["small_uid"] = str(row["uid"])
         out["small_stem"] = str(row["uid"])[:16]
     if "collections" in df:
-        members = sized.assign(_slug=sized["collections"]).explode("_slug").dropna(subset=["_slug"])
-        per = members.groupby("_slug")["size_bytes"].agg(["size", "sum"])
-        per = per[per["size"] > 1]
+        members = df.assign(_slug=df["collections"]).explode("_slug").dropna(subset=["_slug"])
+        per = members.groupby("_slug")["size_bytes"].agg(["size", "count", "sum"])
+        per = per[(per["size"] > 1) & (per["count"] == per["size"])]  # every member has a size
         if not per.empty:
             out["small_collection"] = str(per["sum"].idxmin())
     return out
@@ -108,7 +108,7 @@ def with_defaults(stats: dict[str, str]) -> dict[str, str]:
 
 def fill_code_examples(app, docname, source) -> None:
     """MyST does not substitute inside code fences, so fill the ``{{ small_* }}`` placeholders in the raw source."""
-    for key in ("small_uid", "small_stem", "small_collection"):
+    for key in ("site_url", "small_uid", "small_stem", "small_collection"):
         source[0] = source[0].replace("{{ " + key + " }}", app.config.myst_substitutions[key])
 
 

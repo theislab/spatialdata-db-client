@@ -148,7 +148,8 @@ def test_small_examples_match_website_rule():
 
 def test_small_examples_have_offline_fallback():
     d = cs.with_defaults({})
-    assert d["small_uid"] == "<uid>" and d["small_collection"] == "<slug>"
+    assert d["small_uid"] == "<uid>"
+    assert d["small_collection"] == "<slug>"
     assert "small_uid" not in cs.catalog_stats(_df())  # no uid column: nothing to compute
 
 
@@ -157,6 +158,24 @@ def test_fill_code_examples_replaces_placeholders():
         class config:
             myst_substitutions = cs.with_defaults({"small_uid": "u1", "small_collection": "c1"})
 
-    src = ['Catalog().dataset("{{ small_uid }}") {{ small_collection }} {{ small_stem }}']
+    src = ['Catalog().dataset("{{ small_uid }}") {{ small_collection }} {{ small_stem }} [x]({{ site_url }})']
     cs.fill_code_examples(App, "start", src)
-    assert src[0] == 'Catalog().dataset("u1") c1 <16-character stem>'
+    assert src[0] == f'Catalog().dataset("u1") c1 <16-character stem> [x]({cs.SITE_URL})'
+
+
+def test_start_page_has_no_unfilled_placeholder():
+    class App:
+        class config:
+            myst_substitutions = cs.with_defaults({})
+
+    raw = (Path(__file__).parent.parent / "docs" / "start.md").read_text()
+    src = [raw]
+    cs.fill_code_examples(App, "start", src)
+    assert "{{" not in src[0]
+
+
+def test_small_collection_skips_collections_with_unsized_members():
+    df = _df().assign(uid=["u" * 20, "s" * 20, "v" * 20, "t" * 20])
+    df["collections"] = [["c1"], ["c1"], ["c2"], ["c2"]]
+    df.loc[3, "size_bytes"] = float("nan")
+    assert cs.catalog_stats(df)["small_collection"] == "c1"

@@ -17,7 +17,7 @@ uv pip install git+https://github.com/theislab/spatialdata-db-client
 
 The package needs Python 3.12 or newer. It is not on PyPI yet, so install it from GitHub. The name `sddb` on PyPI belongs to an unrelated package.
 
-The client keeps its cache in the user cache directory of the platform, in a folder called `sddb`. Set `SDDB_CACHE_DIR` to put it somewhere else, for example on a larger disk. The first call to `Catalog()` downloads the catalog (about 6.5 MB) from a GitHub release and reuses it afterwards.
+The client keeps its cache in the user cache directory of the platform, in a folder called `sddb`. Set `SDDB_CACHE_DIR` to put it somewhere else, for example on a larger disk. The first call to `Catalog()` downloads the catalog (about 7 MB) from a GitHub release. Later calls check for a newer catalog and download it again only when one has been published.
 
 (one-dataset)=
 ## One dataset
@@ -28,11 +28,11 @@ Every dataset page shows a uid in the chip at the top right. Click it to copy th
 from sddb import Catalog
 
 ds = Catalog().dataset("{{ small_uid }}")
-ds.license    # the license id of the source, for example "ncbi-geo-policy"
+print(ds.license)  # the license id of the source, e.g. CC-BY-4.0
 sdata = ds.to_sdata()  # copied to the local cache on the first call, then reused
 ```
 
-`{{ small_uid }}` is the smallest dataset in the catalog, so it is a quick one to try. A download prints its progress on stderr, and nothing is printed when the store is already cached. Check `ds.license` before you reuse the data, and see {doc}`cite-and-license` for what the license columns mean. {doc}`guides/find-and-load` covers filtering and loading in more detail.
+The uid in this example is the smallest dataset in the catalog, so it is a quick one to try. A download prints its progress on stderr, and nothing is printed when the store is already cached. Check `ds.license` before you reuse the data, and see {doc}`cite-and-license` for what the license columns mean. {doc}`guides/find-and-load` covers filtering and loading in more detail.
 
 (one-collection)=
 ## One collection
@@ -43,7 +43,7 @@ The slug of a collection is the last part of its page URL, and the collection pa
 from sddb import Catalog
 
 cohort = Catalog().collection("{{ small_collection }}")
-cohort.licenses()  # one row per license, with the number of members
+print(cohort.licenses())  # one row per license, with the number of members
 sdata_by_uid = cohort.to_dict()  # {uid: SpatialData}, downloaded once into the cache
 ```
 
@@ -73,8 +73,10 @@ db = ln.DB("scverse/spatialdata-db")
 artifact = db.Artifact.get("{{ small_stem }}")  # the 16-character stem of the uid
 sdata = artifact.load()
 
-coll = db.Collection.get(key="{{ small_collection }}")  # a collection, by slug
+coll = db.Collection.get(key="<Lamin key>")  # a collection, by its Lamin key
 ```
+
+The Lamin key of a collection is shown in the Lamin tab on its page. It often equals the slug, but not always, so copy it from the tab.
 
 This route needs `pip install lamindb` and network access to the Lamin database. Access is limited during the alpha, so the calls can fail or hang outside an allowed network. If they do, use the client as shown above.
 
