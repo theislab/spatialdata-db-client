@@ -89,6 +89,10 @@ def test_download(tmp_path):
     again = runner.invoke(app, ["download", "uid0001", "uid0002", "--dest", str(dest), "--catalog", p.as_uri()])
     assert again.exit_code == 0, again.output
     assert again.stderr.strip().endswith(f"downloaded 0 datasets (0.0 MB) to {dest}; 2 already present")
+    one = tmp_path / "one"
+    r = runner.invoke(app, ["download", "uid0001", "--dest", str(one), "--catalog", p.as_uri()])
+    assert r.exit_code == 0, r.output
+    assert re.search(rf"downloaded 1 dataset \([\d,.]+ MB\) to {re.escape(str(one))}$", r.stderr.strip())
     col = tmp_path / "col"
     r = runner.invoke(app, ["download", "--collection", "c-1", "--dest", str(col), "--catalog", p.as_uri()])
     assert r.exit_code == 0, r.output

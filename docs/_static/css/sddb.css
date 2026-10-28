@@ -1,9 +1,22 @@
 /* SpatialData-DB additions to the scverse theme, which owns the palette, fonts, cards and code blocks. */
 
-/* The landing-page mosaic: full column width, no frame (the tiles carry their own rounding). */
+/* The landing-page mosaic and card grid span the text column exactly. */
+figure.sddb-mosaic {
+  margin: 1.5rem 0;
+  padding: 0;
+}
 figure.sddb-mosaic img {
+  display: block;
   width: 100%;
   height: auto;
+}
+figure.sddb-mosaic figcaption {
+  margin-top: 0.5rem;
+  text-align: center;
+  color: var(--pst-color-text-muted);
+}
+.bd-article .sd-container-fluid {
+  padding-inline: 0;
 }
 
 /* At phone width the theme's heading sizes give long page titles five lines; scale both levels down. */

@@ -1,14 +1,19 @@
-"""Build ``docs/_static/landing-mosaic.webp``, the thumbnail grid on the docs landing page.
+"""Build the thumbnail grids on the docs landing page.
 
-The grid shows one dataset per technology, picked the way the website's front page picks them: group the
-catalog by its ``assay`` display family, take the 12 largest families and, in each, the first row with a
-Vitessce view (else the first row). The tiles are the website's card thumbnails, labelled like its cards.
-A family whose pick has no thumbnail, or a blank one, falls back to its next row with a usable one.
+The grids show one dataset for each of the 12 largest technologies, picked the way the website's front page
+picks them: group the catalog by its ``assay`` display family, take the 12 largest families (ties broken by
+name) and, in each, the first row with a Vitessce view (else the first row). The tiles are the website's card
+thumbnails, labelled like its cards. A family whose pick has no thumbnail, or a blank one, falls back to its
+next row with a usable one.
+
+It writes two files with the same tiles: ``docs/_static/landing-mosaic.webp`` (4 x 3, for wide screens) and
+``docs/_static/landing-mosaic-narrow.webp`` (2 x 6, for phones). The labels use Inter Semibold, the docs
+theme's typeface, fetched from a pinned npm package, so a refresh looks the same on every machine.
 
 The docs build does not run this script, and its output is committed. To refresh it, run from the repository
-root (needs network access to the catalog and the website)::
+root (needs network access to the catalog, the website and jsDelivr)::
 
-    uv run --with pillow python docs/scripts/landing_mosaic.py
+    uv run --with "pillow>=10.1" python docs/scripts/landing_mosaic.py
 """
 
 from __future__ import annotations
@@ -18,24 +23,22 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageStat
+from PIL import Image, ImageDraw, ImageFont, ImageStat
 
 from sddb import Catalog
 
 SITE_URL = "https://spatialdata-db-web.pages.dev"
-OUT = Path(__file__).parent.parent / "_static" / "landing-mosaic.webp"
-COLS, ROWS = 4, 3
-WIDTH, GAP, RADIUS = 1600, 16, 14
-TILE_W = (WIDTH - (COLS - 1) * GAP) // COLS
+STATIC = Path(__file__).parent.parent / "_static"
+LAYOUTS = {"landing-mosaic.webp": 4, "landing-mosaic-narrow.webp": 2}  # file name: columns
+N_TILES = 12
+GAP, RADIUS = 16, 14
+TILE_W = (1600 - 3 * GAP) // 4  # the wide grid is 1600 px, the narrow one 2 tiles of the same size
 TILE_H = TILE_W * 3 // 4  # the card thumbnails are 4:3
-FONT_SIZE = 34  # about 13 px once the figure is scaled to the docs column; a label too long for one line wraps
+FONT_URL = "https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.8/files/inter-latin-600-normal.woff"
+FONT_SIZE = 30  # about 13 px once a grid is scaled to the page; a label too long for one line wraps
 PAD = 22
-# Semibold system fonts, first match wins; Pillow's own font is the last resort.
-FONTS = [
-    ("/System/Library/Fonts/SFNS.ttf", "Semibold"),
-    ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", None),
-    ("C:/Windows/Fonts/segoeuib.ttf", None),
-]
+SCRIM = 0.72  # opacity of the black band behind a label: white text on it passes 4.5:1 even on a white tile
+FADE = 40  # height of the gradient above the band
 
 
 def display_assay(assay: str) -> str:
@@ -43,12 +46,16 @@ def display_assay(assay: str) -> str:
     return "Visium" if assay == "Visium Spatial Gene Expression" else assay
 
 
+def get(url: str) -> bytes:
+    """Fetch ``url``; Cloudflare refuses urllib's default User-Agent."""
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "sddb-docs"}), timeout=30) as resp:
+        return resp.read()
+
+
 def thumbnail(slug: str) -> Image.Image | None:
     """The website's card thumbnail for ``slug``, or None if it has none or it is blank (nearly one colour)."""
-    req = urllib.request.Request(f"{SITE_URL}/thumbnails/{slug}_card.webp", headers={"User-Agent": "sddb-docs"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            img = Image.open(io.BytesIO(resp.read())).convert("RGB")
+        img = Image.open(io.BytesIO(get(f"{SITE_URL}/thumbnails/{slug}_card.webp"))).convert("RGB")
     except urllib.error.HTTPError as err:
         if err.code == 404:
             return None
@@ -56,11 +63,12 @@ def thumbnail(slug: str) -> Image.Image | None:
     return None if ImageStat.Stat(img.convert("L")).stddev[0] < 3 else img
 
 
-def picks(n: int = COLS * ROWS) -> list[tuple[str, Image.Image]]:
-    """One ``(family, thumbnail)`` per technology family, largest families first."""
+def picks(n: int = N_TILES) -> list[tuple[str, Image.Image]]:
+    """One ``(family, thumbnail)`` for each of the ``n`` largest technology families, by count and then name."""
     df = Catalog().query().to_df()
     df["family"] = df["assay"].astype(str).map(display_assay)
-    families = df["family"].value_counts(sort=True).index[:n]
+    counts = df["family"].value_counts().rename_axis("family").reset_index(name="n")
+    families = counts.sort_values(["n", "family"], ascending=[False, True])["family"][:n]
     out = []
     for fam in families:
         rows = df[df["family"] == fam]
@@ -72,15 +80,9 @@ def picks(n: int = COLS * ROWS) -> list[tuple[str, Image.Image]]:
     return out
 
 
-def font() -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    """The first semibold system font in ``FONTS``, at ``FONT_SIZE``."""
-    for path, variation in FONTS:
-        if Path(path).exists():
-            f = ImageFont.truetype(path, FONT_SIZE)
-            if variation:
-                f.set_variation_by_name(variation)
-            return f
-    return ImageFont.load_default(FONT_SIZE)
+def font() -> ImageFont.FreeTypeFont:
+    """Inter Semibold at ``FONT_SIZE``."""
+    return ImageFont.truetype(io.BytesIO(get(FONT_URL)), FONT_SIZE)
 
 
 def wrap(label: str, typeface) -> str:
@@ -104,19 +106,19 @@ def cover(img: Image.Image) -> Image.Image:
 
 
 def tile(img: Image.Image, label: str, typeface) -> Image.Image:
-    """One rounded tile with the label bottom left over a dark scrim, as on the website's cards."""
+    """One rounded tile with the label bottom left on a dark band that fades out upwards."""
     out = cover(img).convert("RGBA")
-    scrim_h = int(TILE_H * 0.5)
-    alpha = Image.linear_gradient("L").resize((TILE_W, scrim_h)).point(lambda v: v * 0.6)
-    scrim = Image.new("RGBA", (TILE_W, scrim_h), (0, 0, 0, 0))
-    scrim.putalpha(alpha)
-    out.alpha_composite(scrim, (0, TILE_H - scrim_h))
-    x, y = PAD, TILE_H - PAD
-    shadow = Image.new("RGBA", out.size, (0, 0, 0, 0))
     label = wrap(label, typeface)
     text = {"font": typeface, "anchor": "ld", "spacing": 6}
-    ImageDraw.Draw(shadow).multiline_text((x, y + 1), label, fill=(0, 0, 0, 190), **text)
-    out.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(3)))
+    x, y = PAD, TILE_H - PAD
+    top = ImageDraw.Draw(out).multiline_textbbox((x, y), label, **text)[1]
+    band_h = TILE_H - top + PAD
+    alpha = Image.new("L", (TILE_W, band_h + FADE), round(255 * SCRIM))
+    fade = Image.linear_gradient("L").resize((TILE_W, FADE)).point(lambda v: v * SCRIM)
+    alpha.paste(fade, (0, 0))
+    scrim = Image.new("RGBA", alpha.size, (0, 0, 0, 0))
+    scrim.putalpha(alpha)
+    out.alpha_composite(scrim, (0, TILE_H - alpha.height))
     ImageDraw.Draw(out).multiline_text((x, y), label, fill="white", **text)
     mask = Image.new("L", out.size, 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, TILE_W - 1, TILE_H - 1), RADIUS, fill=255)
@@ -124,17 +126,27 @@ def tile(img: Image.Image, label: str, typeface) -> Image.Image:
     return out
 
 
+def grid(tiles: list[Image.Image], cols: int) -> Image.Image:
+    """Lay ``tiles`` out in ``cols`` columns with ``GAP`` between them, on a transparent canvas."""
+    rows = -(-len(tiles) // cols)
+    size = (cols * TILE_W + (cols - 1) * GAP, rows * TILE_H + (rows - 1) * GAP)
+    canvas = Image.new("RGBA", size, (0, 0, 0, 0))
+    for i, t in enumerate(tiles):
+        r, c = divmod(i, cols)
+        canvas.alpha_composite(t, (c * (TILE_W + GAP), r * (TILE_H + GAP)))
+    return canvas
+
+
 def main() -> None:
-    """Compose the tiles into one grid and write ``OUT``."""
+    """Make the tiles once and write both grids."""
     typeface = font()
-    tiles = picks()
-    rows = -(-len(tiles) // COLS)
-    canvas = Image.new("RGBA", (WIDTH, rows * TILE_H + (rows - 1) * GAP), (0, 0, 0, 0))
-    for i, (fam, img) in enumerate(tiles):
-        r, c = divmod(i, COLS)
-        canvas.alpha_composite(tile(img, fam, typeface), (c * (TILE_W + GAP), r * (TILE_H + GAP)))
-    canvas.save(OUT, "WEBP", quality=82, method=6)
-    print(f"wrote {OUT} ({OUT.stat().st_size // 1024} KB): {', '.join(fam for fam, _ in tiles)}")
+    picked = picks()
+    tiles = [tile(img, fam, typeface) for fam, img in picked]
+    print("tiles:", ", ".join(fam for fam, _ in picked))
+    for name, cols in LAYOUTS.items():
+        out = STATIC / name
+        grid(tiles, cols).save(out, "WEBP", quality=72, method=6)
+        print(f"wrote {out} ({out.stat().st_size // 1024} KB)")
 
 
 if __name__ == "__main__":

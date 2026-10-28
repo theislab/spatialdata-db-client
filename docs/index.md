@@ -1,4 +1,4 @@
-# spatialdata-db: spatial omics datasets, ready to load as SpatialData
+# spatialdata-db: spatial omics datasets as SpatialData
 
 spatialdata-db is a catalog of public spatial omics datasets, from Visium and Xenium to MERSCOPE, CosMx and mass spectrometry imaging.
 Each dataset is converted to a SpatialData Zarr store, described by one row of the catalog and registered in the Lamin instance [scverse/spatialdata-db](https://lamin.ai/scverse/spatialdata-db).
@@ -8,11 +8,15 @@ This Python client queries the catalog by technology, tissue, organism, gene or 
 It builds cohorts of datasets that you can freeze, split by study and turn into training data, and it collects the citations of the studies they come from.
 The `sddb-cli` command and the `sddb-mcp` server give the shell and AI agents the same queries and downloads.
 
-```{figure} _static/landing-mosaic.webp
-:alt: A grid of twelve tissue thumbnails, each labelled with its technology
-:figclass: sddb-mosaic
-
-One dataset per technology in the catalog.
+```{raw} html
+<figure class="sddb-mosaic">
+  <picture>
+    <source media="(max-width: 575.98px)" srcset="_static/landing-mosaic-narrow.webp" width="792" height="1826">
+    <img src="_static/landing-mosaic.webp" width="1600" height="905"
+      alt="A grid of twelve tissue thumbnails, each labelled with its technology">
+  </picture>
+  <figcaption>The 12 largest technologies in the catalog, one dataset each.</figcaption>
+</figure>
 ```
 
 ## Installation
@@ -43,7 +47,7 @@ from sddb import Catalog
 hits = Catalog().query(technology="Visium", tissue="lung")
 hits.summary()
 smallest = min(hits, key=lambda ds: ds.size_bytes)
-sdata = smallest.to_sdata()  # ~10 MB, copied to the local cache once
+sdata = smallest.to_sdata()  # about 7 MB, copied to the local cache once
 ```
 
 ## Guides and reference
@@ -55,42 +59,42 @@ sdata = smallest.to_sdata()  # ~10 MB, copied to the local cache once
 :link: start
 :link-type: doc
 
-Copy a dataset uid or a collection slug from the website and load it in Python.
+Load a dataset or collection you found on the website.
 :::
 
 :::{grid-item-card} {octicon}`search;1.5em;sd-mr-1` Find and load
 :link: guides/find-and-load
 :link-type: doc
 
-Filter the catalog by facets or free text, look inside a store and load it.
+Filter by facets or free text, then load what you pick.
 :::
 
 :::{grid-item-card} {octicon}`stack;1.5em;sd-mr-1` Cohorts
 :link: guides/cohorts
 :link-type: doc
 
-Combine datasets into a cohort, freeze it to exact versions and split it by study.
+Combine datasets, freeze exact versions and split by study.
 :::
 
-:::{grid-item-card} {octicon}`cpu;1.5em;sd-mr-1` Machine learning with cohorts
+:::{grid-item-card} {octicon}`cpu;1.5em;sd-mr-1` Machine learning
 :link: guides/ml
 :link-type: doc
 
-Read one table across many stores and loop over the training fold of a split.
+Load one table from many stores and train on a split.
 :::
 
-:::{grid-item-card} {octicon}`terminal;1.5em;sd-mr-1` Command line and agents
+:::{grid-item-card} {octicon}`terminal;1.5em;sd-mr-1` CLI and agents
 :link: guides/cli-and-agents
 :link-type: doc
 
-Query, download and cite from the shell, or give an AI agent the MCP tools.
+Query, download and cite from the shell or an AI agent.
 :::
 
 :::{grid-item-card} {octicon}`code-square;1.5em;sd-mr-1` API reference
 :link: reference/api
 :link-type: doc
 
-Every public class and function of the client, with its parameters.
+Every public class and function, with its parameters.
 :::
 
 ::::

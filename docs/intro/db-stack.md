@@ -41,7 +41,7 @@ Each row's `zarr_url` points to a SpatialData Zarr store on S3, readable anonymo
 ```python
 hits = cat.query(technology="Visium", tissue="lung")
 smallest = min(hits, key=lambda ds: ds.size_bytes)
-sdata = smallest.to_sdata()  # ~10 MB
+sdata = smallest.to_sdata()  # about 7 MB
 ```
 
 ## Versioning and drift

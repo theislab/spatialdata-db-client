@@ -261,6 +261,20 @@ def _latest_for_stem(source: Source, stem: str) -> tuple[str, str] | None:
     return str(row["uid"]), str(row["zarr_url"])
 
 
+def reusable(root: str | Path) -> dict[str, str]:
+    """``{uid: zarr_url}`` of the stores that ``download`` will not fetch again into ``root``.
+
+    These are the entries the manifest in ``root`` lists as complete whose ``<uid>.zarr`` is still there. A store
+    is reused only while its catalog ``zarr_url`` stays the same.
+    """
+    root = Path(root)
+    mpath = root / "manifest.json"
+    if not mpath.exists():
+        return {}
+    entries = Manifest.read(mpath).entries
+    return {e.uid: e.zarr_url for e in entries if e.status == "complete" and (root / f"{e.uid}.zarr").is_dir()}
+
+
 def download(
     results: SpatialDataCohort,
     dest: str | Path,
@@ -300,13 +314,10 @@ def download(
             pinned = True
     pairs: list[tuple[str, str]] = []
     missing: dict[str, str] = {}
-    complete: dict[str, ManifestEntry] = {}
-    if mpath.exists():
-        complete = {e.uid: e for e in Manifest.read(mpath).entries if e.status == "complete"}
+    present = reusable(root)
     for d in results:
         uid, url = str(d.uid), str(d.zarr_url)
-        prev = complete.get(uid)
-        if prev is not None and prev.zarr_url == url and (root / f"{uid}.zarr").is_dir():
+        if present.get(uid) == url:
             pairs.append((uid, url))  # already complete locally: no liveness check, no fetch
             continue
         try:

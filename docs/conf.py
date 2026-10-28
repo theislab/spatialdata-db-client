@@ -30,7 +30,15 @@ release = _version("spatialdata-db")
 
 extensions = ["scverse_doc"]
 source_repository = "https://github.com/theislab/spatialdata-db-client"
-exclude_patterns = ["_build", "design", "superpowers", "**/.pixi", "reference/_catalog_columns.md", "reference/_cli.md"]
+exclude_patterns = [
+    *DEFAULTS.exclude_patterns,
+    "design",
+    "superpowers",
+    "**/.pixi",
+    "reference/_catalog_columns.md",
+    "reference/_cli.md",
+]
+smartquotes = False  # keep straight quotes, and `--flag` in the CLI reference instead of an en dash
 
 copybutton_prompt_text = "$ "
 suppress_warnings = ["sddb.catalog"]
@@ -48,7 +56,7 @@ def setup(app):
     """Emit the deferred catalog warning once ``suppress_warnings`` is active."""
     app.connect("config-inited", warn_if_unavailable)
     app.connect("source-read", fill_code_examples)
-    app.connect("builder-inited", _drop_scverse_links)
+    app.connect("builder-inited", _drop_scverse_links, priority=900)  # after the theme appends it (500)
 
 
 intersphinx_mapping = intersphinx()

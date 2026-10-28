@@ -53,3 +53,22 @@ def test_wordmarks_read_in_both_modes():
         assert "-DB</tspan>" in svg
         assert _contrast(fg, bg) >= 4.5, (key, fg)
         assert _contrast(muted, bg) >= 3, (key, muted)  # large text
+
+
+def test_no_scverse_or_numfocus_links():
+    conf = _conf()
+    configured = repr({k: conf.get(k) for k in ("html_theme_options", "html_context", "source_repository")})
+    for host in ("scverse.org", "numfocus"):
+        assert host not in configured.lower(), host
+    assert conf["html_theme_options"]["announcement"] == ""  # the theme's default is a scverse.org page
+
+
+def test_hook_drops_the_theme_discourse_link():
+    tree = ast.parse((DOCS / "conf.py").read_text())
+    hook = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_drop_scverse_links")
+    namespace: dict[str, object] = {}
+    exec(compile(ast.Module([hook], []), "conf.py", "exec"), namespace)
+    options = {"icon_links": [{"url": "https://site"}, {"url": "https://discourse.scverse.org/"}]}
+    app = type("App", (), {"config": type("Config", (), {"html_theme_options": options})})
+    namespace["_drop_scverse_links"](app)
+    assert options["icon_links"] == [{"url": "https://site"}]
