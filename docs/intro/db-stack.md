@@ -18,8 +18,10 @@ cat = sddb.Catalog(version="2026-10-18")  # catalog-2026-10-18
 ## Validation status and tiers
 
 Every row has a `validation_status`; queries keep only `"pass"` rows by default
-(`validation=None` disables the filter). In the current catalog every dataset passes validation, so this filter changes nothing yet. Filter on `tier` (`silver`, `bronze`) for quality. Rows also carry a `tier`: `gold`, `silver` or `bronze`,
+(`validation=None` disables the filter). Rows also carry a `tier`: `gold`, `silver` or `bronze`,
 from most to least curated. Some rows have no tier assigned yet. Not every tier is populated in every release, and gold is not guaranteed to be present. {{ tier_note }}
+
+In the current catalog every dataset passes validation, so the `validation` filter changes nothing yet. Filter on `tier` (`silver`, `bronze`) for quality.
 
 ```python
 silver = cat.query(tier="silver")
