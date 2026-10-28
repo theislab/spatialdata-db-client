@@ -44,7 +44,7 @@ class TaskAdapter(Protocol):
 
 @runtime_checkable
 class TableAdapter(Protocol):
-    """Per-table counterpart of :class:`TaskAdapter`, used by :meth:`SpatialDataCohort.to_anndata`.
+    """Per-table counterpart of :class:`~sddb.TaskAdapter`, used by :meth:`~sddb.SpatialDataCohort.to_anndata`.
 
     Each member's table is checked and mapped into a shared space (genes, QC, ...) as it is read, before
     concatenation. Any issue from ``validate_meta`` or ``validate`` skips the member; the reasons land in

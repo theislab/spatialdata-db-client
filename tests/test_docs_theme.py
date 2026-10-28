@@ -1,13 +1,22 @@
+import ast
 import re
 from pathlib import Path
 
-CSS = Path(__file__).parent.parent / "docs" / "_static" / "css" / "sddb.css"
+DOCS = Path(__file__).parent.parent / "docs"
+CSS = DOCS / "_static" / "css" / "sddb.css"
 
 
-def _block(css: str, selector: str, last: bool = False) -> str:
-    ms = re.findall(re.escape(selector) + r"\s*\{([^}]*)\}", css)
-    assert ms, f"no {selector} block"
-    return ms[-1] if last else ms[0]
+def _conf() -> dict[str, object]:
+    """The literal top-level assignments of docs/conf.py (without running it, which needs the catalog)."""
+    values = {}
+    for node in ast.parse((DOCS / "conf.py").read_text()).body:
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
+            try:  # literals, plus names imported from docs/_ext (stubbed)
+                expr = compile(ast.Expression(node.value), "conf.py", "eval")
+                values[node.targets[0].id] = eval(expr, {"__builtins__": {}, "SITE_URL": "https://site"})
+            except Exception:
+                values[node.targets[0].id] = None
+    return values
 
 
 def _luminance(hex_color: str) -> float:
@@ -21,22 +30,26 @@ def _contrast(a: str, b: str) -> float:
     return (hi + 0.05) / (lo + 0.05)
 
 
-def test_css_has_both_modes():
-    css = CSS.read_text()
-    for mode, primary, bg in (("dark", "#4fc3ea", "#0b0e1a"), ("light", "#1484c0", "#f7f8fb")):
-        block = _block(css, f'html[data-theme="{mode}"]')
-        assert f"--pst-color-primary: {primary};" in block
-        assert f"--pst-color-background: {bg};" in block
+def test_scverse_theme_with_site_accent():
+    conf = _conf()
+    assert conf["extensions"][0] == "scverse_doc"
+    assert "html_theme" not in conf  # set, it would replace the scverse theme
+    assert conf["html_theme_options"]["accent"] == "#4fc3ea"
+    assert "scverse-ecosystem" not in conf["html_theme_options"]["article_header_end"]  # not a scverse package (yet)
+    assert "scverse-footer" not in conf["html_theme_options"]["footer_start"]
 
 
-def test_dark_code_contrast():
-    assert _contrast("#e8eaf2", "#1b2238") >= 4.5
+def test_theme_owns_the_palette():
+    assert "--pst-color-primary" not in CSS.read_text()
 
 
-def test_light_code_contrast():
-    css = CSS.read_text()
-    block = _block(css, 'html[data-theme="light"]', last=True)
-    tokens = re.findall(r"--sddb-tk-[a-z]+: (#[0-9a-f]{6});", block)
-    assert len(tokens) == 5
-    for color in tokens:
-        assert _contrast(color, "#eef1f7") >= 4.5, color
+def test_wordmarks_read_in_both_modes():
+    logo = _conf()["html_theme_options"]["logo"]
+    # scverse-doc's page backgrounds (scverse_doc/theme/__init__.py)
+    for key, bg in (("image_light", "#ffffff"), ("image_dark", "#14181e")):
+        svg = (DOCS / logo[key]).read_text()
+        fg, muted = re.findall(r'fill="(#[0-9a-f]{6})"', svg)[-2:]
+        assert "SpatialData<tspan" in svg
+        assert "-DB</tspan>" in svg
+        assert _contrast(fg, bg) >= 4.5, (key, fg)
+        assert _contrast(muted, bg) >= 3, (key, muted)  # large text

@@ -76,8 +76,11 @@ def catalog_stats(df: pd.DataFrame, generated_at: str | None = None) -> dict[str
             if f"example_{tok}" in stats:
                 line += f" Example: {stats[f'example_{tok}']}"
             stats[f"line_{tok}"] = line
-    when = f" (catalog {generated_at[:10]})" if generated_at else ""
-    stats["hero_line"] = f"Query {len(df)} spatial omics datasets{when} and load them as SpatialData."
+    # The website's "Technology" facet counts the `assay` column, so count the same thing here.
+    n_tech = int(df["assay" if "assay" in df else "technology"].nunique())
+    subject = f"The catalog of {generated_at[:10]}" if generated_at else "The catalog"
+    tech = f"{n_tech} technolog" + ("y" if n_tech == 1 else "ies")
+    stats["catalog_line"] = f"{subject} holds {_datasets(len(df))} from {tech}."
     stats.update(_examples(df))
     stats["intro_count"] = f"The catalog currently holds {_datasets(len(df))}."
     if "tier" in df:
@@ -96,7 +99,7 @@ def with_defaults(stats: dict[str, str]) -> dict[str, str]:
     """Blank values for every substitution the intro pages use, so a missing catalog renders cleanly."""
     keys = ["intro_count", "tier_note", "other_assays", *(f"line_{t}" for t in DESCRIBED)]
     fallback = {
-        "hero_line": "Query spatial omics datasets and load them as SpatialData.",
+        "catalog_line": "",
         "small_uid": "<uid>",
         "small_stem": "<16-character stem>",
         "small_collection": "<slug>",

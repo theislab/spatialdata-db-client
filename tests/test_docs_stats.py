@@ -107,11 +107,13 @@ def test_other_assays_aggregates_by_token_and_categorical_tier():
     assert "6 datasets (silver)" in s["tier_note"]
 
 
-def test_hero_line_with_and_without_number():
-    assert cs.catalog_stats(_df())["hero_line"] == "Query 4 spatial omics datasets and load them as SpatialData."
-    dated = cs.catalog_stats(_df(), "2026-10-28T09:00:00")["hero_line"]
-    assert dated == "Query 4 spatial omics datasets (catalog 2026-10-28) and load them as SpatialData."
-    assert cs.with_defaults({})["hero_line"] == "Query spatial omics datasets and load them as SpatialData."
+def test_catalog_line_with_and_without_date():
+    assert cs.catalog_stats(_df())["catalog_line"] == "The catalog holds 4 datasets from 3 technologies."
+    dated = cs.catalog_stats(_df(), "2026-10-28T09:00:00")["catalog_line"]
+    assert dated == "The catalog of 2026-10-28 holds 4 datasets from 3 technologies."
+    one = cs.catalog_stats(_df().assign(assay="Visium Spatial Gene Expression"))["catalog_line"]
+    assert one == "The catalog holds 4 datasets from 1 technology."  # counts `assay`, like the website
+    assert cs.with_defaults({})["catalog_line"] == ""
 
 
 def test_site_url_single_source():

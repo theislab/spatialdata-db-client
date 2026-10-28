@@ -22,7 +22,7 @@ The client keeps its cache in the user cache directory of the platform, in a fol
 (one-dataset)=
 ## One dataset
 
-Every dataset page shows a uid in the chip at the top right. Click it to copy the full 20-character uid, then pass it to `Catalog().dataset()`. The 16-character stem that Lamin shows works as well.
+Every dataset page shows a uid in the chip at the top right. Click it to copy the full 20-character uid, then pass it to `Catalog().dataset()`. The 16-character stem that Lamin shows works as well. A stem always resolves to the latest version of the dataset, so scripts you want to reproduce should use the full uid.
 
 ```python
 from sddb import Catalog
@@ -84,7 +84,7 @@ This route needs `pip install lamindb` and network access to the Lamin database.
 ## Words used on both sides
 
 technology and assay
-: The technology is the platform family, such as Visium or Xenium. The assay is the product string within it, such as "Visium Spatial Gene Expression". Both are columns of the catalog.
+: The "Technology" label and filter on the website show the catalog's `assay` column, such as "Vizgen MERSCOPE" or "10x Xenium", so to match a website filter use `Catalog().query(assay="Vizgen MERSCOPE")`. The `technology` column holds a short platform id, such as `Merscope` or `Xenium`, and `Catalog().query(technology="Merscope")` selects by it. For most platforms both columns select the same datasets.
 
 uid, stem and slug
 : The uid is the full 20-character id of a dataset version. The stem is its first 16 characters, which Lamin uses for the latest version. The slug is the id of a collection, and the last part of its URL.

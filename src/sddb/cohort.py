@@ -298,7 +298,7 @@ class SpatialDataCohort(Sequence[Dataset]):
     ) -> AnnData:
         """Concatenate each member's table into one AnnData (outer join, obs[uid]+obs[study_id]).
 
-        See :func:`sddb.concat.concat_tables` for ``obs_columns``, ``elements``, ``adapter`` and ``max_workers``.
+        See ``sddb.concat.concat_tables`` for ``obs_columns``, ``elements``, ``adapter`` and ``max_workers``.
         """
         from sddb.concat import concat_tables
 
