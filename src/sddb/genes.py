@@ -22,9 +22,9 @@ class GeneIndex:
         self._catalog = catalog
         self.url = url or sibling_url(catalog.url, "gene_index.parquet")
         path = fetch_catalog(self.url, cache_dir=catalog._cache_dir, refresh=catalog._refresh)
-        _check_index(path, self.url, "gene_index")
+        strings = _check_index(path, self.url, "gene_index")
         self._fi = FeatureIndex._from_parts(
-            catalog, self.url, path, "symbol", ("feature_id",), schema.GENE_INDEX_COLUMNS
+            catalog, self.url, path, strings, "symbol", ("feature_id",), schema.GENE_INDEX_COLUMNS
         )
 
     def resolve(self, tokens: str | list[str], *, min_fraction: float | None = None) -> dict[str, set[str]]:

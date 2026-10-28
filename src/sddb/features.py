@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -15,6 +15,7 @@ from sddb._cache import fetch_catalog
 from sddb.cohort import SpatialDataCohort
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from sddb.catalog import Catalog
@@ -33,8 +34,17 @@ def _aslist(v: object) -> list[str]:
 _BATCH_ROWS = 1_000_000
 
 
-def _check_index(path: Path, url: str, kind: str) -> None:
-    """Validate the index's footer schema plus a small first batch (never the whole table)."""
+def _check_mode(mode: str) -> None:
+    if mode not in ("all", "any"):
+        raise ValueError(f"mode must be 'all' or 'any', got {mode!r}")
+
+
+def _check_index(path: Path, url: str, kind: str) -> list[str]:
+    """Validate the index's footer schema plus its first 1,000 rows (never the whole table).
+
+    Problems after row 1,000 (a wrong type, a required column that is null there) are not detected. Returns the
+    string columns, which the scans read dictionary-encoded.
+    """
     name = kind.replace("_", " ")
     try:
         pf = pq.ParquetFile(path)
@@ -52,6 +62,7 @@ def _check_index(path: Path, url: str, kind: str) -> None:
         schema.validate(df, kind=kind)
     except schema.SchemaError as err:
         raise schema.SchemaError(f"{name} at {url} is invalid: {err}") from err
+    return [f.name for f in pf.schema_arrow if pa.types.is_string(f.type) or pa.types.is_large_string(f.type)]
 
 
 def _fold_match(values: pa.Array, keys: set[str]) -> dict[int, str]:
@@ -69,17 +80,24 @@ def _fold_match(values: pa.Array, keys: set[str]) -> dict[int, str]:
     return match
 
 
-def _scan(path: Path, keys: set[str], on: tuple[str, ...], columns: list[str]) -> pd.DataFrame:
+def _scan(
+    path: Path,
+    keys: set[str],
+    on: tuple[str, ...],
+    columns: list[str],
+    strings: list[str],
+    keep: Callable[[pd.DataFrame], pd.DataFrame],
+) -> pd.DataFrame:
     """Rows whose ``on`` columns (string or list<string>) casefold to one of ``keys``, streamed batch by batch.
 
-    String columns are read dictionary-encoded, so each batch casefolds only its distinct values; peak memory is
-    about one batch plus the hits. Returns ``columns`` plus ``_key`` (the matched key), one row per (row, key),
-    in file order.
+    The ``strings`` columns are read dictionary-encoded, so each batch casefolds only its distinct values; peak
+    memory is about one batch plus the kept hits. Each batch's hits (``columns`` plus ``_key``, the matched key, and
+    ``_row``, the file row) pass through ``keep``. If ``keep`` keeps ``_row``, the result has one row per (row, key)
+    in file order; otherwise it is the distinct rows ``keep`` returned.
     """
-    strings = [f.name for f in pq.read_schema(path) if pa.types.is_string(f.type) or pa.types.is_large_string(f.type)]
     pf = pq.ParquetFile(path, read_dictionary=strings, pre_buffer=False)  # pre-buffering triples peak memory
     parts, offset = [], 0
-    batches = pf.iter_batches(batch_size=_BATCH_ROWS, columns=list({*columns, *on}))
+    batches = pf.iter_batches(batch_size=_BATCH_ROWS, columns=list(dict.fromkeys([*columns, *on])))
     for batch in batches if keys else ():
         pos, hit_keys = [], []
         for col in on:
@@ -100,12 +118,17 @@ def _scan(path: Path, keys: set[str], on: tuple[str, ...], columns: list[str]) -
             hit = pa.table(
                 [c.dictionary_decode() if pa.types.is_dictionary(c.type) else c for c in hit.columns], names=columns
             ).to_pandas()  # plain strings: a categorical would carry the whole dictionary
-            parts.append(hit.assign(_key=hit_keys, _row=rows + offset))
+            parts.append(keep(hit.assign(_key=hit_keys, _row=rows + offset)))
         offset += batch.num_rows
     if not parts:
-        parts = [pf.schema_arrow.empty_table().select(columns).to_pandas().assign(_key=pd.Series(dtype=object), _row=0)]
-    hits = pd.concat(parts, ignore_index=True).drop_duplicates(["_row", "_key"]).sort_values("_row", kind="stable")
-    return pd.DataFrame(hits.drop(columns="_row").reset_index(drop=True))
+        empty = pf.schema_arrow.empty_table().select(columns).to_pandas()
+        parts = [keep(empty.assign(_key=pd.Series(dtype=object), _row=pd.Series(dtype=np.int64)))]
+    hits = pd.concat(parts, ignore_index=True)
+    if "_row" in hits.columns:
+        hits = hits.drop_duplicates(["_row", "_key"]).sort_values("_row", kind="stable").drop(columns="_row")
+    else:
+        hits = hits.drop_duplicates()
+    return pd.DataFrame(hits.reset_index(drop=True))
 
 
 class FeatureIndex:
@@ -119,7 +142,7 @@ class FeatureIndex:
         self._catalog = catalog
         self.url = url or sibling_url(catalog.url, "feature_index.parquet")
         self._path = fetch_catalog(self.url, cache_dir=catalog._cache_dir, refresh=catalog._refresh)
-        _check_index(self._path, self.url, "feature_index")
+        self._strings = _check_index(self._path, self.url, "feature_index")
         self._label = "raw_label"
         self._refs: tuple[str, ...] = ("ref_ids",)
         drop = ("ref_relations", "ref_confidences")
@@ -127,11 +150,18 @@ class FeatureIndex:
 
     @classmethod
     def _from_parts(
-        cls, catalog: Catalog, url: str, path: Path, label: str, refs: tuple[str, ...], dtypes: dict[str, str]
+        cls,
+        catalog: Catalog,
+        url: str,
+        path: Path,
+        strings: list[str],
+        label: str,
+        refs: tuple[str, ...],
+        dtypes: dict[str, str],
     ) -> FeatureIndex:
         """A view over another index file: ``label``/``refs`` are the token columns, ``dtypes`` the returned ones."""
         self = cls.__new__(cls)
-        self._catalog, self.url, self._path = catalog, url, path
+        self._catalog, self.url, self._path, self._strings = catalog, url, path, strings
         self._label, self._refs, self._dtypes = label, refs, dtypes
         return self
 
@@ -142,23 +172,46 @@ class FeatureIndex:
         keys: set[str],
         *,
         on: tuple[str, ...] | None = None,
+        columns: list[str] | None = None,
+        unique: bool = False,
         feature_type: str | None = None,
         modality: str | None = None,
         min_fraction: float | None = None,
     ) -> pd.DataFrame:
-        """Matching rows for casefolded ``keys`` (column ``_key``) under the type and fraction filters."""
-        hit = _scan(self._path, keys, on or (self._label, *self._refs), list(self._dtypes))
-        hit = schema.cast_scalars(hit, self._dtypes)
-        for col, val in (("feature_type", feature_type), ("modality", modality)):
-            if val is not None:
-                hit = hit[(hit[col] == val).fillna(False).to_numpy(dtype=bool)]
-        if min_fraction is not None:
-            hit = hit[(hit["fraction_obs_detected"] >= min_fraction).fillna(False).to_numpy(dtype=bool)]
-        return hit
+        """Matching rows for casefolded ``keys`` (column ``_key``) under the type and fraction filters.
+
+        ``columns`` limits the returned columns (default: all). ``unique`` reduces each batch to its distinct
+        ``(_key, *columns)`` rows, which bounds a many-token query by tokens x datasets.
+        """
+        cols = columns or list(self._dtypes)
+        filters = {"feature_type": feature_type, "modality": modality, "fraction_obs_detected": min_fraction}
+        read = list(dict.fromkeys([*cols, *(c for c, v in filters.items() if v is not None)]))
+        dtypes = {c: self._dtypes[c] for c in read}
+
+        def keep(hit: pd.DataFrame) -> pd.DataFrame:
+            hit = schema.cast_scalars(hit, dtypes)
+            for col, val in (("feature_type", feature_type), ("modality", modality)):
+                if val is not None:
+                    hit = hit[(hit[col] == val).fillna(False).to_numpy(dtype=bool)]
+            if min_fraction is not None:
+                hit = hit[(hit["fraction_obs_detected"] >= min_fraction).fillna(False).to_numpy(dtype=bool)]
+            return hit[["_key", *cols]].drop_duplicates() if unique else hit[[*cols, "_key", "_row"]]
+
+        return _scan(self._path, keys, on or (self._label, *self._refs), read, self._strings, keep)
 
     @staticmethod
     def _tokens(tokens: str | list[str]) -> list[str]:
         return [tokens] if isinstance(tokens, str) else list(tokens)
+
+    @staticmethod
+    def _combine(sets: list[set[str]], mode: str) -> set[str]:
+        """AND (``"all"``) or OR (``"any"``) of per-token uid sets."""
+        return (set.intersection(*sets) if mode == "all" else set.union(*sets)) if sets else set()
+
+    def _uid_hits(self, toks: list[str], *, columns: tuple[str, ...] = ("uid",), **filters: Any) -> pd.DataFrame:
+        """Distinct ``(_key, *columns)`` matches for all ``toks`` in one scan; ``columns`` must start with ``uid``."""
+        keys = {t.strip().casefold() for t in toks}
+        return self._hits(keys, columns=list(columns), unique=True, **filters).dropna(subset=["uid"])
 
     def _uid_sets(
         self,
@@ -169,13 +222,9 @@ class FeatureIndex:
         min_fraction: float | None = None,
     ) -> dict[str, set[str]]:
         toks = self._tokens(tokens)
-        hit = self._hits(
-            {t.strip().casefold() for t in toks},
-            feature_type=feature_type,
-            modality=modality,
-            min_fraction=min_fraction,
-        )
-        return {tok: {str(u) for u in hit.loc[hit["_key"] == tok.strip().casefold(), "uid"].dropna()} for tok in toks}
+        hit = self._uid_hits(toks, feature_type=feature_type, modality=modality, min_fraction=min_fraction)
+        sets = {k: set(g.astype(str)) for k, g in hit.groupby("_key")["uid"]}
+        return {tok: set(sets.get(tok.strip().casefold(), ())) for tok in toks}
 
     def resolve(self, query: str, *, feature_type: str | None = None, modality: str | None = None) -> pd.DataFrame:
         """Typed hits for ``query`` (matched on ``raw_label`` or any ref id).
@@ -231,13 +280,11 @@ class FeatureIndex:
         restrict the matched rows; ``min_fraction`` keeps rows with ``fraction_obs_detected >= min_fraction``;
         ``validation`` keeps one ``validation_status`` (default ``None`` includes bronze/non-pass).
         """
-        if mode not in ("all", "any"):
-            raise ValueError(f"mode must be 'all' or 'any', got {mode!r}")
+        _check_mode(mode)
         sets = list(
             self._uid_sets(entity, feature_type=feature_type, modality=modality, min_fraction=min_fraction).values()
         )
-        uids = (set.intersection(*sets) if mode == "all" else set.union(*sets)) if sets else set()
-        return self._cohort(uids, validation)
+        return self._cohort(self._combine(sets, mode), validation)
 
     def by_gene(
         self, gene: str, *, min_fraction: float | None = None, validation: str | None = None
@@ -250,7 +297,7 @@ class FeatureIndex:
         key = gene.strip().casefold()
         lab = self._hits({key}, on=(self._label,))
         lab = lab[lab["feature_type"].isin(["gene", "gene_activity"]).to_numpy(dtype=bool)]
-        ids = {key} | {str(v).casefold() for cell in lab["gene_xref"] for v in _aslist(cell)}
+        ids = {key} | {str(v).casefold() for cell in lab["gene_xref"] for v in _aslist(cell) if v is not None}
         hit = pd.concat([lab, self._hits(ids, on=("gene_xref",))])
         if min_fraction is not None:
             hit = hit[(hit["fraction_obs_detected"] >= min_fraction).fillna(False).to_numpy(dtype=bool)]

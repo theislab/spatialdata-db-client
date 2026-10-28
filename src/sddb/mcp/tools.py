@@ -13,6 +13,7 @@ import platformdirs
 from sddb.catalog import Catalog, facet_values
 from sddb.cohort import SpatialDataCohort
 from sddb.dataset import Dataset
+from sddb.features import _check_mode
 from sddb.manifest import plan_sizes
 
 MAX_ROWS = 200
@@ -128,22 +129,24 @@ def features_tool(
     if isinstance(features, str):
         features = [features]
     facets: dict[str, Any] = {k: v for k, v in (("organism", organism), ("tissue", tissue), ("disease", disease), ("assay", assay)) if v is not None}
-    cat = Catalog(catalog_url)
-    cohort = cat.features.where_measured(
-        features, mode=mode, feature_type=feature_type, modality=modality,
-        validation=None if include_bronze else "pass",
-    )
-    df = cohort.to_df()
+    _check_mode(mode)
+    fi = Catalog(catalog_url).features
+    typed = ("raw_label", "feature_type", "modality")
+    # One scan serves both the cohort and the per-dataset typed hits.
+    hits = fi._uid_hits(features, columns=("uid", *typed), feature_type=feature_type, modality=modality)
+    by_key = {k: g.sort_values(list(typed), kind="stable") for k, g in hits.groupby("_key")}
+    per_token = [by_key.get(f.strip().casefold(), hits.iloc[:0]) for f in features]
+    uids = fi._combine([set(g["uid"].astype(str)) for g in per_token], mode)
+    df = fi._cohort(uids, None if include_bronze else "pass").to_df()
     for col, val in facets.items():
         vals = val if isinstance(val, list) else [val]
         df = df[df[col].isin(vals)]
     per_uid: dict[str, list[dict[str, str]]] = {}
-    for f in features:
-        for hit in cat.features.resolve(f, feature_type=feature_type, modality=modality).to_dict("records"):
-            entry = {k: str(hit[k]) for k in ("raw_label", "feature_type", "modality")}
-            for uid in hit["uids"]:
-                if entry not in per_uid.setdefault(str(uid), []):
-                    per_uid[str(uid)].append(entry)
+    for g in per_token:
+        for uid, *vals in g[["uid", *typed]].itertuples(index=False):
+            entry = {k: str(v) for k, v in zip(typed, vals, strict=True)}
+            if entry not in per_uid.setdefault(str(uid), []):
+                per_uid[str(uid)].append(entry)
     rows = _records(df)
     for row in rows:
         row["features"] = per_uid.get(row["uid"], [])
