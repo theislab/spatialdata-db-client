@@ -380,7 +380,12 @@ class SpatialDataCohort(Sequence[Dataset]):
             if dest is not None:
                 from sddb.manifest import _check_pin, _localize_all
 
-                _check_pin(Path(dest) / "manifest.json", self._source.version, allow_version_change=False)
+                _check_pin(
+                    Path(dest) / "manifest.json",
+                    self._source.version,
+                    allow_version_change=False,
+                    hint="use a new dest, or run cohort.download(dest, allow_version_change=True) first",
+                )
                 pairs = list(zip(self._df["uid"].astype(str), urls, strict=True))
                 return _localize_all(pairs, list(elements), Path(dest), workers)
             # per-uid root: zarr_url carries no version, so a republish must not reuse an older partial copy

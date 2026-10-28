@@ -350,7 +350,13 @@ def reusable(root: str | Path) -> dict[str, str]:
     return {e.uid: e.zarr_url for e in entries if e.status == "complete" and (root / f"{e.uid}.zarr").is_dir()}
 
 
-def _check_pin(mpath: Path, current: str | None, allow_version_change: bool) -> bool:
+def _check_pin(
+    mpath: Path,
+    current: str | None,
+    allow_version_change: bool,
+    *,
+    hint: str = "pass allow_version_change=True to overwrite",
+) -> bool:
     """Whether the manifest at ``mpath`` is pinned to ``current``; raise if it is pinned to another version.
 
     A mismatch raises :class:`ManifestVersionMismatch` unless ``allow_version_change`` (then False: not pinned).
@@ -361,8 +367,7 @@ def _check_pin(mpath: Path, current: str | None, allow_version_change: bool) -> 
     if not allow_version_change:
         raise ManifestVersionMismatch(
             f"manifest at {mpath} is pinned to catalog version {recorded!r}, "
-            f"but the current catalog version is {current!r}; "
-            "pass allow_version_change=True to overwrite"
+            f"but the current catalog version is {current!r}; {hint}"
         )
     return False
 
