@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from tests._fixtures import (
@@ -81,10 +82,13 @@ def test_download(tmp_path):
     r = runner.invoke(app, ["download", "uid0001", "uid0002", "--dest", str(dest), "--catalog", p.as_uri()])
     assert r.exit_code == 0, r.output
     assert r.stdout.strip().splitlines()[-1] == str(dest / "manifest.json")
-    assert "downloaded 2 datasets" in r.stderr
+    assert re.search(rf"downloaded 2 datasets \([\d,.]+ MB\) to {re.escape(str(dest))}$", r.stderr.strip())
     m = json.loads((dest / "manifest.json").read_text())
     assert [e["status"] for e in m["entries"]] == ["complete", "complete"]
     assert (dest / "uid0001.zarr").is_dir()
+    again = runner.invoke(app, ["download", "uid0001", "uid0002", "--dest", str(dest), "--catalog", p.as_uri()])
+    assert again.exit_code == 0, again.output
+    assert again.stderr.strip().endswith(f"downloaded 0 datasets (0.0 MB) to {dest}; 2 already present")
     col = tmp_path / "col"
     r = runner.invoke(app, ["download", "--collection", "c-1", "--dest", str(col), "--catalog", p.as_uri()])
     assert r.exit_code == 0, r.output
