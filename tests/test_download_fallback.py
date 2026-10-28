@@ -31,7 +31,9 @@ def test_fallback_resolves_latest_with_warning(monkeypatch, tmp_path):
 
     monkeypatch.setattr(m, "_latest_for_stem", _latest_for)
     captured = {}
-    monkeypatch.setattr(m, "_fetch_all", lambda pairs, root, cv, workers, sizes=None: captured.setdefault("pairs", pairs))
+    monkeypatch.setattr(
+        m, "_fetch_all", lambda pairs, root, cv, workers, sizes=None: captured.setdefault("pairs", pairs)
+    )
     coh = _coh(stem + "0000", "s3://b/missing.zarr")
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")

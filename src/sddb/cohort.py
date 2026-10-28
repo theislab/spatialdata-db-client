@@ -389,6 +389,7 @@ class SpatialDataCohort(Sequence[Dataset]):
             if _is_remote(url) and not (root / f"{uid}.zarr").is_dir()
         }
 
+        lock = threading.Lock()
         with _progress(len(todo), sum(todo.values())) as bar:
 
             def local(uid: str, url: str) -> Path:
@@ -396,7 +397,8 @@ class SpatialDataCohort(Sequence[Dataset]):
                     return Path(url)  # local stores open in place
                 path = _cached_store(uid, url, root)
                 if uid in todo:
-                    bar.update(todo[uid])
+                    with lock:
+                        bar.update(todo[uid])
                 return path
 
             with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:

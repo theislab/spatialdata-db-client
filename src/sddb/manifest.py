@@ -185,7 +185,8 @@ def _fetch_all(
         prev = done.get(uid)
         return prev is not None and prev.zarr_url == url and (root / f"{uid}.zarr").is_dir()
 
-    todo = [u for u, url in pairs if not have(u, url)]
+    todo = {u for u, url in pairs if not have(u, url)}
+    sizes = sizes or {}
 
     def fetch(uid: str, url: str) -> None:
         final = root / f"{uid}.zarr"
@@ -207,10 +208,10 @@ def _fetch_all(
         with lock:
             by_uid[uid] = entry
             save()
-        if uid in todo:
-            bar.update((sizes or {}).get(uid, 0))
+            if uid in todo and entry.status == "complete":
+                bar.update(sizes.get(uid, 0))
 
-    with _progress(len(todo), sum((sizes or {}).get(u, 0) for u in todo)) as bar:
+    with _progress(len(todo), sum(sizes.get(u, 0) for u in todo)) as bar:
         with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
             list(pool.map(lambda p: fetch(*p), pairs))
     save()

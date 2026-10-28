@@ -33,7 +33,7 @@ def _progress(n: int, total: int, desc: str = "downloading") -> Iterator[Any]:
     try:
         from tqdm import tqdm
     except ImportError:
-        print(f"{desc}: {n} datasets, {_fmt_size(total)}", file=sys.stderr)
+        print(f"{desc}: {n} datasets" + (f", {_fmt_size(total)}" if total else ""), file=sys.stderr)
         yield SimpleNamespace(update=lambda _: None)  # ponytail: plain mode has no per-store ticks
         print(f"{desc}: done", file=sys.stderr)
         return
