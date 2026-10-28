@@ -6,6 +6,8 @@
 pip install git+https://github.com/theislab/spatialdata-db-client
 ```
 
+Needs Python 3.12 or newer. The package isn't on PyPI yet, so install it from GitHub.
+
 ```python
 from sddb import Catalog
 
@@ -15,8 +17,14 @@ smallest = min(hits, key=lambda ds: ds.size_bytes)
 sdata = smallest.to_sdata()  # ~10 MB, copied to the local cache once
 ```
 
-::::{grid} 1 2 2 4
+::::{grid} 1 2 3 3
 :gutter: 3
+
+:::{grid-item-card} Coming from the website?
+:link: start
+:link-type: doc
+Take the uid or slug from a page on the DB site and load it in Python.
+:::
 
 :::{grid-item-card} Find & load
 :link: guides/find-and-load
@@ -50,6 +58,7 @@ Using data from the DB? See {doc}`cite-and-license`.
 :maxdepth: 2
 :caption: Introduction
 
+start
 intro/assays
 intro/db-stack
 ```
