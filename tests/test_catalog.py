@@ -396,3 +396,26 @@ def test_list_valued_modalities_facet(tmp_path):
     assert {d.uid for d in cat.query(modalities=["protein", "msi"])} == {"uid0001", "uid0003"}
     assert len(cat.query(organism="human")) == 3  # scalar facets unchanged
     assert "uid0001" in {d.uid for d in cat.search("human lung")}  # search no longer crashes
+
+
+def _uid_catalog(tmp_path, uids):
+    df = make_fixture_catalog().iloc[: len(uids)].copy()
+    df["uid"] = uids
+    p = tmp_path / "uids.parquet"
+    df.to_parquet(p)
+    return Catalog.from_file(p)
+
+
+def test_dataset_by_stem(tmp_path):
+    cat = _uid_catalog(tmp_path, ["AAAAAAAAAAAAAAAA0000", "BBBBBBBBBBBBBBBB0001"])
+    assert cat.dataset("AAAAAAAAAAAAAAAA").uid == "AAAAAAAAAAAAAAAA0000"
+    assert cat.dataset("BBBBBBBBBBBBBBBB0001").uid == "BBBBBBBBBBBBBBBB0001"
+    with pytest.raises(KeyError, match="uid not in catalog"):
+        cat.dataset("ZZZZZZZZZZZZZZZZ")
+
+
+def test_dataset_ambiguous_stem(tmp_path):
+    cat = _uid_catalog(tmp_path, ["CCCCCCCCCCCCCCCC0000", "CCCCCCCCCCCCCCCC0001"])
+    with pytest.raises(KeyError, match="CCCCCCCCCCCCCCCC0000.*CCCCCCCCCCCCCCCC0001"):
+        cat.dataset("CCCCCCCCCCCCCCCC")
+    assert cat.dataset("CCCCCCCCCCCCCCCC0001").uid == "CCCCCCCCCCCCCCCC0001"

@@ -81,7 +81,7 @@ class Dataset:
         return remote.elements(self.zarr_url)
 
     def resolve(self, roles: Mapping[str, str]) -> dict[str, str]:
-        """Resolve role regexes to this store's element paths (``"kind/name"``); see :func:`sddb.roles.resolve`."""
+        """Resolve role regexes to this store's element paths (``"kind/name"``); see :func:`sddb.resolve`."""
         return _resolve_roles(self.elements().keys(), roles)
 
     def viewer_url(self) -> str:

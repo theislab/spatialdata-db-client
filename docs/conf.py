@@ -5,14 +5,18 @@ from pathlib import Path
 from sddb._catalog_schema import CATALOG_COLUMNS, FACETS, RANGE_COLUMNS
 
 sys.path.insert(0, str(Path(__file__).parent / "_ext"))
-from catalog_stats import SITE_URL, load_stats, warn_if_unavailable, with_defaults
+from catalog_stats import SITE_URL, fill_code_examples, load_stats, warn_if_unavailable, with_defaults
 from cli_docs import cli_markdown
+from scverse_doc.config import DEFAULTS
+from scverse_doc.registry import intersphinx
 
 
 def _write_catalog_columns() -> None:
     rows = ["| Column | Dtype | Facet | Range |", "|---|---|---|---|"]
     for col, dtype in CATALOG_COLUMNS.items():
-        rows.append(f"| `{col}` | `{dtype}` | {'yes' if col in FACETS else ''} | {'yes' if col in RANGE_COLUMNS else ''} |")
+        rows.append(
+            f"| `{col}` | `{dtype}` | {'yes' if col in FACETS else ''} | {'yes' if col in RANGE_COLUMNS else ''} |"
+        )
     (Path(__file__).parent / "reference" / "_catalog_columns.md").write_text("\n".join(rows) + "\n")
 
 
@@ -24,56 +28,70 @@ author = "Theis Lab"
 copyright = "2026, Theis Lab"
 release = _version("spatialdata-db")
 
-extensions = [
-    "myst_nb",
-    "sphinx.ext.autodoc",
-    "sphinx.ext.autosummary",
-    "sphinx.ext.napoleon",
-    "sphinx.ext.intersphinx",
-    "sphinx_design",
-    "sphinx_copybutton",
+extensions = ["scverse_doc"]
+source_repository = "https://github.com/theislab/spatialdata-db-client"
+exclude_patterns = [
+    *DEFAULTS.exclude_patterns,
+    "design",
+    "superpowers",
+    "**/.pixi",
+    "reference/_catalog_columns.md",
+    "reference/_cli.md",
 ]
-exclude_patterns = ["_build", "design", "superpowers", "**/.pixi", "reference/_catalog_columns.md", "reference/_cli.md"]
-templates_path = ["_templates"]
+smartquotes = False  # keep straight quotes, and `--flag` in the CLI reference instead of an en dash
 
-autosummary_generate = True
-napoleon_numpy_docstring = True
-
-nb_execution_mode = "off"
 copybutton_prompt_text = "$ "
 suppress_warnings = ["sddb.catalog"]
-myst_enable_extensions = ["colon_fence", "substitution", "deflist"]
+myst_enable_extensions = [*DEFAULTS.myst_enable_extensions, "substitution"]
 myst_substitutions = with_defaults(load_stats())
+
+
+def _drop_scverse_links(app):
+    """Remove the scverse Discourse icon that the scverse theme appends to ``icon_links``."""
+    options = app.config.html_theme_options
+    options["icon_links"] = [link for link in options.get("icon_links", []) if "scverse.org" not in link["url"]]
 
 
 def setup(app):
     """Emit the deferred catalog warning once ``suppress_warnings`` is active."""
     app.connect("config-inited", warn_if_unavailable)
+    app.connect("source-read", fill_code_examples)
+    app.connect("builder-inited", _drop_scverse_links, priority=900)  # after the theme appends it (500)
 
-intersphinx_mapping = {
-    "python": ("https://docs.python.org/3", None),
-    "numpy": ("https://numpy.org/doc/stable/", None),
-    "pandas": ("https://pandas.pydata.org/docs/", None),
-    "anndata": ("https://anndata.scverse.org/en/stable/", None),
-    "spatialdata": ("https://spatialdata.scverse.org/en/stable/", None),
-}
 
-html_theme = "sphinx_book_theme"
-html_title = "spatialdata-db"
-html_logo = "_static/logo.svg"
+intersphinx_mapping = intersphinx()
+ogp_social_cards = {"enable": False}  # needs matplotlib, and the pages have no card artwork
+xref_overrides = {"pandas.core.series.Series": "pandas.Series"}
+nitpick_ignore = [
+    # Internal classes that appear in signatures but are not exported from `sddb`.
+    ("py:class", "sddb.dataset.Source"),
+    ("py:class", "sddb.manifest.ManifestEntry"),
+    ("py:class", "sddb.objectmeta.ObjectMeta"),
+    ("py:class", "sddb.genes.GeneIndex"),
+    ("py:class", "sddb.features.FeatureIndex"),
+    # The docstrings of `count` and `index`, inherited from `collections.abc.Sequence`, read as return types.
+    ("py:class", "integer -- return number of occurrences of value"),
+    ("py:class", "integer -- return first index of value."),
+]
+
+html_logo = "_static/logo.svg"  # og:image and the fallback; the sidebar shows the wordmarks below
 html_favicon = "_static/logo.svg"
 html_static_path = ["_static"]
 html_css_files = ["css/sddb.css"]
 html_theme_options = {
-    "repository_url": "https://github.com/theislab/spatialdata-db-client",
-    "use_repository_button": True,
+    "accent": "#4fc3ea",  # the website's cyan
+    "secondary_accent": "#4fc3ea",  # the sidebar captions, in the same cyan
+    "logo": {
+        "image_light": "_static/wordmark.svg",
+        "image_dark": "_static/wordmark-dark.svg",
+        "alt_text": "SpatialData-DB - Home",
+    },
     "icon_links": [
         {"name": "Browse the DB", "url": SITE_URL, "icon": "fa-solid fa-globe"},
-        {
-            "name": "GitHub",
-            "url": "https://github.com/theislab/spatialdata-db-client",
-            "icon": "fa-brands fa-github",
-        },
         {"name": "Lamin", "url": "https://lamin.ai/scverse/spatialdata-db", "icon": "fa-solid fa-database"},
     ],
+    # Not a scverse package (yet): no scverse menu, announcement, footer or Discourse link.
+    "article_header_end": ["theme-switcher", "navbar-icon-links", "toggle-secondary-sidebar"],
+    "announcement": "",
+    "footer_start": ["copyright"],
 }

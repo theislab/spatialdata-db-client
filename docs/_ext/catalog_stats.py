@@ -35,7 +35,27 @@ def _datasets(n: int) -> str:
     return f"{n} dataset" + ("" if n == 1 else "s")
 
 
-def catalog_stats(df: pd.DataFrame) -> dict[str, str]:
+def _examples(df: pd.DataFrame) -> dict[str, str]:
+    """The website's front-page example uid (smallest dataset) and the smallest multi-member collection slug."""
+    out: dict[str, str] = {}
+    if "uid" not in df:
+        return out
+    sized = df.dropna(subset=["size_bytes"])
+    sized = sized[sized["size_bytes"] > 0]
+    if not sized.empty:
+        row = sized.loc[sized["size_bytes"].idxmin()]
+        out["small_uid"] = str(row["uid"])
+        out["small_stem"] = str(row["uid"])[:16]
+    if "collections" in df:
+        members = df.assign(_slug=df["collections"]).explode("_slug").dropna(subset=["_slug"])
+        per = members.groupby("_slug")["size_bytes"].agg(["size", "count", "sum"])
+        per = per[(per["size"] > 1) & (per["count"] == per["size"])]  # every member has a size
+        if not per.empty:
+            out["small_collection"] = str(per["sum"].idxmin())
+    return out
+
+
+def catalog_stats(df: pd.DataFrame, generated_at: str | None = None) -> dict[str, str]:
     """Substitution values (counts, example links, ready-made prose) for the intro pages."""
     stats = {
         "n_datasets": str(len(df)),
@@ -56,7 +76,12 @@ def catalog_stats(df: pd.DataFrame) -> dict[str, str]:
             if f"example_{tok}" in stats:
                 line += f" Example: {stats[f'example_{tok}']}"
             stats[f"line_{tok}"] = line
-    stats["hero_line"] = f"Query {len(df)} spatial omics datasets and load them as SpatialData."
+    # The website's "Technology" facet counts the `assay` column, so count the same thing here.
+    n_tech = int(df["assay" if "assay" in df else "technology"].nunique())
+    subject = f"The catalog of {generated_at[:10]}" if generated_at else "The catalog"
+    tech = f"{n_tech} technolog" + ("y" if n_tech == 1 else "ies")
+    stats["catalog_line"] = f"{subject} holds {_datasets(len(df))} from {tech}."
+    stats.update(_examples(df))
     stats["intro_count"] = f"The catalog currently holds {_datasets(len(df))}."
     if "tier" in df:
         tiers = df["tier"].astype(object).where(df["tier"].notna(), "unassigned").value_counts()
@@ -73,8 +98,21 @@ def catalog_stats(df: pd.DataFrame) -> dict[str, str]:
 def with_defaults(stats: dict[str, str]) -> dict[str, str]:
     """Blank values for every substitution the intro pages use, so a missing catalog renders cleanly."""
     keys = ["intro_count", "tier_note", "other_assays", *(f"line_{t}" for t in DESCRIBED)]
-    fallback = {"hero_line": "Query spatial omics datasets and load them as SpatialData."}
+    fallback = {
+        "catalog_line": "",
+        "small_uid": "<uid>",
+        "small_stem": "<16-character stem>",
+        "small_collection": "<slug>",
+        "catalog_date": "",
+        "site_url": SITE_URL,
+    }
     return {**dict.fromkeys(keys, ""), **fallback, **stats}
+
+
+def fill_code_examples(app, docname, source) -> None:
+    """MyST does not substitute inside code fences, so fill the ``{{ small_* }}`` placeholders in the raw source."""
+    for key in ("site_url", "small_uid", "small_stem", "small_collection"):
+        source[0] = source[0].replace("{{ " + key + " }}", app.config.myst_substitutions[key])
 
 
 def load_stats() -> dict[str, str]:
@@ -83,7 +121,7 @@ def load_stats() -> dict[str, str]:
         import sddb
 
         cat = sddb.Catalog()
-        stats = catalog_stats(cat.to_df())
+        stats = catalog_stats(cat.to_df(), cat.generated_at)
         stats["catalog_date"] = (cat.generated_at or "")[:10]
         return stats
     except Exception as exc:

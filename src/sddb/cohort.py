@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, overload
 import pandas as pd
 
 from sddb._cache import cache_dir
+from sddb._progress import _progress, _sizes
 from sddb.dataset import Dataset, Source
 from sddb.remote import _is_remote, _localize_to_cache, _open_fs
 
@@ -297,7 +298,7 @@ class SpatialDataCohort(Sequence[Dataset]):
     ) -> AnnData:
         """Concatenate each member's table into one AnnData (outer join, obs[uid]+obs[study_id]).
 
-        See :func:`sddb.concat.concat_tables` for ``obs_columns``, ``elements``, ``adapter`` and ``max_workers``.
+        See ``sddb.concat.concat_tables`` for ``obs_columns``, ``elements``, ``adapter`` and ``max_workers``.
         """
         from sddb.concat import concat_tables
 
@@ -382,12 +383,26 @@ class SpatialDataCohort(Sequence[Dataset]):
                 raise RuntimeError(f"download failed for {failed}; see {Path(dest) / 'manifest.json'}")
             return [Path(dest) / f"{uid}.zarr" for uid in self._df["uid"]]
         root = cache_dir() / "stores"
+        todo = {
+            uid: size
+            for uid, url, size in zip(self._df["uid"].astype(str), urls, _sizes(self._df), strict=True)
+            if _is_remote(url) and not (root / f"{uid}.zarr").is_dir()
+        }
 
-        def local(uid: str, url: str) -> Path:
-            return _cached_store(uid, url, root) if _is_remote(url) else Path(url)  # local stores open in place
+        lock = threading.Lock()
+        with _progress(len(todo), sum(todo.values())) as bar:
 
-        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-            return list(pool.map(lambda p: local(*p), zip(self._df["uid"].astype(str), urls, strict=True)))
+            def local(uid: str, url: str) -> Path:
+                if not _is_remote(url):
+                    return Path(url)  # local stores open in place
+                path = _cached_store(uid, url, root)
+                if uid in todo:
+                    with lock:
+                        bar.update(todo[uid])
+                return path
+
+            with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+                return list(pool.map(lambda p: local(*p), zip(self._df["uid"].astype(str), urls, strict=True)))
 
     def __len__(self) -> int:
         return len(self._df)

@@ -1,10 +1,45 @@
-# spatialdata-db
+# spatialdata-db: spatial omics datasets as SpatialData
 
-{{ hero_line }}
+spatialdata-db is a catalog of public spatial omics datasets, from Visium and Xenium to MERSCOPE, CosMx and mass spectrometry imaging.
+Each dataset is converted to a SpatialData Zarr store, described by one row of the catalog and registered in the Lamin instance [scverse/spatialdata-db](https://lamin.ai/scverse/spatialdata-db).
+{{ catalog_line }} You can browse every dataset and collection on the [website]({{ site_url }}).
 
+This Python client queries the catalog by technology, tissue, organism, gene or free text and loads the datasets you pick as `SpatialData` objects.
+It builds cohorts of datasets that you can freeze, split by study and turn into training data, and it collects the citations of the studies they come from.
+The `sddb-cli` command and the `sddb-mcp` server give the shell and AI agents the same queries and downloads.
+
+```{raw} html
+<figure class="sddb-mosaic">
+  <picture>
+    <source media="(max-width: 575.98px)" srcset="_static/landing-mosaic-narrow.webp" width="792" height="1826">
+    <img src="_static/landing-mosaic.webp" width="1600" height="905"
+      alt="A grid of twelve tissue thumbnails, each labelled with its technology">
+  </picture>
+  <figcaption>The 12 largest technologies in the catalog, one dataset each.</figcaption>
+</figure>
+```
+
+## Installation
+
+::::{tab-set}
+
+:::{tab-item} pip
 ```bash
 pip install git+https://github.com/theislab/spatialdata-db-client
 ```
+:::
+
+:::{tab-item} uv
+```bash
+uv pip install git+https://github.com/theislab/spatialdata-db-client
+```
+:::
+
+::::
+
+The client needs Python 3.12 or newer. It is not on PyPI yet, so install it from GitHub.
+
+## Quick example
 
 ```python
 from sddb import Catalog
@@ -12,44 +47,70 @@ from sddb import Catalog
 hits = Catalog().query(technology="Visium", tissue="lung")
 hits.summary()
 smallest = min(hits, key=lambda ds: ds.size_bytes)
-sdata = smallest.to_sdata()  # ~10 MB, copied to the local cache once
+sdata = smallest.to_sdata()  # about 7 MB, copied to the local cache once
 ```
 
-::::{grid} 1 2 2 4
+## Guides and reference
+
+::::{grid} 1 2 2 3
 :gutter: 3
 
-:::{grid-item-card} Find & load
+:::{grid-item-card} {octicon}`globe;1.5em;sd-mr-1` From the website
+:link: start
+:link-type: doc
+
+Load a dataset or collection you found on the website.
+:::
+
+:::{grid-item-card} {octicon}`search;1.5em;sd-mr-1` Find and load
 :link: guides/find-and-load
 :link-type: doc
-Filter the catalog by facets or free text and load datasets.
+
+Filter by facets or free text, then load what you pick.
 :::
 
-:::{grid-item-card} Cohorts
+:::{grid-item-card} {octicon}`stack;1.5em;sd-mr-1` Cohorts
 :link: guides/cohorts
 :link-type: doc
-Freeze, split and reproduce sets of datasets.
+
+Combine datasets, freeze exact versions and split by study.
 :::
 
-:::{grid-item-card} Agents & CLI
+:::{grid-item-card} {octicon}`cpu;1.5em;sd-mr-1` Machine learning
+:link: guides/ml
+:link-type: doc
+
+Load one table from many stores and train on a split.
+:::
+
+:::{grid-item-card} {octicon}`terminal;1.5em;sd-mr-1` CLI and agents
 :link: guides/cli-and-agents
 :link-type: doc
-Use the catalog from the shell and from AI agents.
+
+Query, download and cite from the shell or an AI agent.
 :::
 
-:::{grid-item-card} API
+:::{grid-item-card} {octicon}`code-square;1.5em;sd-mr-1` API reference
 :link: reference/api
 :link-type: doc
-Full reference for the Python API.
+
+Every public class and function, with its parameters.
 :::
+
 ::::
 
-Using data from the DB? See {doc}`cite-and-license`.
+## Cite and license
+
+The paper that describes the database is forthcoming.
+Until then, cite the studies behind the data you use: `cohort.citations()` writes their BibTeX entries, and `sddb-cli cite` does the same from the shell.
+Each dataset keeps the license of its source, and {doc}`cite-and-license` explains how to check and filter by license.
 
 ```{toctree}
 :hidden:
 :maxdepth: 2
-:caption: Introduction
+:caption: Getting started
 
+start
 intro/assays
 intro/db-stack
 ```
@@ -80,6 +141,7 @@ reference/catalog-columns
 ```{toctree}
 :hidden:
 :maxdepth: 1
+:caption: Project
 
 cite-and-license
 changelog

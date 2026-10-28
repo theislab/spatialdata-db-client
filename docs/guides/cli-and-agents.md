@@ -53,7 +53,14 @@ $ sddb-cli download h1okQyQN4GJd0I1l0000 --dest ./data
 data/manifest.json
 ```
 
-`--workers` sets the number of parallel downloads. The store ([`h1okQyQN4GJd0I1l0000`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-trunk-h1okqyqn4gjd0i1l0000/)) lands in `./data/h1okQyQN4GJd0I1l0000.zarr`.
+To download every member of a collection, pass its slug (the last part of the collection page URL) instead of uids:
+
+```
+$ sddb-cli download --collection <slug> --dest ./data
+data/manifest.json
+```
+
+Pass uids or `--collection`, not both. `--workers` sets the number of parallel downloads. A summary line goes to stderr when the download finishes, so stdout still holds only the manifest path. The store ([`h1okQyQN4GJd0I1l0000`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-trunk-h1okqyqn4gjd0i1l0000/)) lands in `./data/h1okQyQN4GJd0I1l0000.zarr`.
 
 
 ### viewer-url
@@ -145,6 +152,7 @@ If `sddb-mcp` is not on the `PATH` of the app, use its absolute path as `command
 | `query` | Filter datasets by facets, ranges (`min_obs`, `min_features`), gene (`expressing`, `min_fraction`) and free-text `search`. |
 | `describe` | Catalog row and element shapes for one dataset `uid`. |
 | `genes` | Datasets expressing one or more genes (`mode` `all` or `any`), optionally filtered by organism, tissue, disease or assay. Bronze datasets are included by default. |
+| `features` | Datasets measuring one or more features of any modality (genes, protein targets, metabolites; labels or ids; `mode` `all` or `any`), optionally filtered by `modality`, `feature_type`, organism, tissue, disease or assay. Each row lists the typed feature hits. Bronze datasets are included by default. |
 | `facets` | List the facet columns, or the distinct values of one field. |
 | `cite` | BibTeX for the studies of a filtered cohort. |
 | `download` | Plan a download (per-store and total sizes) or, with `download=true`, fetch the cohort into the server download directory. |

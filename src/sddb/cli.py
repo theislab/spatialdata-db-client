@@ -12,6 +12,7 @@ from rapidfuzz import fuzz, process
 from sddb.catalog import Catalog, _distinct, facet_values
 from sddb.citations import parse_bibtex
 from sddb.cohort import SpatialDataCohort
+from sddb.manifest import reusable
 
 app = typer.Typer(help="Query and download spatialdata-db datasets.", no_args_is_help=True, add_completion=False)
 
@@ -146,11 +147,19 @@ def download(
     try:
         cat = Catalog(catalog)
         cohort = cat.collection(collection) if collection is not None else _resolve(cat, uids or [])
+        present = reusable(dest)
         manifest = cohort.download(dest, workers=workers)
     except Exception as err:
         raise _fail(err) from err
     failed = [e.uid for e in manifest.entries if e.status != "complete"]
+    done = [e for e in manifest.entries if e.status == "complete"]
+    fetched = [e for e in done if present.get(e.uid) != e.zarr_url]
+    mb = sum(e.size_bytes or 0 for e in fetched) / 1e6
+    summary = f"downloaded {len(fetched)} dataset{'' if len(fetched) == 1 else 's'} ({mb:,.1f} MB) to {dest}"
+    if len(done) > len(fetched):
+        summary += f"; {len(done) - len(fetched)} already present"
     typer.echo(str(dest / "manifest.json"))
+    typer.echo(summary, err=True)
     if failed:
         typer.echo(f"error: failed: {failed}", err=True)
         raise typer.Exit(1)

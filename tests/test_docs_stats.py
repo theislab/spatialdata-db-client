@@ -107,9 +107,13 @@ def test_other_assays_aggregates_by_token_and_categorical_tier():
     assert "6 datasets (silver)" in s["tier_note"]
 
 
-def test_hero_line_with_and_without_number():
-    assert cs.catalog_stats(_df())["hero_line"] == "Query 4 spatial omics datasets and load them as SpatialData."
-    assert cs.with_defaults({})["hero_line"] == "Query spatial omics datasets and load them as SpatialData."
+def test_catalog_line_with_and_without_date():
+    assert cs.catalog_stats(_df())["catalog_line"] == "The catalog holds 4 datasets from 3 technologies."
+    dated = cs.catalog_stats(_df(), "2026-10-28T09:00:00")["catalog_line"]
+    assert dated == "The catalog of 2026-10-28 holds 4 datasets from 3 technologies."
+    one = cs.catalog_stats(_df().assign(assay="Visium Spatial Gene Expression"))["catalog_line"]
+    assert one == "The catalog holds 4 datasets from 1 technology."  # counts `assay`, like the website
+    assert cs.with_defaults({})["catalog_line"] == ""
 
 
 def test_site_url_single_source():
@@ -133,3 +137,47 @@ def test_site_url_single_source():
 def test_example_label_uses_organism_and_tissue():
     df = _df().assign(tissue="lung")
     assert cs.catalog_stats(df)["example_Xenium"].startswith("[human lung](")
+
+
+def test_small_examples_match_website_rule():
+    df = _df().assign(uid=["u" * 20, "s" * 20, "v" * 20, "t" * 20])
+    df["collections"] = [["c1"], ["c1", "c2"], ["c2"], None]
+    s = cs.catalog_stats(df)
+    assert s["small_uid"] == "v" * 20  # size 50, the smallest
+    assert s["small_stem"] == "v" * 16
+    assert s["small_collection"] == "c2"  # 150 bytes total, against 1000 for c1
+
+
+def test_small_examples_have_offline_fallback():
+    d = cs.with_defaults({})
+    assert d["small_uid"] == "<uid>"
+    assert d["small_collection"] == "<slug>"
+    assert "small_uid" not in cs.catalog_stats(_df())  # no uid column: nothing to compute
+
+
+def test_fill_code_examples_replaces_placeholders():
+    class App:
+        class config:
+            myst_substitutions = cs.with_defaults({"small_uid": "u1", "small_collection": "c1"})
+
+    src = ['Catalog().dataset("{{ small_uid }}") {{ small_collection }} {{ small_stem }} [x]({{ site_url }})']
+    cs.fill_code_examples(App, "start", src)
+    assert src[0] == f'Catalog().dataset("u1") c1 <16-character stem> [x]({cs.SITE_URL})'
+
+
+def test_start_page_has_no_unfilled_placeholder():
+    class App:
+        class config:
+            myst_substitutions = cs.with_defaults({})
+
+    raw = (Path(__file__).parent.parent / "docs" / "start.md").read_text()
+    src = [raw]
+    cs.fill_code_examples(App, "start", src)
+    assert "{{" not in src[0]
+
+
+def test_small_collection_skips_collections_with_unsized_members():
+    df = _df().assign(uid=["u" * 20, "s" * 20, "v" * 20, "t" * 20])
+    df["collections"] = [["c1"], ["c1"], ["c2"], ["c2"]]
+    df.loc[3, "size_bytes"] = float("nan")
+    assert cs.catalog_stats(df)["small_collection"] == "c1"

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 import fsspec
 import pandas as pd
 
+from sddb._progress import _progress, _sizes
 from sddb.dataset import Source
 from sddb.remote import storage_options
 
@@ -159,7 +160,13 @@ class ManifestVersionMismatch(ValueError):
     """The catalog version differs from the one recorded in an existing manifest."""
 
 
-def _fetch_all(pairs: list[tuple[str, str]], root: Path, catalog_version: str | None, workers: int) -> Manifest:
+def _fetch_all(
+    pairs: list[tuple[str, str]],
+    root: Path,
+    catalog_version: str | None,
+    workers: int,
+    sizes: dict[str, int] | None = None,
+) -> Manifest:
     """Copy each ``(uid, zarr_url)`` to ``root/<uid>.zarr`` (skipping completed ones) and write the manifest."""
     root.mkdir(parents=True, exist_ok=True)
     mpath = root / "manifest.json"
@@ -174,11 +181,17 @@ def _fetch_all(pairs: list[tuple[str, str]], root: Path, catalog_version: str | 
         manifest.entries = [by_uid[u] for u, _ in pairs if u in by_uid]
         manifest.write(mpath)
 
+    def have(uid: str, url: str) -> bool:
+        prev = done.get(uid)
+        return prev is not None and prev.zarr_url == url and (root / f"{uid}.zarr").is_dir()
+
+    todo = {u for u, url in pairs if not have(u, url)}
+    sizes = sizes or {}
+
     def fetch(uid: str, url: str) -> None:
         final = root / f"{uid}.zarr"
-        prev = done.get(uid)
-        if prev is not None and prev.zarr_url == url and final.is_dir():
-            entry = prev
+        if have(uid, url):
+            entry = done[uid]
         else:
             part = root / f"{uid}.zarr.part"
             for stale in (part, final):
@@ -195,9 +208,12 @@ def _fetch_all(pairs: list[tuple[str, str]], root: Path, catalog_version: str | 
         with lock:
             by_uid[uid] = entry
             save()
+            if uid in todo and entry.status == "complete":
+                bar.update(sizes.get(uid, 0))
 
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        list(pool.map(lambda p: fetch(*p), pairs))
+    with _progress(len(todo), sum(sizes.get(u, 0) for u in todo)) as bar:
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            list(pool.map(lambda p: fetch(*p), pairs))
     save()
     return manifest
 
@@ -245,6 +261,20 @@ def _latest_for_stem(source: Source, stem: str) -> tuple[str, str] | None:
     return str(row["uid"]), str(row["zarr_url"])
 
 
+def reusable(root: str | Path) -> dict[str, str]:
+    """``{uid: zarr_url}`` of the stores that ``download`` will not fetch again into ``root``.
+
+    These are the entries the manifest in ``root`` lists as complete whose ``<uid>.zarr`` is still there. A store
+    is reused only while its catalog ``zarr_url`` stays the same.
+    """
+    root = Path(root)
+    mpath = root / "manifest.json"
+    if not mpath.exists():
+        return {}
+    entries = Manifest.read(mpath).entries
+    return {e.uid: e.zarr_url for e in entries if e.status == "complete" and (root / f"{e.uid}.zarr").is_dir()}
+
+
 def download(
     results: SpatialDataCohort,
     dest: str | Path,
@@ -284,13 +314,10 @@ def download(
             pinned = True
     pairs: list[tuple[str, str]] = []
     missing: dict[str, str] = {}
-    complete: dict[str, ManifestEntry] = {}
-    if mpath.exists():
-        complete = {e.uid: e for e in Manifest.read(mpath).entries if e.status == "complete"}
+    present = reusable(root)
     for d in results:
         uid, url = str(d.uid), str(d.zarr_url)
-        prev = complete.get(uid)
-        if prev is not None and prev.zarr_url == url and (root / f"{uid}.zarr").is_dir():
+        if present.get(uid) == url:
             pairs.append((uid, url))  # already complete locally: no liveness check, no fetch
             continue
         try:
@@ -315,4 +342,5 @@ def download(
         pairs.append((uid, latest[1]))
     if missing:
         raise CohortDriftError(missing)
-    return _fetch_all(pairs, root, current if pinned else None, workers)
+    sizes = dict(zip(results._df["uid"].astype(str), _sizes(results._df), strict=True))
+    return _fetch_all(pairs, root, current if pinned else None, workers, sizes)

@@ -331,8 +331,12 @@ class Catalog:
         )
 
     def dataset(self, uid: str) -> Dataset:
-        """The catalog row for one full ``uid`` (as on its web page). Raises ``KeyError`` if absent."""
+        """The catalog row for one dataset, by full ``uid`` or its 16-character stem. Raises ``KeyError`` if absent or ambiguous."""
         hit = self._df[self._df["uid"] == uid]
+        if hit.empty and len(uid) == 16:
+            hit = self._df[self._df["uid"].str[:16] == uid]
+            if len(hit) > 1:
+                raise KeyError(f"stem {uid!r} matches several uids: {sorted(hit['uid'])}; pass the full uid")
         if hit.empty:
             raise KeyError(f"uid not in catalog: {uid!r}")
         return Dataset(hit.iloc[0])
