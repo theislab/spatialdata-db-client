@@ -80,7 +80,8 @@ def test_download(tmp_path):
     dest = tmp_path / "out"
     r = runner.invoke(app, ["download", "uid0001", "uid0002", "--dest", str(dest), "--catalog", p.as_uri()])
     assert r.exit_code == 0, r.output
-    assert r.output.strip() == str(dest / "manifest.json")
+    assert r.stdout.strip().splitlines()[-1] == str(dest / "manifest.json")
+    assert "downloaded 2 datasets" in r.stderr
     m = json.loads((dest / "manifest.json").read_text())
     assert [e["status"] for e in m["entries"]] == ["complete", "complete"]
     assert (dest / "uid0001.zarr").is_dir()

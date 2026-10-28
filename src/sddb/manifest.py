@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 import fsspec
 import pandas as pd
 
+from sddb._progress import _progress, _sizes
 from sddb.dataset import Source
 from sddb.remote import storage_options
 
@@ -159,7 +160,13 @@ class ManifestVersionMismatch(ValueError):
     """The catalog version differs from the one recorded in an existing manifest."""
 
 
-def _fetch_all(pairs: list[tuple[str, str]], root: Path, catalog_version: str | None, workers: int) -> Manifest:
+def _fetch_all(
+    pairs: list[tuple[str, str]],
+    root: Path,
+    catalog_version: str | None,
+    workers: int,
+    sizes: dict[str, int] | None = None,
+) -> Manifest:
     """Copy each ``(uid, zarr_url)`` to ``root/<uid>.zarr`` (skipping completed ones) and write the manifest."""
     root.mkdir(parents=True, exist_ok=True)
     mpath = root / "manifest.json"
@@ -174,11 +181,16 @@ def _fetch_all(pairs: list[tuple[str, str]], root: Path, catalog_version: str | 
         manifest.entries = [by_uid[u] for u, _ in pairs if u in by_uid]
         manifest.write(mpath)
 
+    def have(uid: str, url: str) -> bool:
+        prev = done.get(uid)
+        return prev is not None and prev.zarr_url == url and (root / f"{uid}.zarr").is_dir()
+
+    todo = [u for u, url in pairs if not have(u, url)]
+
     def fetch(uid: str, url: str) -> None:
         final = root / f"{uid}.zarr"
-        prev = done.get(uid)
-        if prev is not None and prev.zarr_url == url and final.is_dir():
-            entry = prev
+        if have(uid, url):
+            entry = done[uid]
         else:
             part = root / f"{uid}.zarr.part"
             for stale in (part, final):
@@ -195,9 +207,12 @@ def _fetch_all(pairs: list[tuple[str, str]], root: Path, catalog_version: str | 
         with lock:
             by_uid[uid] = entry
             save()
+        if uid in todo:
+            bar.update((sizes or {}).get(uid, 0))
 
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        list(pool.map(lambda p: fetch(*p), pairs))
+    with _progress(len(todo), sum((sizes or {}).get(u, 0) for u in todo)) as bar:
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            list(pool.map(lambda p: fetch(*p), pairs))
     save()
     return manifest
 
@@ -315,4 +330,5 @@ def download(
         pairs.append((uid, latest[1]))
     if missing:
         raise CohortDriftError(missing)
-    return _fetch_all(pairs, root, current if pinned else None, workers)
+    sizes = dict(zip(results._df["uid"].astype(str), _sizes(results._df), strict=True))
+    return _fetch_all(pairs, root, current if pinned else None, workers, sizes)

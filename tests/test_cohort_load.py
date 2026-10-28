@@ -1,4 +1,5 @@
 import json
+import sys
 
 import pandas as pd
 import pytest
@@ -29,6 +30,20 @@ def test_to_list_caches_by_uid_and_reuses(cohort, tmp_path, monkeypatch):
     assert sorted(p.name for p in (tmp_path / "cache" / "stores").iterdir()) == ["u10000.zarr", "u20000.zarr"]
     cohort.to_list()
     assert len(copies) == 2  # second call opens the cached stores, no copy
+
+
+@pytest.mark.parametrize("with_tqdm", [True, False])
+def test_download_progress_on_stderr_only_when_fetching(cohort, capsys, monkeypatch, with_tqdm):
+    if not with_tqdm:
+        monkeypatch.setitem(sys.modules, "tqdm", None)  # makes ``import tqdm`` fail
+    cohort.to_list()
+    cap = capsys.readouterr()
+    assert "downloading" in cap.err
+    assert cap.out == ""
+    if not with_tqdm:
+        assert "2 datasets" in cap.err
+    cohort.to_list()
+    assert capsys.readouterr().err == ""  # everything cached: silent
 
 
 def test_dataset_to_sdata_shares_the_cohort_cache(cohort, tmp_path):

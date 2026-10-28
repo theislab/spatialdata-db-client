@@ -151,6 +151,7 @@ def download(
         raise _fail(err) from err
     failed = [e.uid for e in manifest.entries if e.status != "complete"]
     typer.echo(str(dest / "manifest.json"))
+    typer.echo(f"downloaded {len(manifest.entries) - len(failed)} datasets", err=True)
     if failed:
         typer.echo(f"error: failed: {failed}", err=True)
         raise typer.Exit(1)
