@@ -71,10 +71,13 @@ module = [ "anndata.*", "mcp.*","fsspec.*", "pyarrow.*", "spatialdata.*", "upath
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-addopts = [ "--import-mode=importlib", "-m", "not network" ]
+addopts = [ "--import-mode=importlib", "-m", "not network and not slow" ]
 pythonpath = [ "." ]
 testpaths = [ "tests" ]
-markers = [ "network: tests that require network/S3 access (deselected by default)" ]
+markers = [
+  "network: tests that require network/S3 access (deselected by default)",
+  "slow: large synthetic-data tests (deselected by default; run with -m slow)",
+]
 
 [tool.coverage.run]
 source = [ "sddb" ]

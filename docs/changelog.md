@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Gene and feature lookups (`Catalog().genes`, `Catalog().features`, `sddb-cli genes`, `query --gene` and the MCP `genes`/`features` tools) stream the index in batches and keep only matching rows. They no longer load the whole index into pandas, so a lookup on the 128M-row gene index uses about 0.7 GB of memory instead of more than 40 GB.
 - `Catalog.dataset` accepts the 16-character stem of a uid as well as the full uid; a stem resolves to the latest version.
 - Downloads print their progress on stderr, and print nothing when the store is already cached.
 - `sddb-cli download` ends with a summary on stderr: "downloaded N datasets (X MB) to <dest>", plus how many were already present.
