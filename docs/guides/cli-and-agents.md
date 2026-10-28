@@ -21,11 +21,14 @@ gene index.
 
 ```
 $ sddb-cli query --organism human --technology Visium --tissue lung --min-obs 5000
-# catalog 2026-10-18 · 1778 datasets
+# catalog 2026-10-28 · 6087 datasets
 uid                   technology  organism  tissue  n_obs
 PntNMJy70YLUP8eq0000  Visium      human     lung    6195
+gA0atNHp50LE7usk0000  Visium      human     lung    5218
+B1pHBGo66lQ15oil0000  Visium      human     lung    13002
+KI3j6VpkjaVwuPPY0000  Visium      human     lung    5388
 ```
-The match, [`PntNMJy70YLUP8eq0000`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-lung-pntnmjy70ylup8eq0000/), has a page on the DB site.
+Each match has a page on the DB site, e.g., [`PntNMJy70YLUP8eq0000`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-lung-pntnmjy70ylup8eq0000/).
 
 Other options: `--assay`, `--disease`, `--tier`, `--search`, `--min-features`, `--min-fraction`. If a value
 matches nothing, the closest known value is suggested.
@@ -36,11 +39,20 @@ Without an argument it lists the facet columns, with one it lists the distinct v
 
 ```
 $ sddb-cli facets organism
+ambystoma mexicanum
 arabidopsis thaliana
+branchiostoma floridae
+crab-eating macaque
+dog
 glycine max
+golden hamster
 human
+leucoraja erinaceus
+macaque
 mouse
+pig
 rat
+zebra finch
 zebrafish
 ```
 
@@ -77,16 +89,17 @@ Dataset: [`xVK6T0rajFTgOKci0000`](https://spatialdata-db-web.pages.dev/datasets/
 
 List datasets that express all the given genes (symbols or Ensembl ids). With one gene, datasets are ranked by
 the fraction of observations in which it is detected. The first call downloads the cross-dataset gene index
-(about 260 MB, cached afterwards).
+(about 900 MB, downloaded once and cached), and lookups read it in batches, so a lookup needs well under 1 GB
+of memory and takes about 15 seconds.
 
 ```
 $ sddb-cli genes EPCAM --limit 3
 uid                   fraction_obs_detected  total_counts  validation_status  tier
 EVTMdgu8thDMETSm0000  1                      3.807e+04     pass               silver
-bOgBgMqQm9TObx470000  0.9995                 3.615e+05     pass               silver
-TeLy8jHRRvoCrNMn0000  0.9989                 2.761e+05     pass               silver
+S6yC0WUFUl8bFH5y0000  0.9997                 1.929e+05     pass               bronze
+7nANAXEEhj6WHiCU0000  0.9997                 2.63e+05      pass               bronze
 ```
-Datasets: [`EVTMdgu8thDMETSm0000`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-intestine-evtmdgu8thdmetsm0000/), [`bOgBgMqQm9TObx470000`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-intestine-bogbgmqqm9tobx470000/), [`TeLy8jHRRvoCrNMn0000`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-colon-tely8jhrrvocrnmn0000/).
+Datasets: [`EVTMdgu8thDMETSm0000`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-intestine-evtmdgu8thdmetsm0000/), [`S6yC0WUFUl8bFH5y0000`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-small-intestine-s6yc0wuful8bfh5y0000/), [`7nANAXEEhj6WHiCU0000`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-small-intestine-7nanaxeehj6whicu0000/).
 
 `genes` defaults to `--validation all`, so datasets that failed validation are included. Pass `--validation pass` to exclude them. To restrict by tier, use `sddb-cli query --tier ...` or `Catalog().query(tier=...)`.
 
@@ -96,7 +109,7 @@ Write BibTeX for the studies behind the datasets that match the facets or search
 
 ```
 $ sddb-cli cite -o refs.bib --organism mouse --tissue brain --technology Visium
-wrote 55 citations -> refs.bib
+wrote 178 citations -> refs.bib
 ```
 
 Studies without a matching citation key are skipped, and the command exits with an error if no datasets match at all.
