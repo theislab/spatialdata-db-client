@@ -1,4 +1,5 @@
 import os
+import urllib.error
 import warnings
 
 import pandas as pd
@@ -6,11 +7,11 @@ import pytest
 from tests._fixtures import write_fixture_catalog
 
 from sddb import cohort as cohort_mod
-from sddb._cache import _file_sha256
+from sddb._cache import _file_sha256, catalog_cache_path
 from sddb.catalog import _ROLLING_SUFFIX, Catalog
 from sddb.cohort import SpatialDataCohort
 from sddb.dataset import Source
-from sddb.manifest import CatalogChangedError, CohortDriftError, CohortManifest
+from sddb.manifest import CatalogChangedError, CatalogUnavailableError, CohortDriftError, CohortManifest
 
 
 class _FS:
@@ -99,7 +100,7 @@ def test_verify_rolling_catalog_change_warns(tmp_path, monkeypatch):
     cache = tmp_path / "cache"
     _catalog(tmp_path, cache)
     rolling = "https://example.org/releases/download" + _ROLLING_SUFFIX
-    monkeypatch.setattr("sddb._cache.fetch_catalog", lambda url, cache_dir=None: tmp_path / "catalog.parquet")
+    monkeypatch.setattr("sddb._cache.fetch_catalog", lambda url, **_: tmp_path / "catalog.parquet")
     coh = SpatialDataCohort(
         pd.DataFrame({"uid": ["a"], "zarr_url": ["s3://x"]}), source=Source(rolling, cache, sha256="sha256:old")
     )
@@ -141,3 +142,24 @@ def test_from_manifest_without_catalog_is_offline(tmp_path, monkeypatch):
     monkeypatch.setattr("sddb._cache._file_sha256", boom)
     coh = SpatialDataCohort.from_manifest(m)
     assert coh._source.sha256 == m.source.sha256
+
+
+def test_verify_raises_when_release_unreachable_but_catalog_falls_back(tmp_path, monkeypatch):
+    url = "https://example.org/releases/download/catalog-2026-10-28/catalog.parquet"
+    cache = tmp_path / "cache"
+    write_fixture_catalog(catalog_cache_path(url, cache_dir=cache))  # a cached copy exists
+
+    def offline(*a, **k):
+        raise urllib.error.URLError("network is down")
+
+    monkeypatch.setattr("sddb._cache.urllib.request.urlopen", offline)
+    _alive(monkeypatch)
+    with pytest.warns(UserWarning, match="using cached catalog"):
+        cat = Catalog(url, cache_dir=cache)  # Catalog() still falls back to the cache
+    coh = cat.query(validation=None)
+    with pytest.raises(CatalogUnavailableError) as ei:
+        coh.verify()
+    assert ei.value.url == url
+    assert url in str(ei.value)
+    assert "could not be verified" in str(ei.value)
+    assert "network is down" in str(ei.value)

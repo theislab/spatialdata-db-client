@@ -1,4 +1,4 @@
-"""Cohort identity record (CohortManifest, cohort_hash, CohortDriftError, CatalogChangedError) and resumable cohort download with a JSON manifest."""
+"""Cohort identity record (CohortManifest, cohort_hash, CohortDriftError, CatalogChangedError, CatalogUnavailableError) and resumable cohort download with a JSON manifest."""
 
 from __future__ import annotations
 
@@ -58,6 +58,15 @@ class CatalogChangedError(RuntimeError):
         super().__init__(
             f"catalog at {url} was modified after the cohort was frozen: expected {expected}, got {actual}"
         )
+
+
+class CatalogUnavailableError(RuntimeError):
+    """The catalog a cohort was frozen from could not be fetched, so its recorded sha256 could not be verified."""
+
+    def __init__(self, url: str, reason: str) -> None:
+        self.url = url
+        self.reason = reason
+        super().__init__(f"catalog at {url} could not be fetched, so it could not be verified: {reason}")
 
 
 def _check_catalog_sha(url: str, expected: str, actual: str) -> None:

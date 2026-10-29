@@ -153,17 +153,22 @@ class SpatialDataCohort(Sequence[Dataset]):
 
         If the cohort recorded its catalog's sha256 (cohorts from a ``Catalog``, manifests written since
         this field was added), the catalog is fetched again from its url and hashed first. A dated release whose
-        bytes changed raises ``CatalogChangedError``; a changed ``catalog-latest`` only warns. Then raise
+        bytes changed raises ``CatalogChangedError``; a changed ``catalog-latest`` only warns. If the url cannot be
+        fetched, raise ``CatalogUnavailableError``: a cached copy is never used in its place. Then raise
         ``CohortDriftError`` if any pinned store no longer resolves: a pinned version may stop resolving when a
         dataset is republished. Not called by :meth:`download`, which runs its own inline liveness loop; not
         run by cheap ops.
         """
         from sddb._cache import _file_sha256, fetch_catalog
-        from sddb.manifest import CohortDriftError, _check_catalog_sha
+        from sddb.manifest import CatalogUnavailableError, CohortDriftError, _check_catalog_sha
 
         src = self._source
         if src.sha256 and src.url:
-            current = _file_sha256(fetch_catalog(src.url, cache_dir=src.cache_dir))
+            try:
+                path = fetch_catalog(src.url, cache_dir=src.cache_dir, fallback=False)
+            except OSError as err:  # includes URLError/HTTPError and a missing local file
+                raise CatalogUnavailableError(src.url, f"{type(err).__name__}: {err}") from err
+            current = _file_sha256(path)
             _check_catalog_sha(src.url, src.sha256, current)
         pairs = [(str(r.uid), str(r.zarr_url)) for r in self._df.itertuples(index=False)]
 
