@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The install instructions pin the alpha release: `pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.1"`.
 - Behaviour change: a string facet value in `Catalog.query` that is not in the catalog no longer returns an empty cohort silently. Values resolve through aliases first (case, spaces, hyphens and underscores are ignored, and `technology` accepts the `assay` label, so `technology="10x Xenium"` selects `Xenium`). A value that still does not resolve raises `ValueError` with a "did you mean" hint, for example "unknown technology value 'Xenum'; did you mean 'Xenium'?". `sddb-cli query` and `cite`, and the MCP tools, resolve values the same way and fail with the same message. A known value that matches nothing after the other filters still gives an empty cohort.
 - New facets `hne_image` and `if_image` (True or False; null means unknown and matches neither) and `source`, the lowercased `study_id` prefix (`geo`, `hest`, `10x`, ...) that the client derives on load, so it shows in `to_df()` and `facets("source")`. New `query(redistributable=...)` keyword: True keeps datasets whose known license allows redistribution. The CLI has `--source`, `--hne-image/--no-hne-image` and `--redistributable/--no-redistributable`, and the MCP `query`, `cite` and `download` tools take `source`, `hne_image`, `if_image` and `redistributable`.
 - Free-text `search` no longer matches the boolean facets, so a token such as "true" no longer empties the result.

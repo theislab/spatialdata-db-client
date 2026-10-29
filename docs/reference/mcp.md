@@ -3,7 +3,7 @@
 `sddb-mcp` serves the catalog to agents over stdio (Model Context Protocol). It needs the optional extra:
 
 ```bash
-pip install "spatialdata-db[mcp] @ git+https://github.com/theislab/spatialdata-db-client"
+pip install "spatialdata-db[mcp] @ git+https://github.com/theislab/spatialdata-db-client@v0.1.1"
 sddb-mcp
 ```
 
