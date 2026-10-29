@@ -2,7 +2,7 @@ import sys
 from importlib.metadata import version as _version
 from pathlib import Path
 
-from sddb._catalog_schema import CATALOG_COLUMNS, FACETS, RANGE_COLUMNS
+from sddb._catalog_schema import CATALOG_COLUMNS, DERIVED_COLUMNS, FACETS, RANGE_COLUMNS
 
 sys.path.insert(0, str(Path(__file__).parent / "_ext"))
 from catalog_stats import SITE_URL, fill_code_examples, load_stats, warn_if_unavailable, with_defaults
@@ -13,7 +13,7 @@ from scverse_doc.registry import intersphinx
 
 def _write_catalog_columns() -> None:
     rows = ["| Column | Dtype | Facet | Range |", "|---|---|---|---|"]
-    for col, dtype in CATALOG_COLUMNS.items():
+    for col, dtype in {**CATALOG_COLUMNS, **DERIVED_COLUMNS}.items():
         rows.append(
             f"| `{col}` | `{dtype}` | {'yes' if col in FACETS else ''} | {'yes' if col in RANGE_COLUMNS else ''} |"
         )

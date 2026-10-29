@@ -10,7 +10,7 @@ from typing import Any
 import pandas as pd
 import platformdirs
 
-from sddb.catalog import Catalog, facet_values
+from sddb.catalog import Catalog, facet_values, resolve_facet_values
 from sddb.cohort import SpatialDataCohort
 from sddb.dataset import Dataset
 from sddb.features import _check_mode
@@ -54,12 +54,17 @@ def query_tool(
     """Query the catalog by facets; at most ``MAX_ROWS`` rows (a trailing ``{"note": ...}`` marks truncation).
 
     ``validation`` filters ``validation_status`` (default ``"pass"``; ``"all"`` includes every row).
-    ``**facets`` accepts equality, lists (isin) and ``col__gte``/``gt``/``lte``/``lt`` ranges. ``expressing``
-    (+ optional ``min_fraction``) and ``search`` compose as in :meth:`Catalog.query`.
+    ``**facets`` accepts equality, lists (isin) and ``col__gte``/``gt``/``lte``/``lt`` ranges, plus the
+    ``noncommercial`` and ``redistributable`` keywords. ``expressing`` (+ optional ``min_fraction``) and
+    ``search`` compose as in :meth:`Catalog.query`, which also resolves facet aliases.
     """
     df = _query(
-        catalog_url, validation=validation, expressing=expressing,
-        min_fraction=min_fraction, search=search, **facets,
+        catalog_url,
+        validation=validation,
+        expressing=expressing,
+        min_fraction=min_fraction,
+        search=search,
+        **facets,
     ).to_df()
     rows = _records(df.head(MAX_ROWS))
     if len(df) > MAX_ROWS:
@@ -100,7 +105,11 @@ def genes_tool(
     """
     if isinstance(symbols, str):
         symbols = [symbols]
-    facets: dict[str, Any] = {k: v for k, v in (("organism", organism), ("tissue", tissue), ("disease", disease), ("assay", assay)) if v is not None}
+    facets: dict[str, Any] = {
+        k: v
+        for k, v in (("organism", organism), ("tissue", tissue), ("disease", disease), ("assay", assay))
+        if v is not None
+    }
     cohort = Catalog(catalog_url).query(
         expressing=symbols, mode=mode, validation=None if include_bronze else "pass", **facets
     )
@@ -128,9 +137,18 @@ def features_tool(
     """
     if isinstance(features, str):
         features = [features]
-    facets: dict[str, Any] = {k: v for k, v in (("organism", organism), ("tissue", tissue), ("disease", disease), ("assay", assay)) if v is not None}
+    facets: dict[str, Any] = {
+        k: v
+        for k, v in (("organism", organism), ("tissue", tissue), ("disease", disease), ("assay", assay))
+        if v is not None
+    }
     _check_mode(mode)
-    fi = Catalog(catalog_url).features
+    cat = Catalog(catalog_url)
+    full = cat.to_df()
+    facets = {
+        col: resolve_facet_values(full, col, val if isinstance(val, list) else [val]) for col, val in facets.items()
+    }
+    fi = cat.features
     typed = ("raw_label", "feature_type", "modality")
     # One scan serves both the cohort and the per-dataset typed hits.
     hits = fi._uid_hits(features, columns=("uid", *typed), feature_type=feature_type, modality=modality)
@@ -138,8 +156,7 @@ def features_tool(
     per_token = [by_key.get(f.strip().casefold(), hits.iloc[:0]) for f in features]
     uids = fi._combine([set(g["uid"].astype(str)) for g in per_token], mode)
     df = fi._cohort(uids, None if include_bronze else "pass").to_df()
-    for col, val in facets.items():
-        vals = val if isinstance(val, list) else [val]
+    for col, vals in facets.items():
         df = df[df[col].isin(vals)]
     per_uid: dict[str, list[dict[str, str]]] = {}
     for g in per_token:
@@ -170,8 +187,12 @@ def cite_tool(
 ) -> dict[str, Any]:
     """Return BibTeX text + entry count for the studies of a filtered cohort (empty cohort -> n=0)."""
     res = _query(
-        catalog_url, validation=validation, expressing=expressing,
-        min_fraction=min_fraction, search=search, **facets,
+        catalog_url,
+        validation=validation,
+        expressing=expressing,
+        min_fraction=min_fraction,
+        search=search,
+        **facets,
     )
     if len(res) == 0:
         return {"bibtex": "", "n": 0}
@@ -204,8 +225,12 @@ def download_tool(
     into the server download dir and returns the manifest path.
     """
     res = _query(
-        catalog_url, validation=validation, expressing=expressing,
-        min_fraction=min_fraction, search=search, **facets,
+        catalog_url,
+        validation=validation,
+        expressing=expressing,
+        min_fraction=min_fraction,
+        search=search,
+        **facets,
     )
     if not download:
         sizes = plan_sizes(res)

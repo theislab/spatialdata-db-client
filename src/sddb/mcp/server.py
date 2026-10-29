@@ -35,6 +35,10 @@ def build_server() -> Any:
         technology: str | None = None,
         assay: str | None = None,
         tier: str | None = None,
+        source: str | None = None,
+        hne_image: bool | None = None,
+        if_image: bool | None = None,
+        redistributable: bool | None = None,
         validation: str = "pass",
         expressing: str | None = None,
         min_fraction: float | None = None,
@@ -45,10 +49,21 @@ def build_server() -> Any:
         return tools.query_tool(
             validation=validation,
             **_drop_none(
-                organism=organism, tissue=tissue, disease=disease,
-                technology=technology, assay=assay, tier=tier,
-                n_obs__gte=min_obs, n_features__gte=min_features,
-                expressing=expressing, min_fraction=min_fraction, search=search,
+                organism=organism,
+                tissue=tissue,
+                disease=disease,
+                technology=technology,
+                assay=assay,
+                tier=tier,
+                source=source,
+                hne_image=hne_image,
+                if_image=if_image,
+                redistributable=redistributable,
+                n_obs__gte=min_obs,
+                n_features__gte=min_features,
+                expressing=expressing,
+                min_fraction=min_fraction,
+                search=search,
             ),
         )
 
@@ -65,7 +80,9 @@ def build_server() -> Any:
         include_bronze: bool = True,
     ) -> list[dict[str, Any]]:
         return tools.genes_tool(
-            symbols, mode=mode, include_bronze=include_bronze,
+            symbols,
+            mode=mode,
+            include_bronze=include_bronze,
             **_drop_none(organism=organism, tissue=tissue, disease=disease, assay=assay),
         )
 
@@ -81,7 +98,11 @@ def build_server() -> Any:
         include_bronze: bool = True,
     ) -> list[dict[str, Any]]:
         return tools.features_tool(
-            features, modality=modality, mode=mode, feature_type=feature_type, include_bronze=include_bronze,
+            features,
+            modality=modality,
+            mode=mode,
+            feature_type=feature_type,
+            include_bronze=include_bronze,
             **_drop_none(organism=organism, tissue=tissue, disease=disease, assay=assay),
         )
 
@@ -95,6 +116,10 @@ def build_server() -> Any:
         technology: str | None = None,
         assay: str | None = None,
         tier: str | None = None,
+        source: str | None = None,
+        hne_image: bool | None = None,
+        if_image: bool | None = None,
+        redistributable: bool | None = None,
         search: str | None = None,
         expressing: str | None = None,
         min_fraction: float | None = None,
@@ -103,9 +128,19 @@ def build_server() -> Any:
         return tools.cite_tool(
             validation=validation,
             **_drop_none(
-                organism=organism, tissue=tissue, disease=disease,
-                technology=technology, assay=assay, tier=tier,
-                search=search, expressing=expressing, min_fraction=min_fraction,
+                organism=organism,
+                tissue=tissue,
+                disease=disease,
+                technology=technology,
+                assay=assay,
+                tier=tier,
+                source=source,
+                hne_image=hne_image,
+                if_image=if_image,
+                redistributable=redistributable,
+                search=search,
+                expressing=expressing,
+                min_fraction=min_fraction,
             ),
         )
 
@@ -116,6 +151,10 @@ def build_server() -> Any:
         technology: str | None = None,
         assay: str | None = None,
         tier: str | None = None,
+        source: str | None = None,
+        hne_image: bool | None = None,
+        if_image: bool | None = None,
+        redistributable: bool | None = None,
         search: str | None = None,
         expressing: str | None = None,
         min_fraction: float | None = None,
@@ -123,17 +162,33 @@ def build_server() -> Any:
         download: bool = False,
     ) -> dict[str, Any]:
         return tools.download_tool(
-            validation=validation, download=download,
+            validation=validation,
+            download=download,
             **_drop_none(
-                organism=organism, tissue=tissue, disease=disease,
-                technology=technology, assay=assay, tier=tier,
-                search=search, expressing=expressing, min_fraction=min_fraction,
+                organism=organism,
+                tissue=tissue,
+                disease=disease,
+                technology=technology,
+                assay=assay,
+                tier=tier,
+                source=source,
+                hne_image=hne_image,
+                if_image=if_image,
+                redistributable=redistributable,
+                search=search,
+                expressing=expressing,
+                min_fraction=min_fraction,
             ),
         )
 
     server.tool(
         name="query",
-        description="Filter datasets by facets, ranges (min_obs/min_features), gene (expressing) and free-text search.",
+        description=(
+            "Filter datasets by facets, ranges (min_obs/min_features), gene (expressing) and free-text search. "
+            "source is the study_id prefix (geo, hest, 10x, ...); hne_image/if_image/redistributable take true "
+            "or false. An unknown facet value fails with a 'did you mean' hint; technology also accepts the "
+            "assay label (e.g. '10x Xenium')."
+        ),
     )(query)
     server.tool(name="describe", description="Catalog row and element shapes for one dataset uid.")(describe)
     server.tool(
@@ -153,7 +208,9 @@ def build_server() -> Any:
     )(features)
     server.tool(name="facets", description="List facet columns, or the distinct values of a facet field.")(facets)
     server.tool(name="cite", description="BibTeX for the studies of a filtered cohort.")(cite)
-    server.tool(name="download", description="Plan (sizes) or fetch a filtered cohort to the server download dir.")(download_cohort)
+    server.tool(name="download", description="Plan (sizes) or fetch a filtered cohort to the server download dir.")(
+        download_cohort
+    )
     return server
 
 

@@ -161,7 +161,14 @@ FACETS: tuple[str, ...] = (
     "validation_status",
     "license",
     "license_noncommercial",
+    "hne_image",
+    "if_image",
+    "source",
 )
+
+# Columns the client derives on load (not in the published parquet): ``source`` is the lowercased
+# ``study_id`` prefix before ":" (geo, hest, 10x, ...), null for rows without a study_id.
+DERIVED_COLUMNS: dict[str, str] = {"source": "string"}
 
 # numeric columns that accept range operators (col__gte / __gt / __lte / __lt) in Catalog.query:
 # exactly the CATALOG_COLUMNS entries whose dtype is Int64/Float64 (derived, so the two stay in sync).

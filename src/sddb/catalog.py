@@ -6,13 +6,14 @@ import operator
 import os
 import re
 import warnings
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz, process
 
 from sddb import _catalog_schema as schema
 from sddb._cache import _file_sha256, _local_path, fetch_catalog
@@ -28,6 +29,7 @@ _RELEASE_BASE = "https://github.com/theislab/spatialdata-db-client/releases/down
 DEFAULT_CATALOG_URL = _RELEASE_BASE + _ROLLING_SUFFIX
 _FUZZY_CUTOFF = 88
 _RANGE_OPS = {"gte": operator.ge, "gt": operator.gt, "lte": operator.le, "lt": operator.lt}
+_SUGGEST_CUTOFF = 70
 
 
 def _split_facets(facets: Mapping[str, Any]) -> tuple[dict[str, Any], list[tuple[str, str, Any]]]:
@@ -74,6 +76,67 @@ def _facet_isin(series: pd.Series, values: list[Any]) -> pd.Series:
             lambda v: not (v is None or (not hasattr(v, "__iter__") and pd.isna(v))) and any(e in want for e in v)
         )
     return series.isin(values)
+
+
+def _norm(value: Any) -> str:
+    """Alias key for a facet value: lowercase, with spaces, hyphens and underscores removed."""
+    return re.sub(r"[\s_-]+", "", str(value).lower())
+
+
+def closest_value(value: str, known: Iterable[str]) -> str | None:
+    """The known value closest to ``value`` (rapidfuzz ``ratio`` on :func:`_norm` keys, cutoff 70), or None."""
+    best = process.extractOne(value, list(known), processor=_norm, scorer=fuzz.ratio, score_cutoff=_SUGGEST_CUTOFF)
+    return best[0] if best else None
+
+
+def _is_bool_facet(col: str) -> bool:
+    return schema.CATALOG_COLUMNS.get(col) == "boolean"
+
+
+def resolve_facet_values(df: pd.DataFrame, col: str, values: list[Any]) -> list[Any]:
+    """Map requested values of facet ``col`` onto values present in ``df[col]``.
+
+    A value present as given is kept. Otherwise it resolves through aliases: values that are equal
+    after :func:`_norm` (case, spaces, hyphens and underscores ignored), and, for ``technology``, the
+    catalog's own ``assay`` display values (``"10x Xenium"`` resolves to ``"Xenium"``; an assay shared
+    by several technologies resolves to all of them). Boolean facets take ``True`` or ``False`` only.
+
+    Raises
+    ------
+    ValueError
+        If a value does not resolve, with the closest known value as a "did you mean" hint.
+    """
+    if _is_bool_facet(col):
+        bad = [v for v in values if not isinstance(v, (bool, np.bool_))]
+        if bad:
+            raise ValueError(f"facet {col!r} takes True or False, got {bad[0]!r}")
+        return values
+    known = _distinct(df[col])
+    own: dict[str, set[str]] = {}
+    for v in known:
+        own.setdefault(_norm(v), set()).add(v)
+    labels: dict[str, set[str]] = {}
+    if col == "technology" and "assay" in df.columns:
+        pairs = df[["technology", "assay"]].dropna().drop_duplicates()
+        for tech, assay in pairs.itertuples(index=False):
+            labels.setdefault(_norm(assay), set()).add(str(tech))
+    known_set = set(known)
+    out: list[Any] = []
+    for v in values:
+        s = str(v)
+        hit = {s} if s in known_set else own.get(_norm(s)) or labels.get(_norm(s))
+        if not hit:
+            choices = [*known, *sorted({str(a) for a in df["assay"].dropna()})] if labels else known
+            best = closest_value(s, choices)
+            hint = f"did you mean {best!r}?" if best else f"list the values with facets({col!r})"
+            raise ValueError(f"unknown {col} value {s!r}; {hint}")
+        out.extend(sorted(hit))
+    return out
+
+
+def _derive_source(study_id: pd.Series) -> pd.Series:
+    """The lowercased ``study_id`` prefix before ``":"`` (``"geo:GSM1"`` -> ``"geo"``); null without one."""
+    return study_id.astype("string").str.extract(r"^([^:]+):", expand=False).str.lower().astype("string")
 
 
 def facet_values(df: pd.DataFrame, field: str | None = None) -> list[str]:
@@ -146,6 +209,8 @@ class Catalog:
             schema.validate(df)
         except schema.SchemaError as err:
             raise schema.SchemaError(f"catalog at {url} is invalid: {err}") from err
+        if "study_id" in df.columns and "source" not in df.columns:
+            df["source"] = _derive_source(df["study_id"])
         self._df = df
 
     @classmethod
@@ -205,6 +270,7 @@ class Catalog:
         validation: str | None = "pass",
         license_set: bool | None = None,
         noncommercial: bool | None = None,
+        redistributable: bool | None = None,
         search: str | None = None,
         expressing: str | list[str] | None = None,
         mode: str = "all",
@@ -228,6 +294,10 @@ class Catalog:
             license is known (``license_unknown`` is False), the same set the website counts as "Commercial
             use OK". Rows with an unknown license are excluded because their terms are not known. If True,
             keep only NonCommercial data; ``None`` disables.
+        redistributable
+            If True, keep only data whose license allows redistribution: ``license_redistributable`` is True
+            and the license is known (``license_unknown`` is False). If False, keep the rest, which includes
+            every row with an unknown license. ``None`` disables.
         search
             Free text, as in :meth:`search`; the result is intersected with the other filters and
             carries the ``matched`` facet values. With ``validation=None`` (or ``"all"``), ``search``
@@ -243,6 +313,16 @@ class Catalog:
         **facets
             Facet column -> value (equality) or list/tuple/set of values (isin). ``license`` and
             ``license_noncommercial`` are facets, so you can also filter by exact license id.
+            String facets compare a value against that column of the whole catalog first. A value that is
+            not there resolves through aliases: case, spaces, hyphens and underscores are ignored, and a
+            ``technology`` value may be an ``assay`` display value (``technology="10x Xenium"`` keeps
+            ``"Xenium"``). A value that still does not resolve raises ``ValueError`` with a "did you mean"
+            hint. A known value that matches nothing after the other filters gives an empty cohort.
+            ``hne_image`` and ``if_image`` take True or False. Null means unknown and matches neither.
+            ``source`` is derived on load as the lowercased ``study_id`` prefix before ``":"``; rows
+            without a ``study_id`` have a null source. In the 2026-10-28 catalog (6087 rows) it is
+            ``geo`` 4113, ``hest`` 1070, ``10x`` 175, ``abc`` 115, ``bia`` 4, ``metaspace`` 3,
+            ``bruker`` 3, ``doi`` 2, ``figshare`` 2, and null 600.
             ``<col>__gte`` / ``__gt`` / ``__lte`` / ``__lt`` apply a numeric range on a column in
             ``RANGE_COLUMNS`` (e.g. ``n_obs__gte=50_000``); missing values never match.
 
@@ -250,6 +330,7 @@ class Catalog:
         ------
         ValueError
             If a keyword is not a facet or range column, a facet column is absent from the loaded catalog,
+            a facet value is not in the catalog and has no alias, a boolean facet gets a non-bool value,
             a range value is not numeric, or ``min_fraction`` is given without ``expressing``.
         """
         if mode not in ("all", "any"):
@@ -276,10 +357,16 @@ class Catalog:
             mask &= df["license_noncommercial"].fillna(False) == noncommercial
         if noncommercial is False and "license_unknown" in df.columns:
             mask &= df["license_unknown"].fillna(True) == False  # noqa: E712
+        if redistributable is not None and "license_redistributable" in df.columns:
+            ok = df["license_redistributable"].fillna(False).astype(bool)
+            if "license_unknown" in df.columns:
+                ok &= df["license_unknown"].fillna(True) == False  # noqa: E712
+            mask &= ok if redistributable else ~ok
         for col, val in equality.items():
             if col not in df.columns:
                 raise ValueError(f"facet column {col!r} is not present in this catalog (columns: {list(df.columns)})")
-            mask &= _facet_isin(df[col], list(val) if isinstance(val, (list, tuple, set)) else [val])
+            values = resolve_facet_values(df, col, list(val) if isinstance(val, (list, tuple, set)) else [val])
+            mask &= _facet_isin(df[col], values)
         for col, op, val in ranges:
             if isinstance(val, (list, tuple, set)):
                 raise ValueError(f"range value for {col}__{op} must be a scalar number, got {val!r}")
@@ -301,6 +388,7 @@ class Catalog:
             "validation": validation,
             "license_set": license_set,
             "noncommercial": noncommercial,
+            "redistributable": redistributable,
             "search": search,
             "expressing": expressing,
             "mode": mode if expressing is not None else None,
@@ -321,7 +409,8 @@ class Catalog:
         tokens = re.findall(r"\w+", text.lower())
         matched: dict[str, list[str]] = {}
         for col in schema.FACETS:
-            if col == "doi" or col not in self._df.columns:  # DOIs tokenize to "10" etc.
+            # DOIs tokenize to "10" etc.; source repeats study_id; booleans hold no searchable text.
+            if col in ("doi", "source") or _is_bool_facet(col) or col not in self._df.columns:
                 continue
             values = _distinct(self._df[col])
             hits = [v for v in values if any(_token_matches(t, v) for t in tokens)]

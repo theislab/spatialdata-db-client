@@ -109,7 +109,7 @@ This route needs `pip install lamindb` and network access to the Lamin database.
 ## Words used on both sides
 
 technology and assay
-: The "Technology" label and filter on the website show the catalog's `assay` column, such as "Vizgen MERSCOPE" or "10x Xenium", so to match a website filter use `Catalog().query(assay="Vizgen MERSCOPE")`. The `technology` column holds a short platform id, such as `Merscope` or `Xenium`, and `Catalog().query(technology="Merscope")` selects by it. For most platforms both columns select the same datasets.
+: The "Technology" label and filter on the website show the catalog's `assay` column, such as "Vizgen MERSCOPE" or "10x Xenium", so to match a website filter use `Catalog().query(assay="Vizgen MERSCOPE")`. The `technology` column holds a short platform id, such as `Merscope` or `Xenium`, and `Catalog().query(technology="Merscope")` selects by it. For most platforms both columns select the same datasets. `technology` also accepts the website label, so `Catalog().query(technology="10x Xenium")` selects the `Xenium` datasets.
 
 uid, stem and slug
 : The uid is the full 20-character id of a dataset version. The stem is its first 16 characters, which Lamin uses for the latest version. The slug is the id of a collection, and the last part of its URL.

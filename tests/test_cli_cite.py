@@ -43,7 +43,7 @@ def test_cite_search(paths, tmp_path):
 
 def test_cite_empty_cohort(paths, tmp_path):
     out = tmp_path / "out.bib"
-    r = _cite(paths, out, "--organism", "nosuch")
+    r = _cite(paths, out, "--organism", "mouse", "--tissue", "lung")
     assert r.exit_code != 0
     assert "no datasets matched" in r.output
     assert not out.exists()
