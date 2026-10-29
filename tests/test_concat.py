@@ -404,9 +404,12 @@ def test_cohort_to_anndata_passes_spatial(tmp_path):
 
 
 @pytest.mark.network
-@pytest.mark.parametrize(("uid", "n_obs"), [("rdngUwLr6XlVEmpD0000", 16324), ("r3rkbHVtKnv9hVKq0000", 5505)])
-def test_spatial_real_allen_tables_get_centroids(uid, n_obs):
-    """Allen MERSCOPE and MERFISH tables store no obsm["spatial"]; their cell_circles shapes hold the cells."""
+@pytest.mark.parametrize(
+    ("uid", "n_obs"),
+    [("rdngUwLr6XlVEmpD0000", 16324), ("r3rkbHVtKnv9hVKq0000", 5505), ("wfVFQEPZXA65gc8S0000", 48944)],
+)
+def test_spatial_real_tables_get_centroids(uid, n_obs):
+    """Allen MERSCOPE/MERFISH (cell_circles) and Bruker CosMx (cells_polygons) tables store no obsm["spatial"]."""
     from sddb import Catalog
 
     cohort = Catalog().cohort(uids=[uid])
