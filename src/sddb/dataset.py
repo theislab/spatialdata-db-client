@@ -22,12 +22,16 @@ _VITESSCE = "https://vitessce.io/?url="
 
 @dataclass(frozen=True)
 class Source:
-    """Where a SpatialDataCohort came from: the catalog url, cache dir and version (for sidecars/manifests)."""
+    """Where a SpatialDataCohort came from: the catalog url, cache dir, version and file hash (for sidecars/manifests).
+
+    ``sha256`` is ``"sha256:<hex>"`` of the catalog parquet the cohort was built from, or None if unknown.
+    """
 
     url: str | None = None
     cache_dir: str | Path | None = None
     version: str | None = None
     refresh: bool = False
+    sha256: str | None = None
 
 
 _ATTRS = (

@@ -57,6 +57,15 @@ def catalog_cache_path(url: str, *, cache_dir: str | Path | None = None) -> Path
     return folder / f"{digest}-{name}"
 
 
+def _file_sha256(path: str | Path) -> str:
+    """``"sha256:<hex>"`` of a file's bytes, read in 1 MB chunks."""
+    h = hashlib.sha256()
+    with Path(path).open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return "sha256:" + h.hexdigest()
+
+
 def _age(path: Path) -> str:
     seconds = max(0.0, time.time() - path.stat().st_mtime)
     return f"{seconds / 3600:.1f} h" if seconds >= 3600 else f"{seconds / 60:.1f} min"
@@ -103,7 +112,9 @@ def _http_fetch(url: str, dest: Path, etag_file: Path, *, refresh: bool) -> None
             raise
 
 
-def fetch_catalog(url: str, *, cache_dir: str | Path | None = None, refresh: bool = False) -> Path:
+def fetch_catalog(
+    url: str, *, cache_dir: str | Path | None = None, refresh: bool = False, fallback: bool = True
+) -> Path:
     """Fetch a catalog parquet from ``url`` into the cache and return the local path.
 
     HTTP(S): conditional GET using a stored ETag/Last-Modified; if the remote is unreachable and a
@@ -119,6 +130,8 @@ def fetch_catalog(url: str, *, cache_dir: str | Path | None = None, refresh: boo
         Cache directory override.
     refresh
         Re-download regardless of the cached copy.
+    fallback
+        If False, a fetch error is raised as it is instead of returning the cached copy.
 
     Returns
     -------
@@ -141,6 +154,8 @@ def fetch_catalog(url: str, *, cache_dir: str | Path | None = None, refresh: boo
         else:
             _http_fetch(url, dest, etag_file, refresh=refresh)
     except (OSError, urllib.error.URLError) as err:
+        if not fallback:
+            raise
         if dest.exists():
             warnings.warn(
                 f"could not reach {url} ({err}); using cached catalog that is {_age(dest)} old",

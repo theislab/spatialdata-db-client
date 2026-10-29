@@ -133,21 +133,43 @@ class SpatialDataCohort(Sequence[Dataset]):
         """Rebuild a cohort pinned to exactly the manifest's members (offline — no catalog re-query).
 
         If ``catalog`` is given, warn once about any members a newer version supersedes (see
-        :meth:`check_updates`).
+        :meth:`check_updates`). If that catalog has the manifest's url and its sha256 differs from the
+        recorded one, raise ``CatalogChangedError`` (a dated release was modified after the freeze) or, for
+        ``catalog-latest``, warn. Without ``catalog`` nothing is fetched or hashed; :meth:`verify` does the
+        network check.
         """
+        from sddb.manifest import _check_catalog_sha
+
         coh = cls(m.members, source=m.source, filter=m.filter)
         if catalog is not None:
+            cur = catalog._source()
+            if cur.url == m.source.url and cur.sha256 and m.source.sha256:
+                _check_catalog_sha(m.source.url, m.source.sha256, cur.sha256)
             coh.check_updates(catalog, warn=True)
         return coh
 
     def verify(self, *, workers: int = 8) -> None:
-        """Liveness check: raise ``CohortDriftError`` if any pinned store no longer resolves.
+        """Check the source catalog is unchanged and every pinned store still resolves.
 
-        A pinned version may stop resolving when a dataset is republished; this detects that. Not called by
-        :meth:`download`, which runs its own inline liveness loop; not run by cheap ops.
+        If the cohort recorded its catalog's sha256 (cohorts from a ``Catalog``, manifests written since
+        this field was added), the catalog is fetched again from its url and hashed first. A dated release whose
+        bytes changed raises ``CatalogChangedError``; a changed ``catalog-latest`` only warns. If the url cannot be
+        fetched, raise ``CatalogUnavailableError``: a cached copy is never used in its place. Then raise
+        ``CohortDriftError`` if any pinned store no longer resolves: a pinned version may stop resolving when a
+        dataset is republished. Not called by :meth:`download`, which runs its own inline liveness loop; not
+        run by cheap ops.
         """
-        from sddb.manifest import CohortDriftError
+        from sddb._cache import _file_sha256, fetch_catalog
+        from sddb.manifest import CatalogUnavailableError, CohortDriftError, _check_catalog_sha
 
+        src = self._source
+        if src.sha256 and src.url:
+            try:
+                path = fetch_catalog(src.url, cache_dir=src.cache_dir, fallback=False)
+            except OSError as err:  # includes URLError/HTTPError and a missing local file
+                raise CatalogUnavailableError(src.url, f"{type(err).__name__}: {err}") from err
+            current = _file_sha256(path)
+            _check_catalog_sha(src.url, src.sha256, current)
         pairs = [(str(r.uid), str(r.zarr_url)) for r in self._df.itertuples(index=False)]
 
         def resolves(uid: str, url: str) -> tuple[str, bool]:

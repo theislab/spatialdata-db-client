@@ -82,3 +82,41 @@ def test_set_filter_serializes_and_hash_is_stable(tmp_path):
     man = SpatialDataCohort(df, source=Source("c.parquet")).filter(tissue={"b", "a"}).freeze()
     assert man.filter == {"tissue": ["a", "b"]}
     man.write(tmp_path / "s.json")
+
+
+def test_manifest_roundtrips_catalog_sha256(tmp_path):
+    m = _members(3)
+    man = CohortManifest(
+        SCHEMA_VERSION, "2026-10-15T00:00:00+00:00", Source("cat.parquet", sha256="sha256:ab"), {}, "h", m
+    )
+    back = CohortManifest.load(man.write(tmp_path / "c.json"))
+    assert back.source.sha256 == "sha256:ab"
+
+
+def test_old_manifest_without_sha256_loads_with_none(tmp_path):
+    import json
+
+    p = tmp_path / "old.json"
+    p.write_text(
+        json.dumps(
+            {
+                "schema_version": "2",
+                "created_at": "2026-10-15T00:00:00+00:00",
+                "source": {"url": "cat.parquet", "version": "v1"},
+                "filter": {},
+                "hash": "h",
+                "n_members": 0,
+                "members_columns": ["uid", "zarr_url"],
+                "members": [],
+            }
+        )
+    )
+    assert CohortManifest.load(p).source.sha256 is None
+
+
+def test_sha256_does_not_change_cohort_hash():
+    from sddb.cohort import SpatialDataCohort
+
+    df = _members(3)
+    plain = SpatialDataCohort(df, source=Source("c.parquet")).freeze().hash
+    assert SpatialDataCohort(df, source=Source("c.parquet", sha256="sha256:ab")).freeze().hash == plain

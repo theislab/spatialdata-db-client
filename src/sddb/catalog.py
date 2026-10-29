@@ -15,7 +15,7 @@ import pyarrow.parquet as pq
 from rapidfuzz import fuzz
 
 from sddb import _catalog_schema as schema
-from sddb._cache import _local_path, fetch_catalog
+from sddb._cache import _file_sha256, _local_path, fetch_catalog
 from sddb.cohort import SpatialDataCohort
 from sddb.dataset import Dataset, Source
 
@@ -131,6 +131,7 @@ class Catalog:
         self._genes: GeneIndex | None = None
         self._features: FeatureIndex | None = None
         self._path = fetch_catalog(url, cache_dir=cache_dir, refresh=refresh)
+        self._sha256 = _file_sha256(self._path)  # recorded in every cohort's Source, checked by verify()
         try:
             df = pd.read_parquet(self._path)
         except Exception as err:
@@ -168,7 +169,7 @@ class Catalog:
         return value.decode() if value else None
 
     def _source(self) -> Source:
-        return Source(self.url, self._cache_dir, self.version, self._refresh)
+        return Source(self.url, self._cache_dir, self.version, self._refresh, self._sha256)
 
     @property
     def genes(self) -> GeneIndex:

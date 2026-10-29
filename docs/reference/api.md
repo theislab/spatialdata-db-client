@@ -14,6 +14,8 @@
    sddb.CohortManifest
    sddb.SplitManifest
    sddb.CohortDriftError
+   sddb.CatalogChangedError
+   sddb.CatalogUnavailableError
    sddb.ManifestVersionMismatch
    sddb.open_sdata
    sddb.resolve

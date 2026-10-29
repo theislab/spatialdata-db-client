@@ -52,6 +52,8 @@ A dataset uid pins a specific version, but the DB does not yet retain old store 
 is republished its store is replaced. `freeze()` records exactly which versions you used;
 `verify()` raises `CohortDriftError` when a pinned version no longer resolves, and `check_updates()`
 lists members a newer version supersedes. `download(..., pin_versions=True)` keeps your own copy.
+`freeze()` also records the sha256 of the catalog file, and `verify()` raises `CatalogChangedError` when a
+dated release was modified after the freeze (for `catalog-latest` it only warns).
 
 ```python
 cohort = cat.query(technology="Visium")
