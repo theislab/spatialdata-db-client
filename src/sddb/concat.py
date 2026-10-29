@@ -134,7 +134,9 @@ def concat_tables(
         ``gene_name``, ``feature_name``. Features without a key (e.g. control probes for ``"ensembl"``)
         are dropped and repeated keys keep the first, with one warning summarizing both. The old name is
         kept in ``var["original_var_name"]``, and ``var`` holds the first member's annotation of each
-        gene. ``"var"`` is added to ``elements`` if missing. ``None`` leaves var_names unchanged.
+        gene. ``"var"`` is added to ``elements`` if missing. ``None`` leaves var_names unchanged, except
+        that a member whose var_names repeat gets them made unique (the second copy of ``A`` becomes
+        ``A-1``), with one warning naming those members.
     max_workers
         Number of members read concurrently.
 
@@ -142,7 +144,8 @@ def concat_tables(
     -----
     UserWarning
         If two or more members share fewer than half the genes of the smallest one, which usually means
-        their var_names hold different id types; also when ``gene_key`` drops or dedupes features.
+        their var_names hold different id types; also when ``gene_key`` drops or dedupes features, and
+        when ``gene_key=None`` makes a member's repeated var_names unique.
 
     Raises
     ------
@@ -164,6 +167,7 @@ def concat_tables(
     rows = [row for _, row in members.iterrows()]
     dropped: dict[str, str] = {}
     rekeyed: dict[str, tuple[int, int]] = {}  # uid -> (dropped, duplicate) features under gene_key
+    repeated: dict[str, int] = {}  # uid -> repeated var_names made unique (gene_key=None)
 
     def read(row: pd.Series) -> ad.AnnData | None:
         uid = str(row["uid"])
@@ -187,6 +191,9 @@ def concat_tables(
         if gene_key is not None:
             adata, n_drop, n_dup = _harmonize_var(adata, gene_key, uid)
             rekeyed[uid] = (n_drop, n_dup)
+        elif n_rep := int(adata.var_names.duplicated().sum()):
+            repeated[uid] = n_rep  # ad.concat(join="outer") cannot reindex a non-unique var index
+            adata.var_names_make_unique()
         return adata
 
     with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
@@ -200,6 +207,13 @@ def concat_tables(
         warnings.warn(
             f"gene_key={gene_key!r}: dropped {n_drop} features without {what} and {n_dup} duplicates "
             f"across {sum(1 for c in rekeyed.values() if any(c))} members",
+            UserWarning,
+            stacklevel=2,
+        )
+    if repeated:
+        warnings.warn(
+            f"made {sum(repeated.values())} repeated var_names unique with a '-1' style suffix in members "
+            f"{sorted(repeated)}; pass gene_key='ensembl' or 'symbol' to merge them instead",
             UserWarning,
             stacklevel=2,
         )

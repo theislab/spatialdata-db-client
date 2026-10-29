@@ -193,6 +193,25 @@ def test_gene_key_none_keeps_var_names_and_warns_low_overlap(tmp_path):
     )
 
 
+def test_gene_key_none_makes_repeated_var_names_unique(tmp_path):
+    var = pd.DataFrame(index=["ENSG00000186092", "ENSG00000187634", "ENSG00000186092"])
+    members = pd.DataFrame(
+        {
+            "uid": ["rep", "tenx"],
+            "zarr_url": [_var_store(tmp_path / "r.zarr", var), _var_store(tmp_path / "t.zarr", _TENX_VAR)],
+        }
+    )
+    with pytest.warns(UserWarning, match="repeated var_names") as record:
+        adata = concat_tables(members)
+    assert {"ENSG00000186092", "ENSG00000186092-1", "ENSG00000187634"} <= set(adata.var_names)
+    assert set(_TENX_VAR.index) <= set(adata.var_names)  # members without repeats are unchanged
+    (msg,) = [str(w.message) for w in record if "repeated" in str(w.message)]
+    assert msg == (
+        "made 1 repeated var_names unique with a '-1' style suffix in members ['rep']; "
+        "pass gene_key='ensembl' or 'symbol' to merge them instead"
+    )
+
+
 def test_gene_key_ensembl_aligns_members(tmp_path):
     with pytest.warns(UserWarning, match="gene_key='ensembl'") as record:
         adata = concat_tables(_mixed(tmp_path), gene_key="ensembl")
@@ -256,13 +275,15 @@ def test_gene_key_real_10x_and_hest_pair():
     from sddb.concat import _read_table, _table_name
 
     cohort = Catalog().cohort(uids=["qEP9pd4LlyKeufe20000", "USx288NLowiqKbV30000"])
-    # as stored (gene_key=None); read var directly, since this HEST member repeats 2 var_names and
-    # ad.concat refuses a non-unique var index
+    # as stored (gene_key=None); the HEST member repeats 2 var_names, which to_anndata makes unique
     stored = [
         set(_read_table(f"{str(r['zarr_url']).rstrip('/')}/tables/{_table_name(r)}", ("var",)).var_names)
         for _, r in cohort.members.iterrows()
     ]
     shared = {None: len(stored[0] & stored[1])}
+    with pytest.warns(UserWarning, match=r"made 2 repeated var_names unique .*'USx288NLowiqKbV30000'"):
+        as_stored = cohort.to_anndata(elements=("X", "var", "obs"))  # used to raise InvalidIndexError
+    assert as_stored.n_vars == 19850 + 17943  # nothing shared, the 2 repeats kept as "-1" copies
     for key in ("ensembl", "symbol"):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
