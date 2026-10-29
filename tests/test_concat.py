@@ -296,3 +296,139 @@ def test_gene_key_real_10x_and_hest_pair():
     assert shared[None] == 0
     assert shared["ensembl"] > 0
     assert shared["symbol"] > 0
+
+
+# spatial: tables that annotate a shapes region, with instance ids in a different order than the shapes
+_XY = np.array([[1.0, 2.0], [10.0, 20.0], [100.0, 200.0]])
+
+
+def _shapes(kind):
+    import geopandas as gpd
+    from shapely.geometry import box
+    from spatialdata.models import ShapesModel
+
+    ids = pd.Index(["c0", "c1", "c2"])
+    if kind == "circles":
+        gdf = gpd.GeoDataFrame({"radius": [1.0] * 3}, geometry=gpd.points_from_xy(*_XY.T), index=ids)
+    else:  # squares of side 2 centred on _XY
+        gdf = gpd.GeoDataFrame(geometry=[box(x - 1, y - 1, x + 1, y + 1) for x, y in _XY], index=ids)
+    return ShapesModel.parse(gdf)
+
+
+def _region_store(path, kind="circles", obsm=None, region="cells"):
+    from spatialdata.models import TableModel
+
+    obs = pd.DataFrame({"cell_id": ["c2", "c0", "c1"], "region": pd.Categorical(["cells"] * 3)})
+    obs.index = [f"row{i}" for i in range(3)]
+    table = TableModel.parse(
+        ad.AnnData(X=np.ones((3, 2), "float32"), obs=obs, obsm=obsm or {}),
+        region="cells",
+        region_key="region",
+        instance_key="cell_id",
+    )
+    shapes = {region: _shapes(kind)} if region else {}
+    SpatialData(shapes=shapes, tables={"table": table}).write(path)
+    return str(path)
+
+
+def _one(path, uid="m"):
+    return pd.DataFrame({"uid": [uid], "zarr_url": [path]})
+
+
+@pytest.mark.parametrize("kind", ["circles", "polygons"])
+def test_spatial_auto_uses_centroids_matched_by_instance_key(tmp_path, kind):
+    adata = concat_tables(_one(_region_store(tmp_path / "s.zarr", kind)))
+    np.testing.assert_allclose(adata.obsm["spatial"], _XY[[2, 0, 1]])  # obs order c2, c0, c1
+
+
+def test_spatial_centroids_without_obsm_element(tmp_path):
+    adata = concat_tables(_one(_region_store(tmp_path / "s.zarr")), elements=("X", "var"), spatial="centroids")
+    np.testing.assert_allclose(adata.obsm["spatial"], _XY[[2, 0, 1]])
+
+
+def test_spatial_auto_keeps_stored_obsm(tmp_path):
+    stored = np.array([[5.0, 6.0], [7.0, 8.0], [9.0, 0.0]])
+    path = _region_store(tmp_path / "s.zarr", obsm={"spatial": stored})
+    np.testing.assert_allclose(concat_tables(_one(path)).obsm["spatial"], stored)
+    np.testing.assert_allclose(concat_tables(_one(path), spatial="obsm").obsm["spatial"], stored)
+    np.testing.assert_allclose(concat_tables(_one(path), spatial="centroids").obsm["spatial"], _XY[[2, 0, 1]])
+
+
+def test_spatial_auto_replaces_stored_obsm_with_nan_rows(tmp_path):
+    stored = np.array([[5.0, 6.0], [np.nan, np.nan], [9.0, 0.0]])
+    path = _region_store(tmp_path / "s.zarr", obsm={"spatial": stored})
+    np.testing.assert_allclose(concat_tables(_one(path)).obsm["spatial"], _XY[[2, 0, 1]])
+
+
+def test_spatial_obsm_leaves_members_without_coordinates(tmp_path):
+    members = pd.concat([_one(_region_store(tmp_path / "s.zarr"), "s"), _one(_store(tmp_path / "t.zarr", 2), "t")])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        adata = concat_tables(members, spatial="obsm")
+    assert "spatial" not in adata.obsm
+
+
+def test_spatial_warns_once_for_members_without_source(tmp_path):
+    members = pd.concat(
+        [
+            _one(_region_store(tmp_path / "s.zarr"), "s"),
+            _one(_store(tmp_path / "t.zarr", 2), "t"),  # no region at all
+            _one(_region_store(tmp_path / "n.zarr", region=None), "n"),  # region element absent
+        ]
+    )
+    with pytest.warns(UserWarning, match="spatial='auto'") as record:
+        adata = concat_tables(members)
+    (msg,) = [str(w.message) for w in record if "spatial=" in str(w.message)]
+    assert msg == (
+        "spatial='auto': no usable coordinates for 2 members: "
+        "'n' (no obsm['spatial'] and region 'cells' is not in the store); "
+        "'t' (no obsm['spatial'] and the table annotates no region)"
+    )
+    xy = adata.obsm["spatial"]
+    by_uid = adata.obs["uid"].astype(str).to_numpy()
+    np.testing.assert_allclose(xy[by_uid == "s"], _XY[[2, 0, 1]])
+    assert np.isnan(xy[by_uid != "s"]).all()
+
+
+def test_spatial_rejects_unknown_mode(tmp_path):
+    with pytest.raises(ValueError, match="spatial must be"):
+        concat_tables(_one(_store(tmp_path / "t.zarr", 2)), spatial="xy")
+
+
+def test_cohort_to_anndata_passes_spatial(tmp_path):
+    from sddb.cohort import SpatialDataCohort
+
+    path = _region_store(tmp_path / "s.zarr", obsm={"spatial": np.zeros((3, 2))})
+    adata = SpatialDataCohort(_one(path)).to_anndata(spatial="centroids")
+    np.testing.assert_allclose(adata.obsm["spatial"], _XY[[2, 0, 1]])
+
+
+@pytest.mark.network
+@pytest.mark.parametrize(("uid", "n_obs"), [("rdngUwLr6XlVEmpD0000", 16324), ("r3rkbHVtKnv9hVKq0000", 5505)])
+def test_spatial_real_allen_tables_get_centroids(uid, n_obs):
+    """Allen MERSCOPE and MERFISH tables store no obsm["spatial"]; their cell_circles shapes hold the cells."""
+    from sddb import Catalog
+
+    cohort = Catalog().cohort(uids=[uid])
+    assert "spatial" not in cohort.to_anndata(elements=("obs", "obsm"), spatial="obsm").obsm
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        xy = cohort.to_anndata(elements=("obs",)).obsm["spatial"]
+    assert xy.shape == (n_obs, 2)
+    assert not np.isnan(xy).any()
+    print(
+        f"{uid}: {len(xy)} rows with coordinates, x {xy[:, 0].min():.1f}..{xy[:, 0].max():.1f}, "
+        f"y {xy[:, 1].min():.1f}..{xy[:, 1].max():.1f}"
+    )
+
+
+def test_spatial_labels_region_counts_as_no_source(tmp_path):
+    from spatialdata.models import Labels2DModel, TableModel
+
+    obs = pd.DataFrame({"cell_id": [1, 2], "region": pd.Categorical(["seg"] * 2)}, index=["a", "b"])
+    table = TableModel.parse(ad.AnnData(X=np.ones((2, 1), "float32"), obs=obs), "seg", "region", "cell_id")
+    labels = Labels2DModel.parse(np.array([[0, 1], [2, 2]], dtype="uint8"), dims=("y", "x"))
+    SpatialData(labels={"seg": labels}, tables={"table": table}).write(tmp_path / "l.zarr")
+    with pytest.warns(UserWarning, match=r"'l' \(no obsm\['spatial'\] and region 'seg' is a labels element\)"):
+        adata = concat_tables(_one(str(tmp_path / "l.zarr"), "l"))
+    assert "spatial" not in adata.obsm
