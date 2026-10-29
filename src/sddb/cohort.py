@@ -317,6 +317,7 @@ class SpatialDataCohort(Sequence[Dataset]):
         elements: Sequence[str] | None = None,
         adapter: TableAdapter | None = None,
         gene_key: Literal["ensembl", "symbol"] | None = None,
+        spatial: Literal["auto", "obsm", "centroids"] = "auto",
         max_workers: int = 8,
     ) -> AnnData:
         """Concatenate each member's table into one AnnData (outer join, obs[uid]+obs[study_id]).
@@ -326,8 +327,12 @@ class SpatialDataCohort(Sequence[Dataset]):
         Features without that key are dropped with a warning; the old name stays in ``var["original_var_name"]``.
         ``None`` (default) joins on the stored var_names and warns when members share under half their genes.
 
-        See ``sddb.concat.concat_tables`` for ``obs_columns``, ``elements``, ``adapter``, ``gene_key`` and
-        ``max_workers``.
+        ``spatial="auto"`` (default) fills ``obsm["spatial"]`` from the centroids of the shapes the table
+        annotates when a member stores no coordinates (e.g. Allen MERSCOPE and MERFISH tables), matched by
+        ``instance_key``. ``"centroids"`` always uses the centroids, ``"obsm"`` keeps ``obsm`` as stored.
+
+        See ``sddb.concat.concat_tables`` for ``obs_columns``, ``elements``, ``adapter``, ``gene_key``,
+        ``spatial`` and ``max_workers``.
         """
         from sddb.concat import concat_tables
 
@@ -338,6 +343,7 @@ class SpatialDataCohort(Sequence[Dataset]):
             elements=elements,
             adapter=adapter,
             gene_key=gene_key,
+            spatial=spatial,
             max_workers=max_workers,
         )
 
