@@ -44,8 +44,28 @@ Each dataset keeps the license of its source. The catalog records it in these co
 cat = Catalog()
 cat.query(license_set=True)                       # keep only datasets whose license is known
 cat.query(noncommercial=False)                    # only datasets cleared for commercial use
-cat.query(license_set=True, noncommercial=False)  # both
 cat.query(license="CC-BY-4.0")                    # one exact license id
 ```
 
-`noncommercial=True` keeps only NonCommercial data. Check the license of your final selection before you redistribute or publish derived data.
+`noncommercial=False` keeps a dataset only when its license is known and does not forbid commercial use. It returns the same set as "Commercial use OK" on the website. Datasets with an unknown license are left out, because their terms are not known. This changed in this release; before, `noncommercial=False` also returned unknown-license datasets. `noncommercial=True` keeps only NonCommercial data, and the default `None` applies no license filter. `license_set=True` on its own keeps every known license, including NonCommercial ones.
+
+### License glossary
+
+These are the `license` values in the catalog of 2026-10-28 (6087 datasets):
+
+| `license` | Datasets | Commercial use | Meaning |
+| --- | ---: | --- | --- |
+| `ncbi-geo-policy` | 3530 | allowed | Data deposited in GEO. GEO data: NCBI places no restrictions on use; submitters may hold copyright or other rights. |
+| `CC-BY-NC-SA-4.0` | 1072 | no | Creative Commons Attribution-NonCommercial-ShareAlike 4.0. Credit the authors, do not use commercially, and share adaptations under the same license. |
+| `unknown` | 1031 | not cleared | No license could be determined. `license_unknown` is true. |
+| `CC-BY-4.0` | 333 | allowed | Creative Commons Attribution 4.0. Credit the authors. |
+| `allen-institute-tou` | 115 | no | Allen Institute terms of use. These are noncommercial, so `license_noncommercial` is true. |
+| `CC0-1.0` | 6 | allowed | Creative Commons public domain dedication. No conditions. |
+
+The three boolean columns mean:
+
+- `license_noncommercial` is true when the license forbids commercial use (`CC-BY-NC-SA-4.0` and `allen-institute-tou`).
+- `license_redistributable` is true when the data may be redistributed. It is false only for `unknown`.
+- `license_unknown` is true when no license could be determined. Those rows have `license` set to `unknown` and `license_noncommercial` false, so check `license_unknown` before you treat the latter as permission.
+
+Check the license of your final selection before you redistribute or publish derived data.

@@ -47,6 +47,16 @@ def test_query_by_license_and_noncommercial(cat):
     assert {d.uid for d in cat.query(noncommercial=True)} == {"uid0002"}
 
 
+def test_query_commercial_use_requires_known_license(cat):
+    # uid0004 has an unknown license (license_noncommercial False, license_unknown True): not cleared
+    comm = {d.uid for d in cat.query(validation=None, noncommercial=False)}
+    assert comm == {"uid0001", "uid0003", "uid0005"}
+    assert comm == {d.uid for d in cat.query(validation=None, noncommercial=False, license_set=True)}
+    # None and True are unchanged: unknown licenses stay in None, and are not NonCommercial
+    assert "uid0004" in {d.uid for d in cat.query(validation=None)}
+    assert "uid0004" not in {d.uid for d in cat.query(validation=None, noncommercial=True)}
+
+
 def test_query_tuple_and_set_values(cat):
     assert len(cat.query(organism=("human", "mouse"))) == 4
     assert len(cat.query(organism={"human"})) == 3

@@ -224,8 +224,10 @@ class Catalog:
         license_set
             If True, keep only rows with a known license (``license_unknown`` is False); False behaves like None.
         noncommercial
-            If False, keep only commercial-ok data (``license_noncommercial`` is False) — the common
-            "exclude NonCommercial" filter; if True, keep only NonCommercial data; ``None`` disables.
+            If False, keep only data cleared for commercial use: ``license_noncommercial`` is False and the
+            license is known (``license_unknown`` is False), the same set the website counts as "Commercial
+            use OK". Rows with an unknown license are excluded because their terms are not known. If True,
+            keep only NonCommercial data; ``None`` disables.
         search
             Free text, as in :meth:`search`; the result is intersected with the other filters and
             carries the ``matched`` facet values. With ``validation=None`` (or ``"all"``), ``search``
@@ -272,6 +274,8 @@ class Catalog:
             mask &= df["license_unknown"].fillna(True) == False  # noqa: E712
         if noncommercial is not None and "license_noncommercial" in df.columns:
             mask &= df["license_noncommercial"].fillna(False) == noncommercial
+        if noncommercial is False and "license_unknown" in df.columns:
+            mask &= df["license_unknown"].fillna(True) == False  # noqa: E712
         for col, val in equality.items():
             if col not in df.columns:
                 raise ValueError(f"facet column {col!r} is not present in this catalog (columns: {list(df.columns)})")
