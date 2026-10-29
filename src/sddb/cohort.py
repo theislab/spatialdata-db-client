@@ -9,7 +9,7 @@ import warnings
 from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import pandas as pd
 
@@ -294,11 +294,18 @@ class SpatialDataCohort(Sequence[Dataset]):
         obs_columns: Sequence[str] = (),
         elements: Sequence[str] | None = None,
         adapter: TableAdapter | None = None,
+        gene_key: Literal["ensembl", "symbol"] | None = None,
         max_workers: int = 8,
     ) -> AnnData:
         """Concatenate each member's table into one AnnData (outer join, obs[uid]+obs[study_id]).
 
-        See ``sddb.concat.concat_tables`` for ``obs_columns``, ``elements``, ``adapter`` and ``max_workers``.
+        ``gene_key="ensembl"`` or ``"symbol"`` re-keys every member's ``var_names`` to that id type before the
+        join, so members whose sources key genes differently (HEST by Ensembl id, 10x by symbol) share columns.
+        Features without that key are dropped with a warning; the old name stays in ``var["original_var_name"]``.
+        ``None`` (default) joins on the stored var_names and warns when members share under half their genes.
+
+        See ``sddb.concat.concat_tables`` for ``obs_columns``, ``elements``, ``adapter``, ``gene_key`` and
+        ``max_workers``.
         """
         from sddb.concat import concat_tables
 
@@ -308,6 +315,7 @@ class SpatialDataCohort(Sequence[Dataset]):
             obs_columns=obs_columns,
             elements=elements,
             adapter=adapter,
+            gene_key=gene_key,
             max_workers=max_workers,
         )
 
