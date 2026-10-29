@@ -18,7 +18,7 @@ def test_quickstart_api_exists():
     index = (_ROOT / "docs" / "index.md").read_text()
     assert ".to_sdata()" in index
     assert "min(hits, key=lambda ds: ds.size_bytes)" in index
-    assert "pip install git+https://github.com/theislab/spatialdata-db-client" in index
+    assert 'pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.1"' in index
 
 
 def test_citation_cff_is_valid():
