@@ -12,13 +12,14 @@ from sddb.catalog import Catalog
 from sddb.cohort import SpatialDataCohort
 from sddb.dataset import Dataset
 from sddb.geometry import table_centroids
-from sddb.manifest import CohortDriftError, CohortManifest, Manifest, ManifestVersionMismatch
+from sddb.manifest import CatalogChangedError, CohortDriftError, CohortManifest, Manifest, ManifestVersionMismatch
 from sddb.remote import open_sdata
 from sddb.roles import resolve
 from sddb.split import SplitManifest
 
 __all__ = [
     "Catalog",
+    "CatalogChangedError",
     "CohortDriftError",
     "CohortManifest",
     "Dataset",

@@ -57,6 +57,15 @@ def catalog_cache_path(url: str, *, cache_dir: str | Path | None = None) -> Path
     return folder / f"{digest}-{name}"
 
 
+def _file_sha256(path: str | Path) -> str:
+    """``"sha256:<hex>"`` of a file's bytes, read in 1 MB chunks."""
+    h = hashlib.sha256()
+    with Path(path).open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return "sha256:" + h.hexdigest()
+
+
 def _age(path: Path) -> str:
     seconds = max(0.0, time.time() - path.stat().st_mtime)
     return f"{seconds / 3600:.1f} h" if seconds >= 3600 else f"{seconds / 60:.1f} min"

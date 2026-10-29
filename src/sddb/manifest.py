@@ -1,4 +1,4 @@
-"""Cohort identity record (CohortManifest, cohort_hash, CohortDriftError) and resumable cohort download with a JSON manifest."""
+"""Cohort identity record (CohortManifest, cohort_hash, CohortDriftError, CatalogChangedError) and resumable cohort download with a JSON manifest."""
 
 from __future__ import annotations
 
@@ -48,6 +48,38 @@ class CohortDriftError(RuntimeError):
         super().__init__(f"{len(drifted)} member(s) no longer resolve: {sorted(drifted)}")
 
 
+class CatalogChangedError(RuntimeError):
+    """The pinned catalog's bytes differ from the sha256 recorded when the cohort was frozen."""
+
+    def __init__(self, url: str, expected: str, actual: str) -> None:
+        self.url = url
+        self.expected = expected
+        self.actual = actual
+        super().__init__(
+            f"catalog at {url} was modified after the cohort was frozen: expected {expected}, got {actual}"
+        )
+
+
+def _check_catalog_sha(url: str, expected: str, actual: str) -> None:
+    """Compare a cohort's recorded catalog hash with the current one.
+
+    A mismatch raises :class:`CatalogChangedError` for a pinned catalog (any url but the rolling
+    ``catalog-latest`` one) and only warns for ``catalog-latest``, which is expected to move.
+    """
+    from sddb.catalog import _ROLLING_SUFFIX
+
+    if expected == actual:
+        return
+    if not url.endswith(_ROLLING_SUFFIX):
+        raise CatalogChangedError(url, expected, actual)
+    warnings.warn(
+        f"catalog-latest changed since the cohort was frozen ({expected} -> {actual}); "
+        "pin version= for a reproducible cohort",
+        UserWarning,
+        stacklevel=3,  # user -> verify/from_manifest -> here
+    )
+
+
 @dataclass(frozen=True, eq=False)
 class CohortManifest:
     """Serializable cohort identity: filter, member snapshot (pinned full uids) and a deterministic hash."""
@@ -65,7 +97,7 @@ class CohortManifest:
         head: dict[str, Any] = {
             "schema_version": self.schema_version,
             "created_at": self.created_at,
-            "source": {"url": self.source.url, "version": self.source.version},
+            "source": {"url": self.source.url, "version": self.source.version, "sha256": self.source.sha256},
             "filter": self.filter,
             "hash": self.hash,
             "n_members": len(self.members),
@@ -89,7 +121,8 @@ class CohortManifest:
             members = pd.read_parquet(p.parent / head["members_ref"])
         else:
             members = pd.DataFrame(head["members"], columns=head.get("members_columns"))
-        src = Source(url=head["source"]["url"], version=head["source"]["version"])
+        raw = head["source"]
+        src = Source(url=raw["url"], version=raw["version"], sha256=raw.get("sha256"))  # sha256 absent in old manifests
         return cls(head["schema_version"], head["created_at"], src, head["filter"], head["hash"], members)
 
 
