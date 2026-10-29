@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `to_anndata(gene_key="ensembl")` and `gene_key="symbol"` put every member's genes under one id type before the join. Sources store genes differently (HEST keys them by Ensembl id, 10x by symbol), so the same gene used to land in two columns. Features without that id, such as control probes, are dropped, repeated ids keep the first, and one warning reports how many. The old name stays in `var["original_var_name"]`. The default `gene_key=None` leaves gene names as stored, and `to_anndata` now warns when members share fewer than half the genes of the smallest one.
 - `to_sdata`, `to_list` and `to_dict` accept `elements=` together with `dest=`. Only the named elements are copied to `dest/<uid>.zarr`, and `dest/manifest.json` records the copy with `status="partial"` and its `elements`. A later `download(dest)` fetches the whole store, and `Manifest.refetch` copies a partial entry's elements again. Manifests written before this change still load.
 - Gene and feature lookups (`Catalog().genes`, `Catalog().features`, `sddb-cli genes`, `query --gene` and the MCP `genes`/`features` tools) stream the index in batches and keep only matching rows. They no longer load the whole index into pandas, so a lookup on the 128M-row gene index uses about 0.7 GB of memory instead of more than 40 GB.
 - `Catalog.dataset` accepts the 16-character stem of a uid as well as the full uid; a stem resolves to the latest version.
