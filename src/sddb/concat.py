@@ -8,16 +8,21 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Literal
 
 import anndata as ad
+import fsspec
+import numpy as np
 import pandas as pd
 from anndata.io import read_elem
 
-from sddb.remote import _open_group
+from sddb.remote import _open_group, storage_options
 
 if TYPE_CHECKING:
+    import zarr
+
     from sddb.adapter import TableAdapter
 
 
 GeneKey = Literal["ensembl", "symbol"]
+Spatial = Literal["auto", "obsm", "centroids"]
 
 _ENSEMBL = r"ENS[A-Z]*G\d{11}(\.\d+)?"
 # var columns tried in order when var_names do not already hold the requested key
@@ -94,6 +99,70 @@ def _read_table(url: str, elements: Sequence[str] | None) -> ad.AnnData:
     return ad.AnnData(**{k: read_elem(group[k]) for k in elements if k in group})
 
 
+def _region_centroids(zarr_url: str, root: zarr.Group, region: str) -> pd.DataFrame | str:
+    """``x``/``y`` centroid per instance of a shapes element, in its intrinsic coordinates, or why there is none."""
+    if f"shapes/{region}" not in root:
+        kind = "a labels element" if f"labels/{region}" in root else "not in the store"
+        return f"region {region!r} is {kind}"
+    fs, path = fsspec.core.url_to_fs(zarr_url, **storage_options(zarr_url))
+    path = f"{path.rstrip('/')}/shapes/{region}/shapes.parquet"
+    if not fs.exists(path):  # the pre-parquet (v0.1) shapes layout
+        return f"shapes {region!r} has no shapes.parquet"
+    import geopandas
+
+    cents = geopandas.read_parquet(path, filesystem=fs, columns=["geometry"]).geometry.centroid
+    return pd.DataFrame({"x": cents.x.to_numpy(), "y": cents.y.to_numpy()}, index=cents.index.astype(str))
+
+
+def _obs_column(adata: ad.AnnData, table: zarr.Group, key: str) -> np.ndarray:
+    if key in adata.obs.columns:
+        return adata.obs[key].astype(str).to_numpy()
+    return pd.Series(read_elem(table[f"obs/{key}"])).astype(str).to_numpy()
+
+
+def _fill_spatial(adata: ad.AnnData, zarr_url: str, table_url: str, spatial: Spatial) -> str | None:
+    """Set ``obsm["spatial"]`` per ``spatial``; return why a member has no coordinates, else ``None``."""
+    table = _open_group(table_url)
+    stored = adata.obsm.get("spatial")
+    if stored is None and "obsm/spatial" in table:
+        stored = read_elem(table["obsm/spatial"])
+    if stored is not None:
+        stored = np.asarray(stored, dtype=np.float64)
+        if spatial == "auto" and not np.isnan(stored).any(axis=1).any():
+            adata.obsm["spatial"] = stored
+            return None
+    attrs = read_elem(table["uns/spatialdata_attrs"]) if "uns/spatialdata_attrs" in table else {}
+    region, region_key, instance_key = (attrs.get(k) for k in ("region", "region_key", "instance_key"))
+    reason = None
+    if not region or not instance_key:
+        reason = "the table annotates no region"
+    else:
+        regions = [region] if isinstance(region, str) else list(region)
+        root = _open_group(zarr_url)
+        ids = _obs_column(adata, table, instance_key)
+        row_region = _obs_column(adata, table, region_key) if len(regions) > 1 else np.full(len(ids), regions[0])
+        xy = np.full((adata.n_obs, 2), np.nan)
+        reasons = []
+        for name in regions:
+            cents = _region_centroids(zarr_url, root, name)
+            if isinstance(cents, str):
+                reasons.append(cents)
+                continue
+            rows = row_region == name
+            pos = cents.index.get_indexer(ids[rows])
+            hit = np.flatnonzero(rows)[pos >= 0]
+            xy[hit] = cents.to_numpy()[pos[pos >= 0]]
+        if not np.isnan(xy).all():
+            adata.obsm["spatial"] = xy
+            n_miss = int(np.isnan(xy).any(axis=1).sum())
+            return f"{n_miss} of {adata.n_obs} rows have no matching {instance_key!r}" if n_miss else None
+        reason = "; ".join(reasons) or f"no {instance_key!r} value matches the region"
+    if stored is None:
+        return f"no obsm['spatial'] and {reason}"
+    adata.obsm["spatial"] = stored  # no centroids: keep what is stored
+    return f"{reason}; kept the stored obsm['spatial']" + (", which has NaN rows" if spatial == "auto" else "")
+
+
 def concat_tables(
     members: pd.DataFrame,
     *,
@@ -102,12 +171,14 @@ def concat_tables(
     elements: Sequence[str] | None = None,
     adapter: TableAdapter | None = None,
     gene_key: GeneKey | None = None,
+    spatial: Spatial = "auto",
     max_workers: int = 8,
 ) -> ad.AnnData:
     """Concatenate one table per member into one AnnData (outer join).
 
     ``obs['uid']`` labels the member; ``obs['study_id']`` is added from the members frame (all-NA if
-    the column is absent). Only ``<zarr_url>/tables/<name>`` is opened — images/shapes are untouched.
+    the column is absent). Only ``<zarr_url>/tables/<name>`` is opened, plus the table's shapes region when
+    ``spatial`` needs centroids. Images are never read.
 
     Parameters
     ----------
@@ -137,6 +208,18 @@ def concat_tables(
         gene. ``"var"`` is added to ``elements`` if missing. ``None`` leaves var_names unchanged, except
         that a member whose var_names repeat gets them made unique (the second copy of ``A`` becomes
         ``A-1``), with one warning naming those members.
+    spatial
+        Where ``obsm["spatial"]`` comes from. ``"obsm"`` keeps each table's ``obsm`` as stored, so a member
+        without ``obsm["spatial"]`` gets missing (NaN) coordinates in the joined AnnData. ``"centroids"`` sets
+        it to the centroids of the shapes element the table annotates (``region`` in
+        ``uns["spatialdata_attrs"]``), in that element's intrinsic coordinates, which is the space a stored
+        ``obsm["spatial"]`` uses. Rows are matched to shapes by the table's ``instance_key``, never by position.
+        Points (e.g. cell circles) give their centre and polygons their centroid. Only that element's
+        ``shapes.parquet`` is read. A labels region, or shapes in the pre-parquet layout, counts as no source,
+        because its centroids would need the whole raster or a full store read. ``"auto"`` (default) keeps a
+        stored ``obsm["spatial"]`` that has no NaN rows and uses centroids otherwise. With ``"auto"`` or
+        ``"centroids"``, ``obsm["spatial"]`` is set even when ``elements`` leaves out ``"obsm"``: only that
+        one array is read, not the rest of ``obsm``.
     max_workers
         Number of members read concurrently.
 
@@ -145,7 +228,9 @@ def concat_tables(
     UserWarning
         If two or more members share fewer than half the genes of the smallest one, which usually means
         their var_names hold different id types; also when ``gene_key`` drops or dedupes features, and
-        when ``gene_key=None`` makes a member's repeated var_names unique.
+        when ``gene_key=None`` makes a member's repeated var_names unique, and once when ``spatial`` finds
+        no coordinate source for some members or rows (the message names the members and the reason). Their
+        coordinates stay missing.
 
     Raises
     ------
@@ -153,13 +238,15 @@ def concat_tables(
         If a member's table is absent or unreadable (the message names the member uid), or an
         ``obs_columns`` entry is not a column of ``members``.
     ValueError
-        If the adapter drops every member, ``gene_key`` is not a known key, or a member has no source for
+        If the adapter drops every member, ``gene_key`` or ``spatial`` is not a known value, or a member has no source for
         ``gene_key`` (the message names the member uid and its var columns).
     """
     if missing := [c for c in obs_columns if c not in members.columns]:
         raise KeyError(f"obs_columns not in members: {missing}")
     if gene_key not in (None, "ensembl", "symbol"):
         raise ValueError(f"gene_key must be 'ensembl', 'symbol' or None, not {gene_key!r}")
+    if spatial not in ("auto", "obsm", "centroids"):
+        raise ValueError(f"spatial must be 'auto', 'obsm' or 'centroids', not {spatial!r}")
     if elements is None and adapter is not None:
         elements = adapter.requirements().get("elements")
     if gene_key is not None and elements is not None and "var" not in elements:
@@ -168,6 +255,7 @@ def concat_tables(
     dropped: dict[str, str] = {}
     rekeyed: dict[str, tuple[int, int]] = {}  # uid -> (dropped, duplicate) features under gene_key
     repeated: dict[str, int] = {}  # uid -> repeated var_names made unique (gene_key=None)
+    no_xy: dict[str, str] = {}  # uid -> why some or all rows have no coordinates
 
     def read(row: pd.Series) -> ad.AnnData | None:
         uid = str(row["uid"])
@@ -180,6 +268,8 @@ def concat_tables(
             adata = _read_table(url, elements)
         except Exception as e:
             raise KeyError(f"member {row['uid']!r}: table {name!r} not readable at {url}: {e}") from e
+        if spatial != "obsm" and (why := _fill_spatial(adata, str(row["zarr_url"]), url, spatial)):
+            no_xy[uid] = why
         if adapter is not None:
             if issues := adapter.validate(adata, row):
                 dropped[uid] = "; ".join(issues)
@@ -214,6 +304,13 @@ def concat_tables(
         warnings.warn(
             f"made {sum(repeated.values())} repeated var_names unique with a '-1' style suffix in members "
             f"{sorted(repeated)}; pass gene_key='ensembl' or 'symbol' to merge them instead",
+            UserWarning,
+            stacklevel=2,
+        )
+    if no_xy := {u: w for u, w in no_xy.items() if u not in dropped}:
+        warnings.warn(
+            f"spatial={spatial!r}: no usable coordinates for {len(no_xy)} members: "
+            + "; ".join(f"{u!r} ({w})" for u, w in sorted(no_xy.items())),
             UserWarning,
             stacklevel=2,
         )
