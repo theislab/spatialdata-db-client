@@ -363,7 +363,7 @@ def test_spatial_auto_replaces_stored_obsm_with_nan_rows(tmp_path):
 def test_spatial_obsm_leaves_members_without_coordinates(tmp_path):
     members = pd.concat([_one(_region_store(tmp_path / "s.zarr"), "s"), _one(_store(tmp_path / "t.zarr", 2), "t")])
     with warnings.catch_warnings():
-        warnings.simplefilter("error")
+        warnings.filterwarnings("error", message="spatial=")  # only ours; pandas 3 deprecations come from anndata
         adata = concat_tables(members, spatial="obsm")
     assert "spatial" not in adata.obsm
 
