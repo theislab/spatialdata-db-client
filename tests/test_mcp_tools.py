@@ -160,7 +160,7 @@ def test_cite_tool(tmp_path):
     assert out["n"] >= 1
     assert "@" in out["bibtex"]
     assert "Smith2023" in out["bibtex"]
-    empty = cite_tool(catalog_url=cat.as_uri(), organism="nonexistent_xyz")
+    empty = cite_tool(catalog_url=cat.as_uri(), organism="mouse", tissue="lung")
     assert empty == {"bibtex": "", "n": 0}
 
 
@@ -235,6 +235,15 @@ def test_server_query_forwards_new_params(monkeypatch):
     assert seen["organism"] == "human"
     assert "min_obs" not in seen
     assert "n_features__gte" not in seen
+    seen.clear()
+    registered["query"](source="geo", hne_image=False, if_image=True, redistributable=True)
+    assert seen == {
+        "validation": "pass",
+        "source": "geo",
+        "hne_image": False,
+        "if_image": True,
+        "redistributable": True,
+    }
 
 
 def test_server_genes_forwards(monkeypatch):

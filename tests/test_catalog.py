@@ -319,7 +319,7 @@ def test_query_expressing_keeps_matched(tmp_path):
 def test_query_expressing_empty_skips_gene_index(tmp_path):
     p = write_fixture_catalog(tmp_path / "catalog.parquet")  # deliberately no gene_index.parquet
     cat = Catalog(p.as_uri(), cache_dir=tmp_path / "cache")
-    assert len(cat.query(organism="nonexistent_xyz", expressing="EPCAM")) == 0
+    assert len(cat.query(organism="mouse", tissue="lung", expressing="EPCAM")) == 0  # known values, no overlap
 
 
 @pytest.mark.parametrize("val", [[1, 2], (1, 2), {1}])

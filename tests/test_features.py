@@ -33,7 +33,12 @@ def test_resolve_metabolite_by_hmdb_and_name(tmp_path):
 def test_by_gene_cross_modal(tmp_path):
     cat = _cat(tmp_path)
     assert sorted(d.uid for d in cat.features.by_gene("EPCAM")) == ["uid0001", "uid0002", "uid0003", "uid0005"]
-    assert sorted(d.uid for d in cat.features.by_gene("ENSG00000119888")) == ["uid0001", "uid0002", "uid0003", "uid0005"]
+    assert sorted(d.uid for d in cat.features.by_gene("ENSG00000119888")) == [
+        "uid0001",
+        "uid0002",
+        "uid0003",
+        "uid0005",
+    ]
     assert len(cat.features.by_gene("NOPE")) == 0
     assert [d.uid for d in cat.features.by_gene("KRT8")] == ["uid0001"]
 
@@ -45,7 +50,7 @@ def test_where_measured_and_ranked(tmp_path):
     assert sorted(d.uid for d in f.where_measured(["Glucose", "KRT8"], mode="any")) == ["uid0001", "uid0004"]
     assert [d.uid for d in f.where_measured("EPCAM", modality="atac")] == ["uid0005"]
     assert list(f.ranked("EPCAM", feature_type="gene")["uid"]) == ["uid0001", "uid0002"]
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="mode"):
         f.where_measured("EPCAM", mode="xor")
 
 
@@ -65,14 +70,14 @@ def test_features_tool_typed_hits(tmp_path):
     assert prot[0]["features"][0]["feature_type"] == "protein"
 
 
-def test_suggest_tolerates_list_valued_facet(tmp_path):
-    from sddb.cli import _suggest
-
+def test_resolve_facet_tolerates_list_valued_facet(tmp_path):
     cat = _cat(tmp_path)
     df = cat.to_df()
     df["modalities"] = [["rna", "protein"], ["rna"], None, ["msi"], ["rna"]]
     cat._df = df
-    _suggest(cat, {"modalities": "rnaa"})  # must not raise on list cells
+    assert {d.uid for d in cat.query(modalities="Protein")} == {"uid0001"}  # alias over list cells
+    with pytest.raises(ValueError, match="did you mean 'rna'"):
+        cat.query(modalities="rnaa")
 
 
 def test_group_counts_explodes_list_column():
@@ -95,5 +100,6 @@ def test_resolve_tolerates_null_list_cells(tmp_path):
     df.to_parquet(tmp_path / "feature_index.parquet")
     cat = Catalog(cat_p.as_uri(), cache_dir=tmp_path / "cache")
     hit = cat.features.resolve("glucose")
-    assert hit.iloc[0]["gene_xref"] == [] and hit.iloc[0]["ref_ids"] == []
+    assert hit.iloc[0]["gene_xref"] == []
+    assert hit.iloc[0]["ref_ids"] == []
     assert hit.iloc[0]["uids"] == ["uid0004"]

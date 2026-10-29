@@ -7,9 +7,8 @@ from typing import Annotated, Any
 
 import pandas as pd
 import typer
-from rapidfuzz import fuzz, process
 
-from sddb.catalog import Catalog, _distinct, facet_values
+from sddb.catalog import Catalog, facet_values
 from sddb.citations import parse_bibtex
 from sddb.cohort import SpatialDataCohort
 from sddb.manifest import reusable
@@ -18,6 +17,17 @@ app = typer.Typer(help="Query and download spatialdata-db datasets.", no_args_is
 
 _CatalogOpt = Annotated[str | None, typer.Option("--catalog", help="Catalog URL (default: $SDDB_CATALOG_URL).")]
 _COLS = ("uid", "technology", "organism", "tissue", "n_obs")
+_SourceOpt = Annotated[str | None, typer.Option(help="Data source: the study_id prefix (geo, hest, 10x, ...).")]
+_HneOpt = Annotated[
+    bool | None, typer.Option("--hne-image/--no-hne-image", help="Keep datasets with (or without) an H&E image.")
+]
+_RedistOpt = Annotated[
+    bool | None,
+    typer.Option(
+        "--redistributable/--no-redistributable",
+        help="Keep datasets whose known license allows redistribution (or the rest).",
+    ),
+]
 
 
 def _fail(err: Exception) -> typer.Exit:
@@ -53,10 +63,17 @@ def query(
     disease: str | None = None,
     technology: str | None = None,
     tier: str | None = None,
+    source: _SourceOpt = None,
+    hne_image: _HneOpt = None,
+    redistributable: _RedistOpt = None,
     validation: Annotated[str, typer.Option(help="'pass' (default) or 'all'.")] = "pass",
     gene: Annotated[
         list[str] | None,
-        typer.Option("--gene", "--expressing", help="Gene symbol or Ensembl id; repeat to require all (downloads the gene index once)."),
+        typer.Option(
+            "--gene",
+            "--expressing",
+            help="Gene symbol or Ensembl id; repeat to require all (downloads the gene index once).",
+        ),
     ] = None,
     min_fraction: Annotated[float | None, typer.Option(help="With --gene: min fraction_obs_detected.")] = None,
     search: Annotated[str | None, typer.Option(help="Free-text search over facet values.")] = None,
@@ -65,22 +82,39 @@ def query(
     catalog: _CatalogOpt = None,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON records.")] = False,
 ) -> None:
-    """List datasets matching the given facets."""
+    """List datasets matching the given facets.
+
+    A facet value that is not in the catalog resolves through aliases (case, spaces and hyphens are
+    ignored; --technology also takes the assay label, e.g. "10x Xenium"), or fails with a "did you mean" hint.
+    """
     val = _validation(validation)
-    facets = _facets(organism=organism, assay=assay, tissue=tissue, disease=disease, technology=technology, tier=tier)
+    facets = _facets(
+        organism=organism,
+        assay=assay,
+        tissue=tissue,
+        disease=disease,
+        technology=technology,
+        tier=tier,
+        source=source,
+        hne_image=hne_image,
+    )
     ranges = _facets(n_obs__gte=min_obs, n_features__gte=min_features)
     try:
         cat = Catalog(catalog)
         res = cat.query(
-            validation=val, search=search, expressing=gene or None, mode="all", min_fraction=min_fraction,
-            **facets, **ranges
+            validation=val,
+            search=search,
+            expressing=gene or None,
+            mode="all",
+            min_fraction=min_fraction,
+            redistributable=redistributable,
+            **facets,
+            **ranges,
         )
     except Exception as err:
         raise _fail(err) from err
 
     df = res.to_df()
-    if df.empty:
-        _suggest(cat, facets)
     if as_json:
         typer.echo(df.to_json(orient="records", indent=2))
         return
@@ -92,24 +126,6 @@ def query(
 
     cols = [c for c in _COLS if c in df.columns]
     _print_table(cols, [[_fmt(v) for v in r] for r in df[cols].itertuples(index=False)])
-
-
-def _norm(v: str) -> str:
-    return "".join(str(v).lower().split())
-
-
-def _suggest(cat: Catalog, facets: dict[str, Any]) -> None:
-    """Hint the closest known value for each facet value that matches nothing (exact-match query)."""
-    df = cat.to_df()
-    for col, val in facets.items():
-        if col not in df.columns or isinstance(val, (list, tuple, set)):
-            continue
-        known = set(_distinct(df[col]))
-        if str(val) in known:
-            continue
-        best = process.extractOne(val, list(known), processor=_norm, scorer=fuzz.ratio, score_cutoff=70)
-        if best:
-            typer.echo(f"no match for --{col} {val!r}; did you mean '{best[0]}'?", err=True)
 
 
 @app.command()
@@ -212,6 +228,9 @@ def cite(
     disease: str | None = None,
     technology: str | None = None,
     tier: str | None = None,
+    source: _SourceOpt = None,
+    hne_image: _HneOpt = None,
+    redistributable: _RedistOpt = None,
     search: Annotated[str | None, typer.Option(help="Free-text search over facet values.")] = None,
     validation: Annotated[str, typer.Option(help="'pass' (default) or 'all'.")] = "pass",
     bib_url: Annotated[str | None, typer.Option(help="citations.bib URL/path (default: next to the catalog).")] = None,
@@ -219,10 +238,19 @@ def cite(
 ) -> None:
     """Write BibTeX for the studies of the datasets matching the given facets/search."""
     val = _validation(validation)
-    facets = _facets(organism=organism, assay=assay, tissue=tissue, disease=disease, technology=technology, tier=tier)
+    facets = _facets(
+        organism=organism,
+        assay=assay,
+        tissue=tissue,
+        disease=disease,
+        technology=technology,
+        tier=tier,
+        source=source,
+        hne_image=hne_image,
+    )
     try:
         cat = Catalog(catalog)
-        res = cat.query(validation=val, search=search, **facets)
+        res = cat.query(validation=val, search=search, redistributable=redistributable, **facets)
     except Exception as err:
         raise _fail(err) from err
     if len(res) == 0:

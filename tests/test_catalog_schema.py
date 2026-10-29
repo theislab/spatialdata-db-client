@@ -59,7 +59,8 @@ def test_unknown_kind():
 
 
 def test_constants_consistent():
-    assert set(cs.FACETS) <= set(cs.CATALOG_COLUMNS)
+    assert set(cs.FACETS) <= set(cs.CATALOG_COLUMNS) | set(cs.DERIVED_COLUMNS)
+    assert not set(cs.DERIVED_COLUMNS) & set(cs.CATALOG_COLUMNS)
     assert set(cs.REQUIRED_COLUMNS) <= set(cs.CATALOG_COLUMNS)
 
 
@@ -213,12 +214,12 @@ _NEW_DATASET_COLUMNS = {
     "timepoint_days": "Float64",
 }
 _NEW_COLLECTION_COLUMNS = {
-    **{c: "string" for c in ("overall_design", "pubmed_id", "source_url", "parent", "source", "contrast_axes")},
+    **dict.fromkeys(("overall_design", "pubmed_id", "source_url", "parent", "source", "contrast_axes"), "string"),
     "year": "Int64",
-    **{
-        c: "list[string]"
-        for c in ("assays", "modalities", "organisms", "tissues", "diseases", "timepoint_kinds", "condition_values")
-    },
+    **dict.fromkeys(
+        ("assays", "modalities", "organisms", "tissues", "diseases", "timepoint_kinds", "condition_values"),
+        "list[string]",
+    ),
 }
 
 
