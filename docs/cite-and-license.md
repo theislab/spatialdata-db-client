@@ -53,7 +53,7 @@ Each dataset keeps the license of its source. The catalog records it in these co
 - `license`: license identifier, for example `CC-BY-4.0`
 - `license_url`: link to the license text
 - `license_noncommercial`: true if the license forbids commercial use
-- `license_redistributable`: true if the data may be redistributed
+- `license_redistributable`: true if the license allows redistribution; false when it does not, and false for every dataset whose license is unknown
 - `license_unknown`: true if no license could be determined
 
 `Catalog.query` can filter on them:
@@ -83,7 +83,7 @@ These are the `license` values in the catalog of 2026-10-28 (6087 datasets):
 The three boolean columns mean:
 
 - `license_noncommercial` is true when the license forbids commercial use (`CC-BY-NC-SA-4.0` and `allen-institute-tou`).
-- `license_redistributable` is true when the data may be redistributed. It is false only for `unknown`.
+- `license_redistributable` is true when the license allows redistribution. It is false only for `unknown`, so false means the terms are not known, not that redistribution is forbidden.
 - `license_unknown` is true when no license could be determined. Those rows have `license` set to `unknown` and `license_noncommercial` false, so check `license_unknown` before you treat the latter as permission.
 
-Check the license of your final selection before you redistribute or publish derived data.
+The catalog lists every dataset it serves, including the 1031 whose license is unknown (17% of 6087). The default `license_set=None` applies no license filter, so a search does not silently hide them. Pass `license_set=True` to keep only datasets with a known license, or `noncommercial=False` to keep only those cleared for commercial use. Check the license of your final selection before you redistribute or publish derived data.

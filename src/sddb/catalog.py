@@ -298,7 +298,8 @@ class Catalog:
         redistributable
             If True, keep only data whose license allows redistribution: ``license_redistributable`` is True
             and the license is known (``license_unknown`` is False). If False, keep the rest, which includes
-            every row with an unknown license. ``None`` disables.
+            every row with an unknown license. ``None`` disables. Every dataset is served. The default ``None`` applies no license filter, so rows with an
+            unknown license stay in the result; check the license before you reuse data.
         search
             Free text, as in :meth:`search`; the result is intersected with the other filters and
             carries the ``matched`` facet values. With ``validation=None`` (or ``"all"``), ``search``
@@ -445,12 +446,21 @@ class Catalog:
         )
 
     def dataset(self, uid: str) -> Dataset:
-        """The catalog row for one dataset, by full ``uid`` or its 16-character stem. Raises ``KeyError`` if absent or ambiguous."""
+        """The catalog row for one dataset, by full ``uid``, its 16-character stem or its ``canonical_key``.
+
+        A uid pins one version. A stem resolves to the latest version. A ``canonical_key`` such as
+        ``"geo:GSM9778330"`` is unique where it is set and usually survives a re-version of the dataset; datasets
+        without one (null in the column) cannot be looked up this way. Raises ``KeyError`` if absent or ambiguous.
+        """
         hit = self._df[self._df["uid"] == uid]
         if hit.empty and len(uid) == 16:
             hit = self._df[self._df["uid"].str[:16] == uid]
             if len(hit) > 1:
                 raise KeyError(f"stem {uid!r} matches several uids: {sorted(hit['uid'])}; pass the full uid")
+        if hit.empty and "canonical_key" in self._df.columns:
+            hit = self._df[self._df["canonical_key"].astype("string") == uid]
+            if len(hit) > 1:
+                raise KeyError(f"canonical_key {uid!r} matches several uids: {sorted(hit['uid'])}; pass the full uid")
         if hit.empty:
             raise KeyError(f"uid not in catalog: {uid!r}")
         return Dataset(hit.iloc[0])

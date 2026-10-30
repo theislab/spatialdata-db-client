@@ -31,7 +31,7 @@ silver = cat.query(tier="silver")
 
 Datasets keep their original license, in the `license` column. Two boolean columns make
 filtering easy: `license_noncommercial` (use is restricted to non-commercial work) and
-`license_redistributable` (the data may be redistributed). Check them before reusing data
+`license_redistributable` (the license allows redistribution; false when the license is unknown). Check them before reusing data
 in a product or republishing it. `query(noncommercial=False)` keeps only datasets with a known
 license that allows commercial use; see {doc}`../cite-and-license`.
 

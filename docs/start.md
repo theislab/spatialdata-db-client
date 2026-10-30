@@ -74,6 +74,25 @@ sdata_by_uid = cohort.to_dict()  # {uid: SpatialData}, downloaded once into the 
 
 Add the uids you want, each copied from the chip on a dataset page. `cohort()` needs full uids, and it raises a `KeyError` that names every uid or study id that is not in the catalog, so a typo fails before anything is downloaded. See {doc}`guides/cohorts` for freezing, splitting and reproducing the cohort.
 
+(reproducible)=
+## Reproducible references
+
+The catalog changes between releases. Between the releases of 2026-10-16 and 2026-10-28, 84 uids got a new version suffix and 138 stems disappeared, so a script that names data loosely can return other data a week later. Three things make a reference stable:
+
+- `Catalog(version="2026-10-28")` reads that dated release and always gives the same rows. Without `version`, `Catalog()` reads the rolling `catalog-latest`.
+- A full uid pins one version of one dataset. Its 16-character stem resolves to the latest version in the catalog you opened, so it can point at different data in a newer release.
+- A `canonical_key` such as `geo:GSM9778330` is unique in the catalog, and for most datasets it equals the `study_id`. `Catalog.dataset()` accepts it. A key usually survives when a dataset is replaced by a newer version, so it is a more durable handle than a stem, but check the uid that comes back. Datasets without a `canonical_key` (null in the column) cannot be looked up this way.
+
+```python
+from sddb import Catalog
+
+cat = Catalog(version="2026-10-28")  # a dated release, the same rows every time
+ds = cat.dataset("geo:GSM9778330")  # by canonical_key; a uid or a stem works as well
+print(ds.uid)  # the uid of that version, which you can record
+```
+
+Record the release date together with the uids. To go back to the exact data later, open the same release and pass the uids. {doc}`guides/cohorts` shows how to freeze a cohort and check that the catalog file has not changed.
+
 (cli)=
 ## Command line
 
