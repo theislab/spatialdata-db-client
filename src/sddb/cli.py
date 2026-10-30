@@ -64,6 +64,9 @@ def query(
     technology: str | None = None,
     tier: str | None = None,
     source: _SourceOpt = None,
+    preservation_method: Annotated[
+        str | None, typer.Option(help="Preservation method, for example FFPE or fresh frozen.")
+    ] = None,
     hne_image: _HneOpt = None,
     redistributable: _RedistOpt = None,
     validation: Annotated[str, typer.Option(help="'pass' (default) or 'all'.")] = "pass",
@@ -96,6 +99,7 @@ def query(
         technology=technology,
         tier=tier,
         source=source,
+        preservation_method=preservation_method,
         hne_image=hne_image,
     )
     ranges = _facets(n_obs__gte=min_obs, n_features__gte=min_features)

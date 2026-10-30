@@ -164,6 +164,10 @@ FACETS: tuple[str, ...] = (
     "hne_image",
     "if_image",
     "source",
+    # Filters the website shows on its datasets page.
+    "preservation_method",
+    "magnification",
+    "collections",
 )
 
 # Columns the client derives on load (not in the published parquet): ``source`` is the lowercased
