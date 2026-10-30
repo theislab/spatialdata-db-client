@@ -26,8 +26,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageStat
 
 from sddb import Catalog
+from sddb.catalog import SITE_URL
 
-SITE_URL = "https://spatialdata-db-web.pages.dev"
 STATIC = Path(__file__).parent.parent / "_static"
 LAYOUTS = {"landing-mosaic.webp": 4, "landing-mosaic-narrow.webp": 2}  # file name: columns
 N_TILES = 12

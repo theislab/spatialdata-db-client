@@ -274,13 +274,20 @@ class SpatialDataCohort(Sequence[Dataset]):
         return self._derive(self._df[~self._df["uid"].isin(other._df["uid"])], self._filter)
 
     def citations(self, path: str | Path, *, bib_url: str | None = None) -> Path:
-        """Write the BibTeX entries for the studies in this set to ``path``."""
+        """Write a BibTeX entry for every study in this set to ``path``.
+
+        Studies without a published entry get a fallback entry that cites the dataset page, and a
+        warning reports how many; see :func:`sddb.citations.citation_entries`.
+        """
         from sddb.citations import write_citations
 
         return write_citations(self, path, bib_url=bib_url)
 
     def citations_text(self, *, bib_url: str | None = None) -> tuple[str, int]:
-        """Return ``(BibTeX text, entry count)`` for the studies in this set, without writing a file."""
+        """Return ``(BibTeX text, entry count)`` for the studies in this set, without writing a file.
+
+        The count includes fallback entries; :func:`sddb.citations.citation_entries` reports the two separately.
+        """
         from sddb.citations import citations_text
 
         return citations_text(self, bib_url=bib_url)

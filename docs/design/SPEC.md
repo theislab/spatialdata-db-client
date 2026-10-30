@@ -106,7 +106,7 @@ d.view()                                        # open that link in a browser (s
 
 # ---- cohorts ----
 m = res.download("./data", workers=4)           # thread-pool, resumable, writes manifest.json
-res.citations("refs.bib")                       # filter published citations.bib to this cohort
+res.citations("refs.bib")                       # published citations.bib entries + fallbacks for the rest
 m = sddb.Manifest.read("./data/manifest.json")  # .refetch(dest): re-download exactly the recorded stores
 
 # ---- cross-dataset gene search ----
@@ -164,7 +164,7 @@ src/sddb/
   manifest.py          # cohort manifest write/read + thread-pool resumable fetch (version pinning)
   genes.py             # gene_index reader (cross-dataset gene search)
   search.py            # deterministic NL -> structured query (rapidfuzz + synonyms over the vocab)
-  citations.py         # filter published citations.bib to a cohort
+  citations.py         # published citations.bib entries for a cohort, fallback @misc for the rest
   _catalog_schema.py   # THE shared column contract (also imported by the engine's inventory gen)
   _cache.py            # cache dir resolution + conditional HTTP fetch + offline fallback
   cli.py               # thin CLI (base): sddb-cli query / download / viewer-url

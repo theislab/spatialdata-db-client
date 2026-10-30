@@ -112,10 +112,10 @@ Write BibTeX for the studies behind the datasets that match the facets or search
 
 ```
 $ sddb-cli cite -o refs.bib --organism mouse --tissue brain --technology Visium
-wrote 178 citations -> refs.bib
+wrote 430 citations (252 fallback) -> refs.bib
 ```
 
-Studies without a matching citation key are skipped, and the command exits with an error if no datasets match at all.
+A study without an entry in the published `citations.bib` gets a fallback entry that cites its dataset page on the website, and the output line counts those entries. The command exits with an error if no datasets match at all. See {doc}`../cite-and-license` for the fallback format.
 
 ## sddb-mcp
 

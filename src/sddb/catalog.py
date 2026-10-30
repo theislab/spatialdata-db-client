@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 _ROLLING_SUFFIX = "/catalog-latest/catalog.parquet"
 _RELEASE_BASE = "https://github.com/theislab/spatialdata-db-client/releases/download"
 DEFAULT_CATALOG_URL = _RELEASE_BASE + _ROLLING_SUFFIX
+SITE_URL = "https://spatialdata-db-web.pages.dev"  # the DB website; dataset pages are SITE_URL/datasets/<slug>/
 _FUZZY_CUTOFF = 88
 _RANGE_OPS = {"gte": operator.ge, "gt": operator.gt, "lte": operator.le, "lt": operator.lt}
 _SUGGEST_CUTOFF = 70
