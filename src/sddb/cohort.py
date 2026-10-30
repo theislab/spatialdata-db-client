@@ -63,10 +63,12 @@ def coverage(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def summary(df: pd.DataFrame) -> dict[str, Any]:
-    """Headline numbers: object count, distinct studies, technologies."""
+    """Headline numbers: object count, distinct study_ids, rows without a study_id, technologies."""
+    has_study = "study_id" in df
     return {
         "n_objects": len(df),
-        "n_studies": int(df["study_id"].astype("string").fillna("unknown").nunique()) if "study_id" in df else None,
+        "n_studies": int(df["study_id"].nunique(dropna=True)) if has_study else None,
+        "n_without_study_id": int(df["study_id"].isna().sum()) if has_study else None,
         "technologies": sorted(df["technology"].dropna().unique()) if "technology" in df else [],
     }
 
