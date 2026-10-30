@@ -36,6 +36,7 @@ def build_server() -> Any:
         assay: str | None = None,
         tier: str | None = None,
         source: str | None = None,
+        preservation_method: str | None = None,
         hne_image: bool | None = None,
         if_image: bool | None = None,
         redistributable: bool | None = None,
@@ -56,6 +57,7 @@ def build_server() -> Any:
                 assay=assay,
                 tier=tier,
                 source=source,
+                preservation_method=preservation_method,
                 hne_image=hne_image,
                 if_image=if_image,
                 redistributable=redistributable,
@@ -185,7 +187,8 @@ def build_server() -> Any:
         name="query",
         description=(
             "Filter datasets by facets, ranges (min_obs/min_features), gene (expressing) and free-text search. "
-            "source is the study_id prefix (geo, hest, 10x, ...); hne_image/if_image/redistributable take true "
+            "source is the study_id prefix (geo, hest, 10x, ...); preservation_method is e.g. FFPE or fresh frozen; "
+            "hne_image/if_image/redistributable take true "
             "or false. An unknown facet value fails with a 'did you mean' hint; technology also accepts the "
             "assay label (e.g. '10x Xenium')."
         ),

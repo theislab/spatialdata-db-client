@@ -403,30 +403,45 @@ class Catalog:
     def search(self, text: str) -> SpatialDataCohort:
         """Deterministic text search over facet values.
 
-        Tokens are fuzzy/substring-matched against the distinct values of each facet; matched values
-        within a facet are OR-ed and facets are AND-ed. Rows that failed validation are excluded unless
-        ``validation_status`` itself was matched. Nothing matching returns an empty SpatialDataCohort with a warning.
+        Each token is fuzzy/substring-matched against the distinct values of each facet. A row matches
+        a token when any of its facet values matches it, in any facet, so "liver" finds rows whose
+        tissue is liver as well as rows whose study_id contains "liver". Tokens are AND-ed:
+        "breast xenium" keeps rows that match both. A token that matches no facet value is ignored,
+        with one warning that names it; if no token matches anything, the result is an empty
+        SpatialDataCohort with a warning. ``matched`` maps each facet to the values that matched any
+        token. Rows that failed validation are excluded unless ``validation_status`` itself was matched.
         """
-        tokens = re.findall(r"\w+", text.lower())
+        df = self._df
+        tokens = list(dict.fromkeys(re.findall(r"\w+", text.lower())))
         matched: dict[str, list[str]] = {}
+        token_masks: dict[str, pd.Series] = {}
         for col in schema.FACETS:
             # DOIs tokenize to "10" etc.; source repeats study_id; booleans hold no searchable text.
-            if col in ("doi", "source") or _is_bool_facet(col) or col not in self._df.columns:
+            if col in ("doi", "source") or _is_bool_facet(col) or col not in df.columns:
                 continue
-            values = _distinct(self._df[col])
-            hits = [v for v in values if any(_token_matches(t, v) for t in tokens)]
-            if hits:
-                matched[col] = hits
+            values = _distinct(df[col])
+            per_token = {t: [v for v in values if _token_matches(t, v)] for t in tokens}
+            hit_set = {v for vs in per_token.values() for v in vs}
+            if not hit_set:
+                continue
+            matched[col] = [v for v in values if v in hit_set]
+            for t, vs in per_token.items():
+                if vs:
+                    m = _facet_isin(df[col], vs).fillna(False).astype(bool)
+                    token_masks[t] = token_masks[t] | m if t in token_masks else m
         if not matched:
             warnings.warn(f"nothing matched {text!r}", stacklevel=2)
-            return SpatialDataCohort(self._df.iloc[0:0], source=self._source(), filter={"search": text})
-        mask = pd.Series(True, index=self._df.index)
-        for col, hits in matched.items():
-            mask &= _facet_isin(self._df[col], hits)
+            return SpatialDataCohort(df.iloc[0:0], source=self._source(), filter={"search": text})
+        unmatched = [t for t in tokens if t not in token_masks]
+        if unmatched:
+            warnings.warn(f"search token(s) {unmatched} match no facet value and were ignored", stacklevel=2)
+        mask = pd.Series(True, index=df.index)
+        for m in token_masks.values():
+            mask &= m
         if "validation_status" not in matched:
-            mask &= self._df["validation_status"] == "pass"
+            mask &= df["validation_status"] == "pass"
         return SpatialDataCohort(
-            self._df[mask.fillna(False).astype(bool)], matched=matched, source=self._source(), filter={"search": text}
+            df[mask.fillna(False).astype(bool)], matched=matched, source=self._source(), filter={"search": text}
         )
 
     def dataset(self, uid: str) -> Dataset:
