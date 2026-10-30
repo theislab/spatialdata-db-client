@@ -9,7 +9,7 @@ import pandas as pd
 import typer
 
 from sddb.catalog import Catalog, facet_values
-from sddb.citations import parse_bibtex
+from sddb.citations import citation_entries
 from sddb.cohort import SpatialDataCohort
 from sddb.manifest import reusable
 
@@ -257,8 +257,8 @@ def cite(
         typer.echo("error: no datasets matched", err=True)
         raise typer.Exit(1)
     try:
-        res.citations(output, bib_url=bib_url)
+        text, n_published, n_fallback = citation_entries(res, bib_url=bib_url)
     except Exception as err:
         raise _fail(err) from err
-    n = len(parse_bibtex(output.read_text(encoding="utf-8")))
-    typer.echo(f"wrote {n} citations -> {output}")
+    output.write_text(text, encoding="utf-8")
+    typer.echo(f"wrote {n_published + n_fallback} citations ({n_fallback} fallback) -> {output}")

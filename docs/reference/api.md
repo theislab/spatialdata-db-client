@@ -20,4 +20,5 @@
    sddb.open_sdata
    sddb.resolve
    sddb.table_centroids
+   sddb.citations.citation_entries
 ```

@@ -11,6 +11,7 @@ import pandas as pd
 import platformdirs
 
 from sddb.catalog import Catalog, facet_values, resolve_facet_values
+from sddb.citations import citation_entries
 from sddb.cohort import SpatialDataCohort
 from sddb.dataset import Dataset
 from sddb.features import _check_mode
@@ -185,7 +186,11 @@ def cite_tool(
     bib_url: str | None = None,
     **facets: Any,
 ) -> dict[str, Any]:
-    """Return BibTeX text + entry count for the studies of a filtered cohort (empty cohort -> n=0)."""
+    """Return BibTeX text, entry count and fallback count for the studies of a filtered cohort (empty cohort -> n=0).
+
+    ``n`` counts every entry; ``n_fallback`` counts the entries that cite the dataset page because the
+    study has no published citation.
+    """
     res = _query(
         catalog_url,
         validation=validation,
@@ -195,9 +200,9 @@ def cite_tool(
         **facets,
     )
     if len(res) == 0:
-        return {"bibtex": "", "n": 0}
-    text, n = res.citations_text(bib_url=bib_url)
-    return {"bibtex": text, "n": n}
+        return {"bibtex": "", "n": 0, "n_fallback": 0}
+    text, n_published, n_fallback = citation_entries(res, bib_url=bib_url)
+    return {"bibtex": text, "n": n_published + n_fallback, "n_fallback": n_fallback}
 
 
 def _download_dir() -> Path:

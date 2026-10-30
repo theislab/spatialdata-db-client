@@ -207,7 +207,10 @@ def build_server() -> Any:
         ),
     )(features)
     server.tool(name="facets", description="List facet columns, or the distinct values of a facet field.")(facets)
-    server.tool(name="cite", description="BibTeX for the studies of a filtered cohort.")(cite)
+    server.tool(
+        name="cite",
+        description="BibTeX for every study of a filtered cohort; studies without a published citation get a fallback entry that cites the dataset page (counted in n_fallback).",
+    )(cite)
     server.tool(name="download", description="Plan (sizes) or fetch a filtered cohort to the server download dir.")(
         download_cohort
     )

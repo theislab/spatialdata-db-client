@@ -160,8 +160,9 @@ def test_cite_tool(tmp_path):
     assert out["n"] >= 1
     assert "@" in out["bibtex"]
     assert "Smith2023" in out["bibtex"]
+    assert out["n_fallback"] == 0
     empty = cite_tool(catalog_url=cat.as_uri(), organism="mouse", tissue="lung")
-    assert empty == {"bibtex": "", "n": 0}
+    assert empty == {"bibtex": "", "n": 0, "n_fallback": 0}
 
 
 def test_download_tool_plan_no_copy(tmp_path, monkeypatch):

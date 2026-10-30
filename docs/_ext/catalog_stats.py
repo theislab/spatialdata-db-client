@@ -5,12 +5,13 @@ from __future__ import annotations
 import pandas as pd
 from sphinx.util import logging as _logging
 
+from sddb.catalog import SITE_URL
+
 _log = _logging.getLogger(__name__)
 _failure: list[Exception] = []  # load_stats runs while conf.py is read, before warning filters exist
 
 # Technologies with a hand-written card on docs/intro/assays.md.
 DESCRIBED = frozenset({"Visium", "VisiumHD", "Xenium", "Atera", "SpatialTranscriptomics"})
-SITE_URL = "https://spatialdata-db-web.pages.dev"  # single source of truth for links to the DB website
 _BASE = f"{SITE_URL}/datasets"
 
 
