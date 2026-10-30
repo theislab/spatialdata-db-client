@@ -429,3 +429,24 @@ def test_dataset_ambiguous_stem(tmp_path):
     with pytest.raises(KeyError, match="CCCCCCCCCCCCCCCC0000.*CCCCCCCCCCCCCCCC0001"):
         cat.dataset("CCCCCCCCCCCCCCCC")
     assert cat.dataset("CCCCCCCCCCCCCCCC0001").uid == "CCCCCCCCCCCCCCCC0001"
+
+
+def test_dataset_by_canonical_key(tmp_path):
+    df = make_fixture_catalog().iloc[:3].copy()
+    df["canonical_key"] = ["geo:GSM1", "geo:GSM2", None]
+    p = tmp_path / "ck.parquet"
+    df.to_parquet(p)
+    cat = Catalog.from_file(p)
+    assert cat.dataset("geo:GSM2").uid == df["uid"].iloc[1]
+    assert cat.dataset(df["uid"].iloc[0]).uid == df["uid"].iloc[0]
+    with pytest.raises(KeyError, match="uid not in catalog"):
+        cat.dataset("geo:GSM9")
+
+
+def test_dataset_duplicate_canonical_key(tmp_path):
+    df = make_fixture_catalog().iloc[:2].copy()
+    df["canonical_key"] = ["geo:GSM1", "geo:GSM1"]
+    p = tmp_path / "ck2.parquet"
+    df.to_parquet(p)
+    with pytest.raises(KeyError, match="canonical_key 'geo:GSM1' matches several"):
+        Catalog.from_file(p).dataset("geo:GSM1")

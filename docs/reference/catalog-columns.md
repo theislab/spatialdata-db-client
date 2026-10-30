@@ -7,7 +7,7 @@ Every column of the catalog schema. "Facet" columns are categorical filters (`Ca
 - A string facet value is first looked up as given in that column of the whole catalog. If it is not there, case, spaces, hyphens and underscores are ignored. A `technology` value may also be an `assay` label, so `technology="10x Xenium"` selects `Xenium`, and `technology="PhenoCycler-Fusion"` selects both `PhenoCyclerFusion1` and `PhenoCyclerFusion2`. A value that still does not resolve raises `ValueError` with the closest known value ("did you mean 'Xenium'?"). A known value that matches nothing after the other filters gives an empty cohort.
 - `hne_image` and `if_image` take `True` or `False`. A null value means unknown and matches neither.
 - `source` is the lowercased `study_id` prefix before ":". In the 2026-10-28 catalog (6087 datasets) the values are `geo` (4113), `hest` (1070), `10x` (175), `abc` (115), `bia` (4), `metaspace` (3), `bruker` (3), `doi` (2) and `figshare` (2). 600 datasets have no `study_id`, so their source is null.
-- `query(redistributable=True)` keeps datasets whose license is known and allows redistribution (`license_redistributable` is true and `license_unknown` is false). `redistributable=False` keeps the rest, including every dataset with an unknown license.
+- `query(redistributable=True)` keeps datasets whose license is known and allows redistribution (`license_redistributable` is true and `license_unknown` is false). `redistributable=False` keeps the rest, including every dataset with an unknown license, where false means the terms are not known. Every dataset in the catalog is served, whatever its license.
 
 ```{include} _catalog_columns.md
 ```

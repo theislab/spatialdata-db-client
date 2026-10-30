@@ -25,7 +25,7 @@ _RedistOpt = Annotated[
     bool | None,
     typer.Option(
         "--redistributable/--no-redistributable",
-        help="Keep datasets whose known license allows redistribution (or the rest).",
+        help="Keep datasets whose known license allows redistribution (or the rest, which includes unknown licenses).",
     ),
 ]
 
