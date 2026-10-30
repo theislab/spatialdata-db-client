@@ -450,3 +450,44 @@ def test_dataset_duplicate_canonical_key(tmp_path):
     df.to_parquet(p)
     with pytest.raises(KeyError, match="canonical_key 'geo:GSM1' matches several"):
         Catalog.from_file(p).dataset("geo:GSM1")
+
+
+def _liver_catalog(cat):
+    df = cat._df.copy()
+    df.loc[df["uid"] == "uid0005", "tissue"] = "liver"  # liver as a tissue (uid0004 is liver too, but fails validation)
+    df.loc[df["uid"] == "uid0002", "study_id"] = "geo:GSE1-liver"  # liver only in a study_id slug
+    cat._df = df
+    return cat
+
+
+def test_search_token_matches_any_facet(cat):
+    res = _liver_catalog(cat).search("liver")
+    assert {d.uid for d in res} == {"uid0002", "uid0005"}  # tissue OR study_id, not both
+    assert res.matched["tissue"] == ["liver"]
+    assert res.matched["study_id"] == ["geo:GSE1-liver"]
+    assert {d.uid for d in cat.search("liver")} >= {d.uid for d in cat.query(tissue="liver")}
+
+
+def test_search_tokens_are_anded(cat):
+    assert {d.uid for d in cat.search("breast xenium")} == {"uid0002"}
+    assert {d.uid for d in _liver_catalog(cat).search("liver xenium")} == {"uid0002"}
+    assert {d.uid for d in cat.search("lung breast")} == set()  # no row is both
+
+
+def test_search_ignores_unmatched_token(cat):
+    with pytest.warns(UserWarning, match=r"\['qqqqzz'\] match no facet value") as rec:
+        res = cat.search("lung qqqqzz")
+    assert len(rec) == 1
+    assert {d.uid for d in res} == {"uid0001"}
+    assert res.matched == {"tissue": ["lung"]}
+
+
+def test_summary_counts_study_ids_without_nulls(cat):
+    df = cat._df.copy()
+    df["study_id"] = df["study_id"].astype("string")
+    df.loc[df["uid"].isin(["uid0004", "uid0005"]), "study_id"] = None
+    cat._df = df
+    s = cat.query(validation=None).summary()
+    assert s["n_objects"] == 5
+    assert s["n_studies"] == 2  # Smith2023 and Lee2022; the two rows without a study_id are not a study
+    assert s["n_without_study_id"] == 2

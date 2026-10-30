@@ -31,8 +31,9 @@ KI3j6VpkjaVwuPPY0000  Visium      human     lung    5388
 Each match has a page on the DB site, e.g., [`PntNMJy70YLUP8eq0000`](https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-lung-pntnmjy70ylup8eq0000/).
 
 Other options: `--assay`, `--disease`, `--tier`, `--source` (the `study_id` prefix, such as `geo`, `hest` or
-`10x`), `--hne-image/--no-hne-image`, `--redistributable/--no-redistributable`, `--search`, `--min-features`,
-`--min-fraction`. Case, spaces and hyphens in a value are ignored, and `--technology` also accepts the website
+`10x`), `--preservation-method`, `--hne-image/--no-hne-image`, `--redistributable/--no-redistributable`, `--search`,
+`--min-features`, `--min-fraction`. `--search` keeps datasets where every word matches a value in some facet; a
+word that matches nothing is ignored with a warning. Case, spaces and hyphens in a value are ignored, and `--technology` also accepts the website
 label, such as "10x Xenium". A value that is not in the catalog fails with the closest known value as a hint.
 
 ### facets
@@ -111,10 +112,10 @@ Write BibTeX for the studies behind the datasets that match the facets or search
 
 ```
 $ sddb-cli cite -o refs.bib --organism mouse --tissue brain --technology Visium
-wrote 178 citations -> refs.bib
+wrote 430 citations (252 fallback) -> refs.bib
 ```
 
-Studies without a matching citation key are skipped, and the command exits with an error if no datasets match at all.
+A study without an entry in the published `citations.bib` gets a fallback entry that cites its dataset page on the website, and the output line counts those entries. The command exits with an error if no datasets match at all. See {doc}`../cite-and-license` for the fallback format.
 
 ## sddb-mcp
 
@@ -164,7 +165,7 @@ If `sddb-mcp` is not on the `PATH` of the app, use its absolute path as `command
 
 | Tool | What it does |
 |---|---|
-| `query` | Filter datasets by facets (including `source`, `hne_image`, `if_image` and `redistributable`), ranges (`min_obs`, `min_features`), gene (`expressing`, `min_fraction`) and free-text `search`. |
+| `query` | Filter datasets by facets (including `source`, `preservation_method`, `hne_image`, `if_image` and `redistributable`), ranges (`min_obs`, `min_features`), gene (`expressing`, `min_fraction`) and free-text `search`. |
 | `describe` | Catalog row and element shapes for one dataset `uid`. |
 | `genes` | Datasets expressing one or more genes (`mode` `all` or `any`), optionally filtered by organism, tissue, disease or assay. Bronze datasets are included by default. |
 | `features` | Datasets measuring one or more features of any modality (genes, protein targets, metabolites; labels or ids; `mode` `all` or `any`), optionally filtered by `modality`, `feature_type`, organism, tissue, disease or assay. Each row lists the typed feature hits. Bronze datasets are included by default. |

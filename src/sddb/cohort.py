@@ -63,10 +63,12 @@ def coverage(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def summary(df: pd.DataFrame) -> dict[str, Any]:
-    """Headline numbers: object count, distinct studies, technologies."""
+    """Headline numbers: object count, distinct study_ids, rows without a study_id, technologies."""
+    has_study = "study_id" in df
     return {
         "n_objects": len(df),
-        "n_studies": int(df["study_id"].astype("string").fillna("unknown").nunique()) if "study_id" in df else None,
+        "n_studies": int(df["study_id"].nunique(dropna=True)) if has_study else None,
+        "n_without_study_id": int(df["study_id"].isna().sum()) if has_study else None,
         "technologies": sorted(df["technology"].dropna().unique()) if "technology" in df else [],
     }
 
@@ -272,13 +274,20 @@ class SpatialDataCohort(Sequence[Dataset]):
         return self._derive(self._df[~self._df["uid"].isin(other._df["uid"])], self._filter)
 
     def citations(self, path: str | Path, *, bib_url: str | None = None) -> Path:
-        """Write the BibTeX entries for the studies in this set to ``path``."""
+        """Write a BibTeX entry for every study in this set to ``path``.
+
+        Studies without a published entry get a fallback entry that cites the dataset page, and a
+        warning reports how many; see :func:`sddb.citations.citation_entries`.
+        """
         from sddb.citations import write_citations
 
         return write_citations(self, path, bib_url=bib_url)
 
     def citations_text(self, *, bib_url: str | None = None) -> tuple[str, int]:
-        """Return ``(BibTeX text, entry count)`` for the studies in this set, without writing a file."""
+        """Return ``(BibTeX text, entry count)`` for the studies in this set, without writing a file.
+
+        The count includes fallback entries; :func:`sddb.citations.citation_entries` reports the two separately.
+        """
         from sddb.citations import citations_text
 
         return citations_text(self, bib_url=bib_url)

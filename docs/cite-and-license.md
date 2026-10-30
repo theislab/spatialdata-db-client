@@ -2,21 +2,39 @@
 
 ## Cite the datasets
 
-Every dataset belongs to a study. A cohort writes the BibTeX entries of the studies it contains:
+Every dataset belongs to a study. A cohort writes one BibTeX entry for each study it contains:
 
 ```python
 from sddb import Catalog
+from sddb.citations import citation_entries
 
 cohort = Catalog().query(technology="Visium", tissue="lung")
 cohort.citations("refs.bib")          # write BibTeX to a file
 bibtex, n_entries = cohort.citations_text()  # or get it as a string
+bibtex, n_published, n_fallback = citation_entries(cohort)  # with the two kinds counted apart
 ```
+
+A study whose `study_id` is a key in the catalog's published `citations.bib` gets that entry. Not every study has one yet. Each study without one, and each dataset without a `study_id`, gets a fallback `@misc` entry instead, so the file cites every study in the cohort. The datasets of one study share one fallback entry. It looks like this:
+
+```bibtex
+@misc{10x:visium-cytassist-human-colon-cancer-p2,
+  title = {visium-cytassist-human-colon-cancer-p2},
+  howpublished = {\url{https://spatialdata-db-web.pages.dev/datasets/visium-spatial-gene-expression-colon-qmnnmcp2b2w5ddyn0000/}},
+  doi = {10.1038/s41588-025-02193-3},
+  year = {2025},
+  note = {SpatialData-DB dataset qMnnMcP2B2W5ddYN0000; license CC-BY-4.0}
+}
+```
+
+The key is the `study_id`, or the uid when the dataset has no `study_id`. The title is the dataset title and the link points to the dataset page on the website (the first dataset of the study, by uid). `doi` appears when the catalog has one. `year` comes from `publication_year`, or else from `publication_date` or `published_at`. The note lists the uids (the first five, then a count) and their licenses. When the cohort needs any fallback entries, one warning reports the counts, for example "3 of 12 studies have a published citation; added 9 fallback entries that cite the dataset page; check them before publishing". Check those entries, and replace them with the paper's own entry where there is one, before you publish. An empty cohort raises `ValueError` instead of writing an empty file.
 
 From the shell, `sddb-cli cite` takes the same facets as a query:
 
 ```bash
 sddb-cli cite --technology Visium --tissue lung -o refs.bib
 ```
+
+It prints how many entries it wrote and how many of them are fallback entries, for example "wrote 12 citations (9 fallback) -> refs.bib".
 
 See {doc}`reference/cli` for all options.
 

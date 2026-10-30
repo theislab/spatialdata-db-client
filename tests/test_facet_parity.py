@@ -125,3 +125,38 @@ def test_mcp_query_tool_new_filters(cat_path):
         "uid0001",
         "uid0002",
     }
+
+
+def test_site_filter_facets(cat):
+    df = cat._df.copy()
+    df["preservation_method"] = pd.array(["FFPE", "fresh frozen", "FFPE", None, "fresh frozen"], dtype="string")
+    df["magnification"] = pd.array(["20x", None, "40x", None, "20x"], dtype="string")
+    cat._df = df
+    assert facet_values(cat.to_df(), "preservation_method") == ["FFPE", "fresh frozen"]
+    assert uids(cat.query(preservation_method="FFPE")) == {"uid0001", "uid0003"}
+    assert uids(cat.query(preservation_method="ffpe")) == {"uid0001", "uid0003"}  # alias
+    assert uids(cat.query(preservation_method="Fresh-Frozen")) == {"uid0002", "uid0005"}  # alias
+    with pytest.raises(ValueError, match="did you mean 'FFPE'"):
+        cat.query(preservation_method="FFPEE")
+    assert uids(cat.query(magnification="20X")) == {"uid0001", "uid0005"}
+    assert uids(cat.query(collections="c-1")) == {"uid0002"}
+    with pytest.raises(ValueError, match="unknown collections value 'c-9'"):
+        cat.query(collections="c-9")
+    assert uids(cat.search("ffpe")) == {"uid0001", "uid0003"}
+
+
+def test_mcp_query_tool_preservation_method(cat_path):
+    df = pd.read_parquet(cat_path)
+    df["preservation_method"] = pd.array(["FFPE", None, None, None, "FFPE"], dtype="string")
+    df.to_parquet(cat_path)
+    assert {r["uid"] for r in tools.query_tool(cat_path.as_uri(), preservation_method="ffpe")} == {"uid0001", "uid0005"}
+
+
+def test_cli_preservation_method(cat_path):
+    df = pd.read_parquet(cat_path)
+    df["preservation_method"] = pd.array(["FFPE", None, None, None, "fresh frozen"], dtype="string")
+    df.to_parquet(cat_path)
+    r = runner.invoke(app, ["query", "--catalog", cat_path.as_uri(), "--preservation-method", "ffpe"])
+    assert r.exit_code == 0, r.output
+    assert "uid0001" in r.output
+    assert "uid0005" not in r.output
