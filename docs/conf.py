@@ -28,7 +28,13 @@ author = "Theis Lab"
 copyright = "2026, Theis Lab"
 release = _version("spatialdata-db")
 
-extensions = ["scverse_doc"]
+extensions = ["scverse_doc", "sphinx_reredirects"]
+# Pages that moved or were withdrawn keep their old URLs working.
+redirects = {
+    "guides/paper/index": "../../index.html",
+    "guides/paper/he-expression": "../../index.html",
+    "guides/paper/novae-domains": "../../index.html",
+}
 source_repository = "https://github.com/theislab/spatialdata-db-client"
 exclude_patterns = [
     *DEFAULTS.exclude_patterns,
