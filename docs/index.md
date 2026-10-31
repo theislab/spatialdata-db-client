@@ -25,19 +25,19 @@ The `sddb-cli` command and the `sddb-mcp` server give the shell and AI agents th
 
 :::{tab-item} pip
 ```bash
-pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.2"
+pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.3"
 ```
 :::
 
 :::{tab-item} uv
 ```bash
-uv pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.2"
+uv pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.3"
 ```
 :::
 
 ::::
 
-This installs the alpha release, v0.1.2. The `main` branch may be ahead of it, and you get the newest code if you leave out `@v0.1.2`.
+This installs the alpha release, v0.1.3. The `main` branch may be ahead of it, and you get the newest code if you leave out `@v0.1.3`.
 
 The client needs Python 3.12 or newer. It is not on PyPI yet, so install it from GitHub.
 
@@ -52,7 +52,7 @@ smallest = min(hits, key=lambda ds: ds.size_bytes)
 sdata = smallest.to_sdata()  # about 7 MB, copied to the local cache once
 ```
 
-## Guides and reference
+## Tutorials and reference
 
 ::::{grid} 1 2 2 3
 :gutter: 3
@@ -64,25 +64,18 @@ sdata = smallest.to_sdata()  # about 7 MB, copied to the local cache once
 Load a dataset or collection you found on the website.
 :::
 
-:::{grid-item-card} {octicon}`search;1.5em;sd-mr-1` Find and load
-:link: guides/find-and-load
+:::{grid-item-card} {octicon}`book;1.5em;sd-mr-1` Tutorials
+:link: tutorials/index
 :link-type: doc
 
-Filter by facets or free text, then load what you pick.
+A numbered series from the first query to a frozen cohort with its citations.
 :::
 
-:::{grid-item-card} {octicon}`stack;1.5em;sd-mr-1` Cohorts
-:link: guides/cohorts
+:::{grid-item-card} {octicon}`beaker;1.5em;sd-mr-1` Use cases
+:link: use_cases/index
 :link-type: doc
 
-Combine datasets, freeze exact versions and split by study.
-:::
-
-:::{grid-item-card} {octicon}`cpu;1.5em;sd-mr-1` Machine learning
-:link: guides/ml
-:link-type: doc
-
-Load one table from many stores and train on a split.
+Longer analyses built on the client, such as an atlas of every Visium section.
 :::
 
 :::{grid-item-card} {octicon}`terminal;1.5em;sd-mr-1` CLI and agents
@@ -99,13 +92,20 @@ Query, download and cite from the shell or an AI agent.
 Every public class and function, with its parameters.
 :::
 
+:::{grid-item-card} {octicon}`law;1.5em;sd-mr-1` Citations and licenses
+:link: tutorials/04_citations_and_licences
+:link-type: doc
+
+Cite the studies behind your data and check what their licenses allow.
+:::
+
 ::::
 
 ## Cite and license
 
-The paper that describes the database is forthcoming.
+A publication that describes the database is forthcoming.
 Until then, cite the studies behind the data you use: `cohort.citations()` writes their BibTeX entries, and `sddb-cli cite` does the same from the shell.
-Each dataset keeps the license of its source, and {doc}`cite-and-license` explains how to check and filter by license.
+Each dataset keeps the license of its source, and {doc}`tutorials/04_citations_and_licences` explains how to check and filter by license.
 
 ```{toctree}
 :hidden:
@@ -120,12 +120,29 @@ intro/db-stack
 ```{toctree}
 :hidden:
 :maxdepth: 2
-:caption: Guides
+:caption: Tutorials
 
-guides/find-and-load
-guides/cohorts
-guides/ml
-guides/visium-atlas/visium-atlas
+tutorials/00_overview
+tutorials/01_find_and_filter
+tutorials/02_load_and_inspect
+tutorials/03_cohorts_and_manifests
+tutorials/04_citations_and_licences
+```
+
+```{toctree}
+:hidden:
+:maxdepth: 2
+:caption: Use cases
+
+use_cases/training_cohort
+use_cases/visium_atlas/visium-atlas
+```
+
+```{toctree}
+:hidden:
+:maxdepth: 2
+:caption: How-to
+
 guides/cli-and-agents
 ```
 
@@ -138,13 +155,4 @@ reference/api
 reference/cli
 reference/mcp
 reference/catalog-columns
-```
-
-```{toctree}
-:hidden:
-:maxdepth: 1
-:caption: Project
-
-cite-and-license
-changelog
 ```

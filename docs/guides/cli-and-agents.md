@@ -5,7 +5,7 @@ The package installs two commands: `sddb-cli`, a thin command line over the cata
 same catalog.
 
 ```
-pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.2"
+pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.3"
 ```
 
 ## sddb-cli
@@ -115,14 +115,14 @@ $ sddb-cli cite -o refs.bib --organism mouse --tissue brain --technology Visium
 wrote 276 citations (252 fallback; entries that share a DOI merged) -> refs.bib
 ```
 
-A study without an entry in the published `citations.bib` gets a fallback entry that cites its dataset page on the website, and the output line counts those entries. Entries that cite the same DOI, such as the GEO samples of one paper, are merged into one. The command exits with an error if no datasets match at all. See {doc}`../cite-and-license` for the fallback format.
+A study without an entry in the published `citations.bib` gets a fallback entry that cites its dataset page on the website, and the output line counts those entries. Entries that cite the same DOI, such as the GEO samples of one paper, are merged into one. The command exits with an error if no datasets match at all. See {doc}`../tutorials/04_citations_and_licences` for the fallback format.
 
 ## sddb-mcp
 
 The MCP server speaks stdio and exposes the catalog to an agent. Install the extra:
 
 ```
-pip install "spatialdata-db[mcp] @ git+https://github.com/theislab/spatialdata-db-client@v0.1.2"
+pip install "spatialdata-db[mcp] @ git+https://github.com/theislab/spatialdata-db-client@v0.1.3"
 ```
 
 ### Claude Desktop

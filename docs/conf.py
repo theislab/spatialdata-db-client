@@ -43,7 +43,7 @@ smartquotes = False  # keep straight quotes, and `--flag` in the CLI reference i
 copybutton_prompt_text = "$ "
 suppress_warnings = ["sddb.catalog"]
 myst_enable_extensions = [*DEFAULTS.myst_enable_extensions, "substitution"]
-nb_execution_mode = "off"  # guides are executed on the HPC by docs/execute_notebooks.sh, never at build time
+nb_execution_mode = "off"  # notebooks are executed on the HPC by docs/execute_notebooks.sh, never at build time
 myst_substitutions = with_defaults(load_stats())
 
 

@@ -21,7 +21,10 @@ def _fmt_size(n: float) -> str:
 
 def _sizes(df: pd.DataFrame) -> list[int]:
     """Catalog ``size_bytes`` per row, 0 where missing."""
-    return df["size_bytes"].fillna(0).astype(int).tolist() if "size_bytes" in df else [0] * len(df)
+    if "size_bytes" not in df:
+        return [0] * len(df)
+    # to_numeric first: a row taken from a Dataset arrives with object dtype, and fillna on it warns in pandas 2.2+
+    return pd.to_numeric(df["size_bytes"], errors="coerce").fillna(0).astype(int).tolist()
 
 
 @contextmanager
