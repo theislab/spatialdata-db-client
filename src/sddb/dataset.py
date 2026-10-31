@@ -35,20 +35,22 @@ def _loads_other_store(vitessce_url: str, zarr_url: str | None) -> bool:
     return bool(linked and own) and linked != own
 
 
-def usable_vitessce_url(uid: Any, vitessce_url: Any, zarr_url: Any) -> str | None:
-    """``vitessce_url``, or None when it is missing or loads another dataset's store (then with a warning).
+def usable_vitessce_url(uid: Any, vitessce_url: Any, zarr_url: Any, *, warn: bool = True) -> str | None:
+    """``vitessce_url``, or None when it is missing or loads another dataset's store.
 
     Every path that returns or renders a ``vitessce_url`` goes through this check, as the website does.
+    A hidden link gives a warning unless ``warn`` is False, for callers that report many rows at once.
     """
     url = _clean(vitessce_url)
     if not url:
         return None
     if _loads_other_store(str(url), _clean(zarr_url)):
-        warnings.warn(
-            f"the viewer link for {uid} loads another dataset's store; it is hidden until the catalog is fixed",
-            UserWarning,
-            stacklevel=3,
-        )
+        if warn:
+            warnings.warn(
+                f"the viewer link for {uid} loads another dataset's store; it is hidden until the catalog is fixed",
+                UserWarning,
+                stacklevel=3,
+            )
         return None
     return str(url)
 

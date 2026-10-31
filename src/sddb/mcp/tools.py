@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -21,9 +22,16 @@ MAX_ROWS = 200
 
 
 def _records(df: pd.DataFrame) -> list[dict[str, Any]]:
-    """JSON rows; a ``vitessce_url`` that loads another dataset's store becomes null, with a warning."""
+    """JSON rows; a ``vitessce_url`` that loads another dataset's store becomes null, with one warning."""
     if {"vitessce_url", "zarr_url", "uid"} <= set(df.columns):
-        urls = [usable_vitessce_url(*r) for r in df[["uid", "vitessce_url", "zarr_url"]].itertuples(index=False)]
+        rows = list(df[["uid", "vitessce_url", "zarr_url"]].itertuples(index=False))
+        urls = [usable_vitessce_url(*r, warn=False) for r in rows]
+        if hidden := [str(r[0]) for r, u in zip(rows, urls, strict=True) if u is None and pd.notna(r[1]) and r[1]]:
+            warnings.warn(
+                f"hid {len(hidden)} viewer links that load another dataset's store (e.g. {hidden[0]})",
+                UserWarning,
+                stacklevel=3,
+            )
         df = df.assign(vitessce_url=pd.Series(urls, index=df.index, dtype="object"))
     out: list[dict[str, Any]] = json.loads(df.to_json(orient="records"))
     return out

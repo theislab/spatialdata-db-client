@@ -277,11 +277,13 @@ def test_records_hide_links_to_another_datasets_store(tmp_path):
     df.loc[df["uid"] == "uid0003", "vitessce_url"] = own
     p = tmp_path / "cat.parquet"
     df.to_parquet(p)
-    with pytest.warns(UserWarning, match="the viewer link for uid0002 loads another dataset's store") as record:
+    with pytest.warns(
+        UserWarning, match=r"hid 1 viewer links that load another dataset's store \(e.g. uid0002\)"
+    ) as record:
         rows = {r["uid"]: r for r in tools.query_tool(p.as_uri(), validation="all")}
     assert len(record) == 1
     assert rows["uid0002"]["vitessce_url"] is None
     assert rows["uid0003"]["vitessce_url"] == own
     assert rows["uid0001"]["vitessce_url"] == df.loc[0, "vitessce_url"]
-    with pytest.warns(UserWarning, match="uid0002"):
+    with pytest.warns(UserWarning, match=r"hid 1 viewer links .*uid0002"):
         assert tools.describe_tool("uid0002", p.as_uri())["vitessce_url"] is None
