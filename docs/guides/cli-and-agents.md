@@ -5,7 +5,7 @@ The package installs two commands: `sddb-cli`, a thin command line over the cata
 same catalog.
 
 ```
-pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.2"
+pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.3"
 ```
 
 ## sddb-cli
@@ -122,7 +122,7 @@ A study without an entry in the published `citations.bib` gets a fallback entry 
 The MCP server speaks stdio and exposes the catalog to an agent. Install the extra:
 
 ```
-pip install "spatialdata-db[mcp] @ git+https://github.com/theislab/spatialdata-db-client@v0.1.2"
+pip install "spatialdata-db[mcp] @ git+https://github.com/theislab/spatialdata-db-client@v0.1.3"
 ```
 
 ### Claude Desktop

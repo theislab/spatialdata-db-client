@@ -7,10 +7,10 @@ Lean read client for the spatialdata-db spatial-omics collection: query the cata
 ## Install
 
 ```bash
-pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.2"
+pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.3"
 ```
 
-This installs the alpha release, v0.1.2. The `main` branch may be ahead of it, and you get the newest code if you leave out `@v0.1.2`.
+This installs the alpha release, v0.1.3. The `main` branch may be ahead of it, and you get the newest code if you leave out `@v0.1.3`.
 
 ## Usage
 
