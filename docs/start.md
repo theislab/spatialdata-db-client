@@ -32,7 +32,7 @@ print(ds.license)  # the license id of the source, e.g. CC-BY-4.0
 sdata = ds.to_sdata()  # copied to the local cache on the first call, then reused
 ```
 
-The uid in this example is the smallest dataset in the catalog, so it is a quick one to try. A download prints its progress on stderr, and nothing is printed when the store is already cached. Check `ds.license` before you reuse the data, and see {doc}`cite-and-license` for what the license columns mean. {doc}`guides/find-and-load` covers filtering and loading in more detail.
+The uid in this example is the smallest dataset in the catalog, so it is a quick one to try. A download prints its progress on stderr, and nothing is printed when the store is already cached. Check `ds.license` before you reuse the data, and see {doc}`tutorials/04_citations_and_licences` for what the license columns mean. {doc}`tutorials/01_find_and_filter` and {doc}`tutorials/02_load_and_inspect` cover filtering and loading in more detail.
 
 ### Only some elements, in a folder of your choice
 
@@ -57,7 +57,7 @@ print(cohort.licenses())  # one row per license, with the number of members
 sdata_by_uid = cohort.to_dict()  # {uid: SpatialData}, downloaded once into the cache
 ```
 
-`licenses()` returns a table with the columns `license` and `n`. Members whose license is not known are counted under `unknown`. To keep the `.zarr` stores in a folder of your own instead of the cache, call `cohort.download("data/")`. See {doc}`guides/cohorts` for freezing, splitting and reproducing a cohort.
+`licenses()` returns a table with the columns `license` and `n`. Members whose license is not known are counted under `unknown`. To keep the `.zarr` stores in a folder of your own instead of the cache, call `cohort.download("data/")`. See {doc}`tutorials/03_cohorts_and_manifests` for freezing, splitting and reproducing a cohort.
 
 (from-uids)=
 ## From a list of uids
@@ -72,7 +72,7 @@ print(cohort.members[["uid", "study_id"]])  # one row per dataset
 sdata_by_uid = cohort.to_dict()  # {uid: SpatialData}, downloaded once into the cache
 ```
 
-Add the uids you want, each copied from the chip on a dataset page. `cohort()` needs full uids, and it raises a `KeyError` that names every uid or study id that is not in the catalog, so a typo fails before anything is downloaded. See {doc}`guides/cohorts` for freezing, splitting and reproducing the cohort.
+Add the uids you want, each copied from the chip on a dataset page. `cohort()` needs full uids, and it raises a `KeyError` that names every uid or study id that is not in the catalog, so a typo fails before anything is downloaded. See {doc}`tutorials/03_cohorts_and_manifests` for freezing, splitting and reproducing the cohort.
 
 (reproducible)=
 ## Reproducible references
@@ -91,7 +91,7 @@ ds = cat.dataset("geo:GSM9778330")  # by canonical_key; a uid or a stem works as
 print(ds.uid)  # the uid of that version, which you can record
 ```
 
-Record the release date together with the uids. To go back to the exact data later, open the same release and pass the uids. {doc}`guides/cohorts` shows how to freeze a cohort and check that the catalog file has not changed.
+Record the release date together with the uids. To go back to the exact data later, open the same release and pass the uids. {doc}`tutorials/03_cohorts_and_manifests` shows how to freeze a cohort and check that the catalog file has not changed.
 
 (cli)=
 ## Command line
