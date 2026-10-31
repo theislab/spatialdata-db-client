@@ -212,6 +212,35 @@ def test_gene_key_none_makes_repeated_var_names_unique(tmp_path):
     )
 
 
+def test_gene_key_none_drops_missing_var_names(tmp_path):
+    """Allen MERSCOPE panels hold blank probes whose var_names are NA, which ad.concat cannot reindex."""
+    names = pd.Index(["A", pd.NA, "B", pd.NA, "", "A"], dtype="string")
+    with ad.settings.override(allow_write_nullable_strings=True):
+        url = _var_store(tmp_path / "na.zarr", pd.DataFrame(index=names))
+    members = pd.DataFrame({"uid": ["blank"], "zarr_url": [url]})
+    with pytest.warns(UserWarning, match="missing or empty var_name") as record:
+        adata = concat_tables(members)
+    assert list(adata.var_names) == ["A", "B", "A-1"]
+    (msg,) = [str(w.message) for w in record if "in members" in str(w.message)]
+    assert msg == (
+        "dropped 3 features with a missing or empty var_name and made 1 repeated var_names unique with a "
+        "'-1' style suffix in members ['blank']; pass gene_key='ensembl' or 'symbol' to merge them instead"
+    )
+
+
+@pytest.mark.network
+def test_gene_key_none_real_merscope_blank_probes():
+    """The repro: an Allen MERSCOPE table with 15 blank probes whose var_names are NA."""
+    from sddb import Catalog
+
+    cohort = Catalog().cohort(uids=["rdngUwLr6XlVEmpD0000"])
+    with pytest.warns(UserWarning, match=r"dropped 15 features with a missing .*'rdngUwLr6XlVEmpD0000'"):
+        adata = cohort.to_anndata(elements=("X", "var", "obs"))  # used to raise InvalidIndexError
+    assert adata.n_vars == 314 - 15
+    assert adata.var_names.is_unique
+    assert not adata.var_names.isna().any()
+
+
 def test_gene_key_ensembl_aligns_members(tmp_path):
     with pytest.warns(UserWarning, match="gene_key='ensembl'") as record:
         adata = concat_tables(_mixed(tmp_path), gene_key="ensembl")

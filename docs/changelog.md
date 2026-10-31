@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Behaviour change: `to_anndata()` with the default `gene_key=None` drops features whose var_name is missing or empty before it makes repeated names unique. Allen MERSCOPE tables hold 15 blank probes with missing names, and `to_anndata()` failed on them with `InvalidIndexError`. The existing warning names the member and now also gives the number of dropped features.
 - Documentation: a "Guides from the paper" section with the two executed paper guides (H&E to expression, Novae domains across platforms), rendered from their stored outputs.
 - The install instructions pin v0.1.2. `tests/test_docs_quickstart.py` holds the pinned tag in one constant, `ALPHA_TAG`, and fails when an install line in README.md or docs/ names another tag.
 - `Catalog.dataset` also accepts a `canonical_key` such as `geo:GSM9778330`, after the full uid and the 16-character stem. The column is unique where it is set (5424 of 6087 datasets in the 2026-10-28 catalog); a null `canonical_key` cannot be looked up. A key that matches several rows raises `KeyError`, like an ambiguous stem. A new "Reproducible references" section in "From the website to Python" covers `Catalog(version=...)`, uids, stems and `canonical_key`.
