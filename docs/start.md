@@ -6,16 +6,16 @@ The [DB website]({{ site_url }}) is the place to find data. This page shows what
 ## Install
 
 ```bash
-pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.1"
+pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.2"
 ```
 
 or, with uv:
 
 ```bash
-uv pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.1"
+uv pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.2"
 ```
 
-This installs the alpha release, v0.1.1. The `main` branch may be ahead of it, and you get the newest code if you leave out `@v0.1.1`. The package needs Python 3.12 or newer. It is not on PyPI yet, so install it from GitHub. The name `sddb` on PyPI belongs to an unrelated package.
+This installs the alpha release, v0.1.2. The `main` branch may be ahead of it, and you get the newest code if you leave out `@v0.1.2`. The package needs Python 3.12 or newer. It is not on PyPI yet, so install it from GitHub. The name `sddb` on PyPI belongs to an unrelated package.
 
 The client keeps its cache in the user cache directory of the platform, in a folder called `sddb`. Set `SDDB_CACHE_DIR` to put it somewhere else, for example on a larger disk. The first call to `Catalog()` downloads the catalog (about 7 MB) from a GitHub release. Later calls check for a newer catalog and download it again only when one has been published.
 
