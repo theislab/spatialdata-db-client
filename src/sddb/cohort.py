@@ -311,7 +311,8 @@ class SpatialDataCohort(Sequence[Dataset]):
         """Write a BibTeX entry for every study in this set to ``path``.
 
         Studies without a published entry get a fallback entry that cites the dataset page, and a
-        warning reports how many; see :func:`sddb.citations.citation_entries`.
+        warning reports how many. Entries that share a DOI are merged into one; see
+        :func:`sddb.citations.citation_entries`.
         """
         from sddb.citations import write_citations
 
@@ -320,7 +321,8 @@ class SpatialDataCohort(Sequence[Dataset]):
     def citations_text(self, *, bib_url: str | None = None) -> tuple[str, int]:
         """Return ``(BibTeX text, entry count)`` for the studies in this set, without writing a file.
 
-        The count includes fallback entries; :func:`sddb.citations.citation_entries` reports the two separately.
+        The count includes fallback entries and is counted after merging entries that share a DOI;
+        :func:`sddb.citations.citation_entries` reports the two kinds separately.
         """
         from sddb.citations import citations_text
 

@@ -268,4 +268,5 @@ def cite(
     except Exception as err:
         raise _fail(err) from err
     output.write_text(text, encoding="utf-8")
-    typer.echo(f"wrote {n_published + n_fallback} citations ({n_fallback} fallback) -> {output}")
+    n = n_published + n_fallback
+    typer.echo(f"wrote {n} citations ({n_fallback} fallback; entries that share a DOI merged) -> {output}")

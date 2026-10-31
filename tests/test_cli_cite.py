@@ -31,7 +31,7 @@ def test_cite_facet(paths, tmp_path):
     text = out.read_text()
     assert "Smith2023" in text
     assert "Lee2022" not in text
-    assert "wrote 1 citations (0 fallback) ->" in r.output
+    assert "wrote 1 citations (0 fallback; entries that share a DOI merged) ->" in r.output
 
 
 def test_cite_search(paths, tmp_path):
@@ -53,7 +53,7 @@ def test_cite_reports_fallback(paths, tmp_path):
     out = tmp_path / "out.bib"
     r = _cite(paths, out, "--search", "colon")  # Wong2021 is in the fixture bib
     assert r.exit_code == 0, r.output
-    assert "wrote 1 citations (0 fallback)" in r.output
+    assert "wrote 1 citations (0 fallback;" in r.output
     cat, _ = paths
     empty_bib = tmp_path / "empty.bib"
     empty_bib.write_text("")
@@ -62,5 +62,5 @@ def test_cite_reports_fallback(paths, tmp_path):
             app, ["cite", "--technology", "Xenium", "--catalog", cat, "--bib-url", str(empty_bib), "-o", str(out)]
         )
     assert r.exit_code == 0, r.output
-    assert "wrote 1 citations (1 fallback)" in r.output
+    assert "wrote 1 citations (1 fallback;" in r.output
     assert out.read_text().startswith("@misc{Smith2023,")

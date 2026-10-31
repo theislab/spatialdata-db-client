@@ -189,7 +189,7 @@ def cite_tool(
     """Return BibTeX text, entry count and fallback count for the studies of a filtered cohort (empty cohort -> n=0).
 
     ``n`` counts every entry; ``n_fallback`` counts the entries that cite the dataset page because the
-    study has no published citation.
+    study has no published citation. Both count entries after merging those that share a DOI.
     """
     res = _query(
         catalog_url,

@@ -14,7 +14,11 @@ bibtex, n_entries = cohort.citations_text()  # or get it as a string
 bibtex, n_published, n_fallback = citation_entries(cohort)  # with the two kinds counted apart
 ```
 
-A study whose `study_id` is a key in the catalog's published `citations.bib` gets that entry. Not every study has one yet. Each study without one, and each dataset without a `study_id`, gets a fallback `@misc` entry instead, so the file cites every study in the cohort. The datasets of one study share one fallback entry. It looks like this:
+A study whose `study_id` is a key in the catalog's published `citations.bib` gets that entry. Not every study has one yet. Each study without one, and each dataset without a `study_id`, gets a fallback `@misc` entry instead, so the file cites every study in the cohort. The datasets of one study share one fallback entry.
+
+The published `citations.bib` has one entry per study, and a GEO study is a single sample, so one paper with many samples has many entries. Entries that share a DOI are merged into one: the first entry (by key) keeps its key and fields, and its `note` lists the keys it covers, for example "covers samples: geo:GSM9231917, geo:GSM9231918, geo:GSM9231919, geo:GSM9231920, geo:GSM9231921 and 5 more". Fallback entries that share a DOI merge the same way. In the 2026-10-28 catalog, human lung Visium (152 studies) gives 95 entries instead of 152: its 65 published entries cite 8 papers. The counts that `citation_entries` returns are counted after merging.
+
+A fallback entry looks like this:
 
 ```bibtex
 @misc{10x:visium-cytassist-human-colon-cancer-p2,
@@ -26,7 +30,7 @@ A study whose `study_id` is a key in the catalog's published `citations.bib` get
 }
 ```
 
-The key is the `study_id`, or the uid when the dataset has no `study_id`. The title is the dataset title and the link points to the dataset page on the website (the first dataset of the study, by uid). `doi` appears when the catalog has one. `year` comes from `publication_year`, or else from `publication_date` or `published_at`. The note lists the uids (the first five, then a count) and their licenses. When the cohort needs any fallback entries, one warning reports the counts, for example "3 of 12 studies have a published citation; added 9 fallback entries that cite the dataset page; check them before publishing". Check those entries, and replace them with the paper's own entry where there is one, before you publish. An empty cohort raises `ValueError` instead of writing an empty file.
+The key is the `study_id`, or the uid when the dataset has no `study_id`. The title is the dataset title and the link points to the dataset page on the website (the first dataset of the study, by uid). `doi` appears when the catalog has one. `year` comes from `publication_year`, or else from `publication_date` or `published_at`. The note lists the uids (the first five, then a count) and their licenses. When the cohort needs any fallback entries, one warning reports the counts, for example "65 of 152 studies have a published citation, in 8 entries after merging those that share a DOI; added 87 fallback entries that cite the dataset page; check them before publishing". Check those entries, and replace them with the paper's own entry where there is one, before you publish. An empty cohort raises `ValueError` instead of writing an empty file.
 
 From the shell, `sddb-cli cite` takes the same facets as a query:
 
@@ -34,7 +38,7 @@ From the shell, `sddb-cli cite` takes the same facets as a query:
 sddb-cli cite --technology Visium --tissue lung -o refs.bib
 ```
 
-It prints how many entries it wrote and how many of them are fallback entries, for example "wrote 12 citations (9 fallback) -> refs.bib".
+It prints how many entries it wrote and how many of them are fallback entries, for example "wrote 95 citations (87 fallback; entries that share a DOI merged) -> refs.bib".
 
 See {doc}`reference/cli` for all options.
 
