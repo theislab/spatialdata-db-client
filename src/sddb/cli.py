@@ -187,9 +187,12 @@ def download(
 
 @app.command("viewer-url")
 def viewer_url(uid: str, catalog: _CatalogOpt = None) -> None:
-    """Print the browser viewer link for a dataset."""
+    """Print the browser viewer link for a dataset; fails when the link loads another dataset's store."""
     try:
-        typer.echo(_resolve(Catalog(catalog), [uid])[0].viewer_url())
+        dataset = _resolve(Catalog(catalog), [uid])[0]
+        if (url := dataset.viewer_url()) is None:
+            raise ValueError(f"dataset {dataset.uid} has no usable viewer link")
+        typer.echo(url)
     except Exception as err:
         raise _fail(err) from err
 

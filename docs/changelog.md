@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Behaviour change: `Dataset.viewer_url()` returns `None` with a warning when the viewer link loads another dataset's store, and `Dataset.view()` and `sddb-cli viewer-url` fail with `ValueError` (exit code 1) instead of opening it. The store id in the link (`.lamindb/<id>.zarr`, after decoding the link twice) is compared with the one in `zarr_url`. This hides 333 of the 5937 links in the 2026-10-28 catalog, the same ones the website hides.
 - Behaviour change: `to_anndata()` with the default `gene_key=None` drops features whose var_name is missing or empty before it makes repeated names unique. Allen MERSCOPE tables hold 15 blank probes with missing names, and `to_anndata()` failed on them with `InvalidIndexError`. The existing warning names the member and now also gives the number of dropped features.
 - Documentation: a "Guides from the paper" section with the two executed paper guides (H&E to expression, Novae domains across platforms), rendered from their stored outputs.
 - The install instructions pin v0.1.2. `tests/test_docs_quickstart.py` holds the pinned tag in one constant, `ALPHA_TAG`, and fails when an install line in README.md or docs/ names another tag.

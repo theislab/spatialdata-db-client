@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import re
+import warnings
 import webbrowser
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import unquote
 
 import numpy as np
 import pandas as pd
@@ -18,6 +21,18 @@ if TYPE_CHECKING:
     from spatialdata import SpatialData
 
 _VITESSCE = "https://vitessce.io/?url="
+_STORE_ID = re.compile(r"\.lamindb/([A-Za-z0-9]+)\.zarr")
+
+
+def _loads_other_store(vitessce_url: str, zarr_url: str | None) -> bool:
+    """True when a viewer link loads a ``.lamindb/<id>.zarr`` store other than the one in ``zarr_url``.
+
+    Published links embed the Vitessce config URL-encoded twice, so the link is decoded twice before the
+    store ids are read. A link or ``zarr_url`` without a store id is not checked.
+    """
+    linked = set(_STORE_ID.findall(unquote(unquote(vitessce_url))))
+    own = set(_STORE_ID.findall(zarr_url or ""))
+    return bool(linked and own) and linked != own
 
 
 @dataclass(frozen=True)
@@ -91,12 +106,22 @@ class Dataset:
         """Resolve role regexes to this store's element paths (``"kind/name"``); see :func:`sddb.resolve`."""
         return _resolve_roles(self.elements().keys(), roles)
 
-    def viewer_url(self) -> str:
+    def viewer_url(self) -> str | None:
         """Build a vitessce.io viewer link from this row's ``vitessce_url`` (pure string transform).
 
         If ``vitessce_url`` is already a vitessce.io viewer link (as in the published catalog) it is
-        returned unchanged. Otherwise it is treated as a config-sidecar URL: an ``s3://bucket/key`` URL is rewritten to the LaminHub CORS proxy
-        ``https://lamin.ai/storage/s3/bucket/key`` and wrapped as ``https://vitessce.io/?url=<proxied>``.
+        returned unchanged. Otherwise it is treated as a config-sidecar URL: an ``s3://bucket/key`` URL is
+        rewritten to the LaminHub CORS proxy ``https://lamin.ai/storage/s3/bucket/key`` and wrapped as
+        ``https://vitessce.io/?url=<proxied>``.
+
+        Some published links load another dataset's store (333 of 6087 rows in the 2026-10-28 catalog). The
+        store id in the link (``.lamindb/<id>.zarr``) is compared with the one in ``zarr_url``, and on a
+        mismatch the link is hidden: this returns ``None`` with a warning, as the website does.
+
+        Warns
+        -----
+        UserWarning
+            If the link loads another dataset's store.
 
         Raises
         ------
@@ -106,13 +131,30 @@ class Dataset:
         url: str | None = self.vitessce_url
         if not url:
             raise ValueError(f"dataset {self.uid} has no vitessce_url")
+        if _loads_other_store(url, self.zarr_url):
+            warnings.warn(
+                f"the viewer link for {self.uid} loads another dataset's store; it is hidden until the catalog is fixed",
+                UserWarning,
+                stacklevel=2,
+            )
+            return None
         if url.startswith("https://vitessce.io"):
             return url
         return _VITESSCE + remote.proxy_url(url)
 
     def view(self) -> None:
-        """Open :meth:`viewer_url` in the default browser."""
-        webbrowser.open(self.viewer_url())
+        """Open :meth:`viewer_url` in the default browser.
+
+        Raises
+        ------
+        ValueError
+            If the row has no ``vitessce_url``, or its link loads another dataset's store (with the warning
+            from :meth:`viewer_url`).
+        """
+        url = self.viewer_url()
+        if url is None:
+            raise ValueError(f"dataset {self.uid} has no usable viewer link")
+        webbrowser.open(url)
 
     def view_interactive(self, *, mode: str = "config") -> Any:
         """In-notebook interactive view; requires the ``[viz]`` extra.
