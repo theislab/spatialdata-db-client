@@ -1,4 +1,5 @@
 import inspect
+import re
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,8 @@ import pytest
 from sddb import Catalog
 
 _ROOT = Path(__file__).parent.parent
+# The release the install instructions pin. To bump: replace the old tag in README.md and docs/, then change this line.
+ALPHA_TAG = "v0.1.2"
 
 
 def test_quickstart_api_exists():
@@ -18,7 +21,20 @@ def test_quickstart_api_exists():
     index = (_ROOT / "docs" / "index.md").read_text()
     assert ".to_sdata()" in index
     assert "min(hits, key=lambda ds: ds.size_bytes)" in index
-    assert 'pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.1"' in index
+    assert f'pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@{ALPHA_TAG}"' in index
+
+
+def test_install_pins_use_one_tag():
+    files = [_ROOT / "README.md", *(_ROOT / "docs").rglob("*.md"), *(_ROOT / "docs").rglob("*.ipynb")]
+    files = [f for f in files if "_build" not in f.parts and "superpowers" not in f.parts and f.name != "changelog.md"]
+    tags = {
+        (f.relative_to(_ROOT).as_posix(), tag)
+        for f in files
+        for tag in re.findall(r"spatialdata-db-client@(v[\d.]+\d)|alpha release, (v[\d.]+\d)", f.read_text())
+    }
+    found = {(path, a or b) for path, (a, b) in tags}
+    assert found, "no pinned install line found"
+    assert {t for _, t in found} == {ALPHA_TAG}, sorted(p for p in found if p[1] != ALPHA_TAG)
 
 
 def test_citation_cff_is_valid():
