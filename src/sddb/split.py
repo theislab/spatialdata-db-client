@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,10 @@ _FOLDS = ("train", "val", "test")
 
 @dataclass(frozen=True)
 class SplitManifest:
-    """Per-uid fold assignment, pinned to the parent cohort hash, ``by`` key, ``seed`` and ratios."""
+    """Per-uid fold assignment, pinned to the parent cohort hash, ``by`` key, ``seed`` and ratios.
+
+    ``by`` is the grouping column, or the name of the grouping function (``"callable"`` for a lambda).
+    """
 
     parent_hash: str
     by: str
@@ -42,11 +46,22 @@ def _group_key(uid: Any, study: Any) -> str:
     return f"object:{uid}" if (study is None or pd.isna(study)) else str(study)
 
 
+GroupBy = str | Callable[[pd.Series], Any]
+
+
+def _by_name(by: GroupBy) -> str:
+    """How the split was grouped, for the manifest: the column, else the function's name or ``"callable"``."""
+    if isinstance(by, str):
+        return by
+    name = getattr(by, "__name__", None)
+    return name if isinstance(name, str) and name != "<lambda>" else "callable"
+
+
 def make_split(
     members: pd.DataFrame,
     parent_hash: str,
     *,
-    by: str = "study_id",
+    by: GroupBy = "study_id",
     train: float,
     val: float,
     test: float,
@@ -60,17 +75,25 @@ def make_split(
 
     Fold sizes are counted in groups, not rows, so row-level proportions can differ from the
     requested ratios when studies are uneven.
+
+    ``by`` is a column of ``members``, or a function that takes one member row and returns its group
+    key. A missing key (``None`` or NA) puts that member in a group of its own. The manifest records
+    the column, or the function's ``__name__`` (``"callable"`` for a lambda).
     """
     if mode not in {"group", "annotate"}:
         raise ValueError(f"mode must be 'group' or 'annotate', got {mode!r}")
-    if by not in members.columns:
+    if isinstance(by, str) and by not in members.columns:
         raise KeyError(f"split column {by!r} not in cohort members")
+    if not isinstance(by, str) and not callable(by):
+        raise TypeError(f"by must be a column name or a callable, got {type(by).__name__}")
     ratios = {"train": train, "val": val, "test": test}
     if min(ratios.values()) < 0 or max(ratios.values()) <= 0 or not math.isclose(sum(ratios.values()), 1.0):
         raise ValueError(f"ratios must be >= 0, include a positive one, and sum to 1; got {ratios}")
-    groups = {str(u): _group_key(u, s) for u, s in zip(members["uid"], members[by], strict=True)}
+    keys_in = members[by] if isinstance(by, str) else [by(row) for _, row in members.iterrows()]
+    groups = {str(u): _group_key(u, s) for u, s in zip(members["uid"], keys_in, strict=True)}
+    name = _by_name(by)
     if mode == "annotate":
-        return SplitManifest(parent_hash, by, seed, ratios, mode, groups)
+        return SplitManifest(parent_hash, name, seed, ratios, mode, groups)
     keys = sorted(set(groups.values()))  # deterministic input order
     nonzero = [f for f, w in ratios.items() if w > 0]
     if len(keys) < len(nonzero):
@@ -87,7 +110,7 @@ def make_split(
         for _ in range(counts[fold]):
             fold_by_key[order[i]] = fold
             i += 1
-    return SplitManifest(parent_hash, by, seed, ratios, mode, {u: fold_by_key[g] for u, g in groups.items()})
+    return SplitManifest(parent_hash, name, seed, ratios, mode, {u: fold_by_key[g] for u, g in groups.items()})
 
 
 def _largest_remainder(n: int, ratios: dict[str, float]) -> dict[str, int]:

@@ -78,3 +78,38 @@ def test_bad_ratios_raise(r, mode):
 def test_bad_mode_raises():
     with pytest.raises(ValueError, match="mode"):
         make_split(_members(["A", "B"]), "h", train=0.5, val=0.0, test=0.5, seed=1, mode="nope")
+
+
+def _series(row):
+    return row["series"]
+
+
+def test_by_callable_groups_by_its_key():
+    """A GEO study_id is one sample (GSM), so the default splits a series; a callable groups by series."""
+    m = pd.DataFrame(
+        {
+            "uid": [f"u{i}" for i in range(6)],
+            "study_id": [f"geo:GSM{i}" for i in range(6)],
+            "series": ["GSE1", "GSE1", "GSE1", "GSE2", "GSE2", None],
+        }
+    )
+    s = make_split(m, "h", by=_series, train=0.5, val=0.0, test=0.5, seed=3)
+    assert s.by == "_series"
+    assert len({s.assignments[u] for u in ("u0", "u1", "u2")}) == 1  # one series, one fold
+    assert s.assignments["u3"] == s.assignments["u4"]
+    a = make_split(m, "h", by=_series, train=0.5, val=0.0, test=0.5, seed=3, mode="annotate")
+    assert a.assignments == {"u0": "GSE1", "u1": "GSE1", "u2": "GSE1", "u3": "GSE2", "u4": "GSE2", "u5": "object:u5"}
+    assert make_split(m, "h", by=lambda r: r["series"], train=0.5, val=0.0, test=0.5, seed=3).by == "callable"
+
+
+def test_by_column_matches_the_same_callable():
+    m = _members(["A", "A", "B", "C", "D", "E"])
+    col = make_split(m, "h", by="study_id", train=0.5, val=0.25, test=0.25, seed=9)
+    fn = make_split(m, "h", by=lambda r: r["study_id"], train=0.5, val=0.25, test=0.25, seed=9)
+    assert col.by == "study_id"
+    assert col.assignments == fn.assignments
+
+
+def test_by_rejects_other_types():
+    with pytest.raises(TypeError, match="column name or a callable"):
+        make_split(_members(["A", "B"]), "h", by=3, train=0.5, val=0.0, test=0.5, seed=1)

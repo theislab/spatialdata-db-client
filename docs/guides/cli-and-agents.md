@@ -112,10 +112,10 @@ Write BibTeX for the studies behind the datasets that match the facets or search
 
 ```
 $ sddb-cli cite -o refs.bib --organism mouse --tissue brain --technology Visium
-wrote 430 citations (252 fallback) -> refs.bib
+wrote 276 citations (252 fallback; entries that share a DOI merged) -> refs.bib
 ```
 
-A study without an entry in the published `citations.bib` gets a fallback entry that cites its dataset page on the website, and the output line counts those entries. The command exits with an error if no datasets match at all. See {doc}`../tutorials/04_citations_and_licences` for the fallback format.
+A study without an entry in the published `citations.bib` gets a fallback entry that cites its dataset page on the website, and the output line counts those entries. Entries that cite the same DOI, such as the GEO samples of one paper, are merged into one. The command exits with an error if no datasets match at all. See {doc}`../tutorials/04_citations_and_licences` for the fallback format.
 
 ## sddb-mcp
 

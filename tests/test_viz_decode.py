@@ -38,7 +38,8 @@ def test_view_interactive_inlined_and_fallback(monkeypatch):
     seen = []
     monkeypatch.setattr(viz, "render_config", lambda c: seen.append(c) or "w")
     row = make_fixture_catalog().iloc[0].copy()
-    row["vitessce_url"] = _real_url()
+    sample = pd.read_parquet(SAMPLE).dropna(subset=["vitessce_url"]).iloc[0]
+    row["vitessce_url"], row["zarr_url"] = _real_url(), sample["zarr_url"]  # the link must load this store
     assert Dataset(row).view_interactive(mode="config") == "w"
     assert isinstance(seen[0], dict)
     Dataset(make_fixture_catalog().iloc[0]).view_interactive(mode="config")

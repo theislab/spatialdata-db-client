@@ -72,6 +72,16 @@ def test_viewer_url(cat_url):
     assert runner.invoke(app, ["viewer-url", "nope", "--catalog", cat_url]).exit_code == 1
 
 
+def test_viewer_url_fails_on_another_datasets_store(tmp_path):
+    df = make_fixture_catalog()
+    df["vitessce_url"] = "https://vitessce.io#?edit=false&url=data:,%252E.lamindb%252FotherStore000000.zarr"
+    (p := tmp_path / "cat.parquet").write_bytes(df.to_parquet())
+    with pytest.warns(UserWarning, match="another dataset's store"):
+        r = runner.invoke(app, ["viewer-url", "uid0001", "--catalog", p.as_uri()])
+    assert r.exit_code == 1
+    assert "no usable viewer link" in r.output
+
+
 def test_download(tmp_path):
     zarr = make_tiny_sdata_zarr(tmp_path)
     df = make_fixture_catalog()

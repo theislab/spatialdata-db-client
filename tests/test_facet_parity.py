@@ -83,6 +83,15 @@ def test_unknown_value_raises_with_suggestion(cat):
         cat.query(organism=["human", "mouze"])
     with pytest.raises(ValueError, match=r"list the values with facets\('tissue'\)"):
         cat.query(tissue="qqqqqqqq")
+    assert cat.facets("tissue") == facet_values(cat.to_df(), "tissue")  # the hint names a real method
+
+
+def test_catalog_facets(cat):
+    assert cat.facets() == facet_values(cat.to_df())
+    assert "organism" in cat.facets()
+    assert cat.facets("source") == ["10x", "geo", "hest"]
+    with pytest.raises(ValueError, match="unknown facet 'nope'"):
+        cat.facets("nope")
 
 
 def test_known_value_without_match_is_empty(cat):

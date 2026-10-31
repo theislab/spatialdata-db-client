@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,6 +16,9 @@ from sddb.genes import sibling_url
 if TYPE_CHECKING:
     from sddb.cohort import SpatialDataCohort
 
+_DOI_FIELD = re.compile(r"\bdoi\s*=\s*[{\"]\s*([^}\"]+?)\s*[}\"]", re.IGNORECASE)
+_NOTE_FIELD = re.compile(r"\bnote\s*=\s*\{", re.IGNORECASE)
+_SHOWN = 5  # keys listed in a merged entry's note before the rest become a count
 DEFAULT_BIB_URL = "https://github.com/theislab/spatialdata-db-client/releases/download/catalog-latest/citations.bib"
 
 
@@ -89,6 +93,49 @@ def _fallback_entry(key: str, rows: pd.DataFrame) -> str:
     return f"@misc{{{key},\n{body}\n}}"
 
 
+def _doi(entry: str) -> str | None:
+    """The DOI field of a BibTeX entry, lower case and without a resolver prefix, or None."""
+    match = _DOI_FIELD.search(entry)
+    if not match:
+        return None
+    doi = re.sub(r"^(https?://)?(dx\.)?doi\.org/", "", match.group(1).strip(), flags=re.IGNORECASE)
+    return doi.lower() or None
+
+
+def _add_note(entry: str, text: str) -> str:
+    """Append ``text`` to the entry's ``note`` field, or add a ``note`` field before the closing brace."""
+    if match := _NOTE_FIELD.search(entry):
+        depth, j = 1, match.end()
+        while j < len(entry) and depth:
+            depth += {"{": 1, "}": -1}.get(entry[j], 0)
+            j += 1
+        return f"{entry[: j - 1]}; {text}{entry[j - 1 :]}"
+    body = entry[: entry.rindex("}")].rstrip().rstrip(",")
+    return f"{body},\n  note = {{{text}}}\n}}"
+
+
+def _merge_by_doi(entries: list[tuple[str, str]]) -> list[str]:
+    """Merge ``(key, entry)`` pairs that share a DOI into the first one; its note lists every key it covers.
+
+    Entries without a DOI are kept as they are, and the order of the first entry of each DOI is kept.
+    """
+    by_doi: dict[str, list[str]] = {}
+    for key, entry in entries:
+        if doi := _doi(entry):
+            by_doi.setdefault(doi, []).append(key)
+    out = []
+    for key, entry in entries:
+        keys = by_doi.get(_doi(entry) or "", [key])
+        if keys[0] != key:
+            continue  # merged into the first entry of its DOI
+        if len(keys) > 1:
+            shown = ", ".join(_tex(k) for k in keys[:_SHOWN])
+            more = f" and {len(keys) - _SHOWN} more" if len(keys) > _SHOWN else ""
+            entry = _add_note(entry, f"covers samples: {shown}{more}")
+        out.append(entry)
+    return out
+
+
 def citation_entries(results: SpatialDataCohort, *, bib_url: str | None = None) -> tuple[str, int, int]:
     """Return ``(BibTeX text, n_published, n_fallback)`` that cite every study in ``results``.
 
@@ -96,8 +143,16 @@ def citation_entries(results: SpatialDataCohort, *, bib_url: str | None = None) 
     in that file gets its published entry. Every other study, and every dataset without a
     ``study_id``, gets a ``@misc`` fallback entry keyed by the ``study_id`` (or the uid). It cites the
     dataset page on the website and carries the title, DOI, year, uid and license from the catalog.
-    The datasets of one study share one entry. One warning reports the fallback count, because
-    those entries should be checked before you publish. An empty cohort raises ``ValueError``.
+    The datasets of one study share one entry.
+
+    The published file has one entry per study, and a GEO study is one sample, so a paper with many
+    samples appears many times. Published entries that share a DOI are merged into one: the first
+    (by key) keeps its key and fields, and its ``note`` gains "covers samples: <key>, ..." with every
+    key it stands for (the first five, then a count). Fallback entries that share a DOI merge the
+    same way. ``n_published`` and ``n_fallback`` count the entries after merging.
+
+    One warning reports the counts when there are fallback entries, because those entries should be
+    checked before you publish. An empty cohort raises ``ValueError``.
     """
     df = results.to_df()
     if df.empty:
@@ -110,15 +165,19 @@ def citation_entries(results: SpatialDataCohort, *, bib_url: str | None = None) 
     keys = study.where(study.notna(), df["uid"]).astype(str)
     published = sorted(k for k in set(keys[study.notna()]) if k in entries)
     rest = df[~keys.isin(published)]
-    fallback = [_fallback_entry(str(k), g) for k, g in rest.groupby(keys[rest.index])]
+    fallback_keys = [(str(k), _fallback_entry(str(k), g)) for k, g in rest.groupby(keys[rest.index])]
+    merged = _merge_by_doi([(k, entries[k]) for k in published])
+    fallback = _merge_by_doi(fallback_keys)
     if fallback:
+        n_studies = len(published) + len(fallback_keys)
         warnings.warn(
-            f"{len(published)} of {len(published) + len(fallback)} studies have a published citation; "
-            f"added {len(fallback)} fallback entries that cite the dataset page; check them before publishing",
+            f"{len(published)} of {n_studies} studies have a published citation, in {len(merged)} entries "
+            f"after merging those that share a DOI; added {len(fallback)} fallback entries that cite the "
+            "dataset page; check them before publishing",
             stacklevel=2,
         )
-    out = "".join(e + "\n\n" for e in [*(entries[k] for k in published), *fallback])
-    return out, len(published), len(fallback)
+    out = "".join(e + "\n\n" for e in [*merged, *fallback])
+    return out, len(merged), len(fallback)
 
 
 def citations_text(results: SpatialDataCohort, *, bib_url: str | None = None) -> tuple[str, int]:

@@ -46,3 +46,14 @@ def test_union_keeps_manifest_only_within_one_split():
     folds = _coh(6).split(by="study_id", train=0.5, val=0.25, test=0.25, seed=0)
     assert (folds["train"] | folds["val"]).split_manifest is folds["train"].split_manifest
     assert (folds["train"] | _coh(2)).split_manifest is None
+
+
+def test_split_by_callable_records_its_name(tmp_path):
+    def study(row):
+        return row["study_id"]
+
+    folds = _coh(6).split(by=study, train=0.5, val=0.25, test=0.25, seed=0)
+    sm = folds["train"].split_manifest
+    assert sm.by == "study"
+    assert SplitManifest.load(sm.write(tmp_path / "split.json")).by == "study"
+    assert _coh(6).split(train=0.5, val=0.25, test=0.25, seed=0)["train"].split_manifest.by == "study_id"

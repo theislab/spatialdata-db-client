@@ -259,6 +259,30 @@ class Catalog:
         """Return the full catalog as a DataFrame copy."""
         return self._df.copy()
 
+    def facets(self, name: str | None = None) -> list[str]:
+        """List the facet columns, or the values of one facet.
+
+        These are the names and values that :meth:`query` accepts, and the list that the "did you mean" hint
+        of an unknown value points to. It is the same list as ``sddb-cli facets`` and the MCP ``facets`` tool.
+
+        Parameters
+        ----------
+        name
+            A facet column such as ``"organism"``. ``None`` lists the facet columns in this catalog.
+
+        Returns
+        -------
+        list[str]
+            The facet columns, or the sorted distinct non-null values of ``name``. A list-valued facet
+            (``modalities``) gives each element once.
+
+        Raises
+        ------
+        ValueError
+            If ``name`` is not a facet of this catalog.
+        """
+        return facet_values(self._df, name)
+
     def __len__(self) -> int:
         return len(self._df)
 
