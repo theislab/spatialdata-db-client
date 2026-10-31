@@ -6,7 +6,7 @@ import os
 import shutil
 import threading
 import warnings
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, overload
@@ -215,12 +215,46 @@ class SpatialDataCohort(Sequence[Dataset]):
         return sub
 
     def split(
-        self, *, by: str = "study_id", train: float, val: float, test: float, seed: int
+        self,
+        *,
+        by: str | Callable[[pd.Series], Any] = "study_id",
+        train: float,
+        val: float,
+        test: float,
+        seed: int,
     ) -> dict[str, SpatialDataCohort]:
         """Group-safe deterministic split into ``{fold: SpatialDataCohort}``.
 
         Each returned cohort carries the derived ``SplitManifest`` as ``.split_manifest`` (pinned to
-        this cohort's hash). Splitting is always group-safe (``mode="group"``).
+        this cohort's hash). Splitting is always group-safe (``mode="group"``): all members with the
+        same group key land in the same fold.
+
+        Parameters
+        ----------
+        by
+            A column name, or a function that takes one member row (a ``pd.Series``) and returns its
+            group key. A missing key puts the member in a group of its own. The manifest's ``by``
+            records the column, or the function's ``__name__`` (``"callable"`` for a lambda).
+        train, val, test
+            Fold ratios, counted in groups. They must sum to 1.
+        seed
+            Seed for the shuffle of the sorted group keys.
+
+        Notes
+        -----
+        For GEO data the default ``by="study_id"`` groups by sample, not by series: a GEO
+        ``study_id`` is a GSM, so the samples of one GEO series (one study, often one patient
+        cohort) can land in different folds and leak between train and test. Group by the series
+        instead, for example through its ``geo-gse...`` collection::
+
+            def geo_series(row):
+                cols = row["collections"] if row["collections"] is not None else []
+                return next((c for c in cols if c.startswith("geo-gse")), row["study_id"])
+
+
+            folds = cohort.split(by=geo_series, train=0.8, val=0.1, test=0.1, seed=0)
+
+        ``by="doi"`` is another choice when every member has a publication.
         """
         from sddb.manifest import cohort_hash
         from sddb.split import make_split
@@ -277,7 +311,8 @@ class SpatialDataCohort(Sequence[Dataset]):
         """Write a BibTeX entry for every study in this set to ``path``.
 
         Studies without a published entry get a fallback entry that cites the dataset page, and a
-        warning reports how many; see :func:`sddb.citations.citation_entries`.
+        warning reports how many. Entries that share a DOI are merged into one; see
+        :func:`sddb.citations.citation_entries`.
         """
         from sddb.citations import write_citations
 
@@ -286,7 +321,8 @@ class SpatialDataCohort(Sequence[Dataset]):
     def citations_text(self, *, bib_url: str | None = None) -> tuple[str, int]:
         """Return ``(BibTeX text, entry count)`` for the studies in this set, without writing a file.
 
-        The count includes fallback entries; :func:`sddb.citations.citation_entries` reports the two separately.
+        The count includes fallback entries and is counted after merging entries that share a DOI;
+        :func:`sddb.citations.citation_entries` reports the two kinds separately.
         """
         from sddb.citations import citations_text
 

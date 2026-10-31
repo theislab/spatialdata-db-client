@@ -72,6 +72,22 @@ def _harmonize_var(adata: ad.AnnData, gene_key: GeneKey, uid: str) -> tuple[ad.A
     return out, int((~usable).sum()), int(dup.sum())
 
 
+def _drop_blank_make_unique(adata: ad.AnnData) -> tuple[ad.AnnData, int, int]:
+    """Drop features whose var_name is missing or empty, then make repeats unique; return the two counts.
+
+    ``ad.concat(join="outer")`` cannot reindex a non-unique var index, and a missing name (e.g. the blank
+    probes of Allen MERSCOPE panels) cannot be made unique.
+    """
+    names = pd.Series(adata.var_names, dtype="string")
+    blank = (names.isna() | names.str.strip().eq("")).fillna(True).to_numpy(dtype=bool)
+    if blank.any():
+        adata = adata[:, ~blank].copy()
+    n_rep = int(adata.var_names.duplicated().sum())
+    if n_rep:
+        adata.var_names_make_unique()
+    return adata, int(blank.sum()), n_rep
+
+
 def _warn_low_overlap(kept: list[tuple[str, ad.AnnData]], gene_key: GeneKey | None) -> None:
     sizes = [p.n_vars for _, p in kept]
     if len(kept) < 2 or min(sizes) == 0:
@@ -206,8 +222,9 @@ def concat_tables(
         are dropped and repeated keys keep the first, with one warning summarizing both. The old name is
         kept in ``var["original_var_name"]``, and ``var`` holds the first member's annotation of each
         gene. ``"var"`` is added to ``elements`` if missing. ``None`` leaves var_names unchanged, except
-        that a member whose var_names repeat gets them made unique (the second copy of ``A`` becomes
-        ``A-1``), with one warning naming those members.
+        that features whose var_name is missing or empty (e.g. the blank probes of Allen MERSCOPE panels)
+        are dropped, and a member whose var_names repeat gets them made unique (the second copy of ``A``
+        becomes ``A-1``), with one warning naming those members and giving both counts.
     spatial
         Where ``obsm["spatial"]`` comes from. ``"obsm"`` keeps each table's ``obsm`` as stored, so a member
         without ``obsm["spatial"]`` gets missing (NaN) coordinates in the joined AnnData. ``"centroids"`` sets
@@ -228,9 +245,9 @@ def concat_tables(
     UserWarning
         If two or more members share fewer than half the genes of the smallest one, which usually means
         their var_names hold different id types; also when ``gene_key`` drops or dedupes features, and
-        when ``gene_key=None`` makes a member's repeated var_names unique, and once when ``spatial`` finds
-        no coordinate source for some members or rows (the message names the members and the reason). Their
-        coordinates stay missing.
+        when ``gene_key=None`` drops features without a var_name or makes a member's repeated var_names
+        unique, and once when ``spatial`` finds no coordinate source for some members or rows (the message
+        names the members and the reason). Their coordinates stay missing.
 
     Raises
     ------
@@ -254,7 +271,7 @@ def concat_tables(
     rows = [row for _, row in members.iterrows()]
     dropped: dict[str, str] = {}
     rekeyed: dict[str, tuple[int, int]] = {}  # uid -> (dropped, duplicate) features under gene_key
-    repeated: dict[str, int] = {}  # uid -> repeated var_names made unique (gene_key=None)
+    repeated: dict[str, tuple[int, int]] = {}  # uid -> (blank dropped, repeats made unique) (gene_key=None)
     no_xy: dict[str, str] = {}  # uid -> why some or all rows have no coordinates
 
     def read(row: pd.Series) -> ad.AnnData | None:
@@ -281,9 +298,10 @@ def concat_tables(
         if gene_key is not None:
             adata, n_drop, n_dup = _harmonize_var(adata, gene_key, uid)
             rekeyed[uid] = (n_drop, n_dup)
-        elif n_rep := int(adata.var_names.duplicated().sum()):
-            repeated[uid] = n_rep  # ad.concat(join="outer") cannot reindex a non-unique var index
-            adata.var_names_make_unique()
+        else:
+            adata, n_blank, n_rep = _drop_blank_make_unique(adata)
+            if n_blank or n_rep:
+                repeated[uid] = (n_blank, n_rep)
         return adata
 
     with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
@@ -301,9 +319,13 @@ def concat_tables(
             stacklevel=2,
         )
     if repeated:
+        n_blank, n_rep = (sum(c[i] for c in repeated.values()) for i in (0, 1))
+        done = [f"dropped {n_blank} features with a missing or empty var_name"] if n_blank else []
+        if n_rep:
+            done.append(f"made {n_rep} repeated var_names unique with a '-1' style suffix")
         warnings.warn(
-            f"made {sum(repeated.values())} repeated var_names unique with a '-1' style suffix in members "
-            f"{sorted(repeated)}; pass gene_key='ensembl' or 'symbol' to merge them instead",
+            f"{' and '.join(done)} in members {sorted(repeated)}; "
+            "pass gene_key='ensembl' or 'symbol' to merge them instead",
             UserWarning,
             stacklevel=2,
         )
