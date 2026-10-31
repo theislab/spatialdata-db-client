@@ -126,7 +126,6 @@ guides/find-and-load
 guides/cohorts
 guides/ml
 guides/visium-atlas/visium-atlas
-guides/paper/index
 guides/cli-and-agents
 ```
 
