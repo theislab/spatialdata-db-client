@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Tutorials
 
 The tutorials teach the client in order, from the first query to a frozen cohort with its citations. Each one is

@@ -122,7 +122,11 @@ intro/db-stack
 :maxdepth: 2
 :caption: Tutorials
 
-tutorials/index
+tutorials/00_overview
+tutorials/01_find_and_filter
+tutorials/02_load_and_inspect
+tutorials/03_cohorts_and_manifests
+tutorials/04_citations_and_licences
 ```
 
 ```{toctree}
@@ -130,7 +134,8 @@ tutorials/index
 :maxdepth: 2
 :caption: Use cases
 
-use_cases/index
+use_cases/training_cohort
+use_cases/visium_atlas/visium-atlas
 ```
 
 ```{toctree}

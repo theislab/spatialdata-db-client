@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Use cases
 
 The use cases are longer analyses built on the steps of the {doc}`tutorials <../tutorials/index>`. Each starts
