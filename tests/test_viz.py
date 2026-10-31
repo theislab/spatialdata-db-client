@@ -69,3 +69,13 @@ def test_render_sdata(tmp_path):
 def test_base_import_has_no_vitessce():
     code = "import sys, sddb; sys.exit(any(m.split('.')[0] in ('vitessce','easy_vitessce') for m in sys.modules))"
     assert subprocess.run([sys.executable, "-c", code]).returncode == 0
+
+
+def test_view_interactive_config_hides_another_datasets_store(monkeypatch):
+    seen = []
+    monkeypatch.setattr(viz, "render_config", seen.append)
+    row = make_fixture_catalog().iloc[0].copy()
+    row["vitessce_url"] = "https://vitessce.io#?edit=false&url=data:,%252E.lamindb%252FotherStore000000.zarr"
+    with pytest.warns(UserWarning, match="another dataset's store"), pytest.raises(ValueError, match="no usable"):
+        Dataset(row).view_interactive(mode="config")
+    assert seen == []

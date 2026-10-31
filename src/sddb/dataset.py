@@ -35,6 +35,24 @@ def _loads_other_store(vitessce_url: str, zarr_url: str | None) -> bool:
     return bool(linked and own) and linked != own
 
 
+def usable_vitessce_url(uid: Any, vitessce_url: Any, zarr_url: Any) -> str | None:
+    """``vitessce_url``, or None when it is missing or loads another dataset's store (then with a warning).
+
+    Every path that returns or renders a ``vitessce_url`` goes through this check, as the website does.
+    """
+    url = _clean(vitessce_url)
+    if not url:
+        return None
+    if _loads_other_store(str(url), _clean(zarr_url)):
+        warnings.warn(
+            f"the viewer link for {uid} loads another dataset's store; it is hidden until the catalog is fixed",
+            UserWarning,
+            stacklevel=3,
+        )
+        return None
+    return str(url)
+
+
 @dataclass(frozen=True)
 class Source:
     """Where a SpatialDataCohort came from: the catalog url, cache dir, version and file hash (for sidecars/manifests).
@@ -128,15 +146,10 @@ class Dataset:
         ValueError
             If the row has no ``vitessce_url``.
         """
-        url: str | None = self.vitessce_url
-        if not url:
+        if not self.vitessce_url:
             raise ValueError(f"dataset {self.uid} has no vitessce_url")
-        if _loads_other_store(url, self.zarr_url):
-            warnings.warn(
-                f"the viewer link for {self.uid} loads another dataset's store; it is hidden until the catalog is fixed",
-                UserWarning,
-                stacklevel=2,
-            )
+        url = usable_vitessce_url(self.uid, self.vitessce_url, self.zarr_url)
+        if url is None:
             return None
         if url.startswith("https://vitessce.io"):
             return url
@@ -161,6 +174,12 @@ class Dataset:
 
         ``mode="config"`` renders the published Vitessce config (``vitessce_url``); ``mode="sdata"``
         loads the store and renders it via easy_vitessce.
+
+        Raises
+        ------
+        ValueError
+            With ``mode="config"``, if the row has no ``vitessce_url`` or its link loads another dataset's
+            store (with the warning from :meth:`viewer_url`).
         """
         from sddb import viz
 
@@ -168,9 +187,9 @@ class Dataset:
             return viz.render_sdata(self.to_sdata())
         if mode != "config":
             raise ValueError(f"mode must be 'config' or 'sdata', got {mode!r}")
-        url: str | None = self.vitessce_url
-        if not url:
-            raise ValueError(f"dataset {self.uid} has no vitessce_url")
+        url = usable_vitessce_url(self.uid, self.vitessce_url, self.zarr_url)
+        if url is None:
+            raise ValueError(f"dataset {self.uid} has no usable vitessce_url")
         inlined = viz.config_from_vitessce_url(url)
         return viz.render_config(inlined if inlined is not None else remote.proxy_url(url))
 
