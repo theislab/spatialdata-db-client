@@ -101,28 +101,55 @@ def test_panel_drops_are_greedy_and_stop_at_the_floor():
     assert v.uns["primer"]["genes"]["measured"] == 70
 
 
-def test_member_dropped_early_is_readmitted_when_it_fits_the_rest():
-    """A big panel dropped first while tiny panels were still in is readmitted once they are gone (kidney case)."""
+def _panel_view(parts, tech="Xenium"):
+    (v,) = embed_views(
+        {"imaging_cell": _members([(u, tech, sorted(g)) for u, g in parts])}, MARKERS, floor=0, use_gpu=False
+    ).values()
+    return v
+
+
+def test_big_panel_kept_at_a_cost_when_the_view_keeps_half_its_genes():
+    """Kidney: a 5K panel sharing 129 of the 224 genes stays (58%), tiny 50-gene panels go, and the cost is logged."""
     shared = [f"G{i}" for i in range(224)]
-    tiny = shared[:10] + [f"T{i}" for i in range(40)]  # 10 genes in common with the rest
+    tiny = shared[:10] + [f"T{i}" for i in range(40)]
     big = shared[3:132] + [f"T{i}" for i in range(25)]  # 129 in common with the rest, 7 with the rest and tiny
-    parts = [("p1", "Xenium", shared), ("p2", "Xenium", shared), ("big", "Xenium", big)]
-    parts += [(f"t{i}", "Xenium", tiny) for i in range(1, 4)]
-    (v,) = embed_views({"imaging_cell": _members(parts)}, MARKERS, floor=0, use_gpu=False).values()
+    main = [(f"p{i}", shared) for i in range(1, 5)]  # the anchor: most sections, as the 13 in kidney
+    v = _panel_view([*main, ("big", big)] + [(f"t{i}", tiny) for i in range(1, 4)])
     dropped = v.uns["primer"]["members_dropped_panel"]
     assert sorted(dropped) == ["t1", "t2", "t3"]
-    # counted against the genes the kept members share (129, with big back): tiny has 7 of them
     assert set(dropped.values()) == {"dropped: panel shares 7 genes with the rest of its technology"}
     assert "big" in set(v.obs["dataset_uid"].astype(str))
     assert v.uns["primer"]["genes"]["measured"] == 129
-    (readmit,) = v.uns["primer"]["panel_readmits"]
-    assert readmit == {
-        "technology": "Xenium",
-        "uid": "big",
-        "genes_before": 224,
-        "genes_after": 129,
-        "reason": "readmitted: shares 129 of 224",
-    }
+    assert v.uns["primer"]["panel_costs"] == [
+        {
+            "technology": "Xenium",
+            "uids": ["big"],
+            "genes_without": 224,
+            "genes_with": 129,
+            "kept": True,
+            "reason": "kept: shares 129 of 224",
+        }
+    ]
+
+
+def test_panel_that_halves_the_view_is_dropped_with_its_cost():
+    """Merscope: GEO sections sharing 61 of Allen's 500 genes go, so the view keeps 500 genes.
+
+    Allen has the most sections, so it is the anchor even where the GEO sections hold more cells.
+    """
+    allen = {f"A{i}" for i in range(500)}
+    geo = {f"A{i}" for i in range(61)} | {f"G{i}" for i in range(435)}
+    tiny = {f"A{i}" for i in range(4)} | {f"G{i}" for i in range(4)} | {f"T{i}" for i in range(400)}
+    parts = [(f"allen{i}", allen) for i in range(4)] + [(f"geo{i}", geo) for i in range(3)]
+    v = _panel_view(parts + [("tiny1", tiny), ("tiny2", tiny)], tech="Merscope")
+    dropped = v.uns["primer"]["members_dropped_panel"]
+    assert sorted(v.obs["dataset_uid"].astype(str).unique()) == ["allen0", "allen1", "allen2", "allen3"]
+    assert v.uns["primer"]["genes"]["measured"] == 500
+    assert {dropped[f"geo{i}"] for i in range(3)} == {"dropped: panel would reduce 500 shared genes to 61"}
+    assert dropped["tiny1"] == "dropped: panel shares 4 genes with the rest of its technology"
+    (cost,) = v.uns["primer"]["panel_costs"]
+    assert cost["kept"] is False
+    assert (cost["genes_without"], cost["genes_with"], sorted(cost["uids"])) == (500, 61, ["geo0", "geo1", "geo2"])
 
 
 def test_panel_dropped_member_marked_in_the_cohort_table(tmp_path):

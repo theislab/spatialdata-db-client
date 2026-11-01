@@ -4,9 +4,10 @@ Each technology family gets its own view on the genes measured by every member o
 intersection of ``uns["member_genes"]``; the outer join of a family pads a gene a member lacks with
 zeros, so the union would compare measured genes with padding). When a family's members share fewer than
 200 genes, the family is split into one view per technology, named ``"<family>:<technology>"``; a
-technology whose own members share fewer than 50 genes first loses members, one at a time, the member
-whose panel shrinks the technology's shared genes most first, until the rest share 50 genes; each dropped
-member is recorded with how many genes its panel shared. A technology left with fewer than 50 shared genes
+technology whose own members share fewer than 50 genes first loses members, one panel at a time, the
+panel that shrinks the technology's shared genes most first, until the rest share 50 genes; a panel that
+would cut the rest's shared genes by more than half is dropped too (``_drop_odd_panels``), and each drop
+is recorded with its reason. A technology left with fewer than 50 shared genes
 gets no view, and the reason is recorded. A joint
 view on the genes shared by all families is added only when the gates pass (the mixing rule approved on
 2026-11-01). Every view is embedded the same way, following the T094 spike:
@@ -111,49 +112,90 @@ PANEL_DROP = "dropped: panel shares {n} genes with the rest of its technology"
 def _drop_odd_panels(adata: ad.AnnData) -> tuple[ad.AnnData, dict[str, str], list[dict]]:
     """``adata`` without the members whose panels keep their technology under ``MIN_GENES_FOR_QC`` shared genes.
 
-    Per technology, while its members share fewer genes than the floor, the member whose removal leaves
-    the most shared genes is dropped (on a tie, the smaller panel, then the one with fewer observations).
-    Then, latest drop first, a dropped member that shares the floor with the rest is taken back, so a big
-    panel dropped while tiny panels were still in is not lost; taking one back lowers the technology's
-    shared genes, so each readmit is logged as ``{technology, uid, genes_before, genes_after, reason}``.
-    Returns the rest, ``{uid: PANEL_DROP reason}`` with N counted against the genes the rest share, and the
-    readmits.
+    Members with the same panel count as one unit, and the unit with the most sections (then observations)
+    is the anchor, which always stays. Per technology, while its units share fewer genes than the floor, the
+    unit whose removal leaves the most shared genes is dropped (on a tie, the smaller panel,
+    then fewer observations). Then, latest drop first, a dropped unit is taken back when it shares the
+    floor and at least half of the rest's shared genes. Last, in a technology that needed drops, a kept unit
+    goes too when the rest would share more than twice the genes without it ("would reduce 500 shared
+    genes to 61"). Returns the rest, ``{uid: reason}``, and per unit that costs genes against the anchor,
+    ``{technology, uids, genes_without, genes_with, kept, reason}`` (dropped
+    units by the halving rule are listed with ``kept: false``).
     """
     known = adata.uns.get("member_genes") or {}
     var = set(adata.var_names)
     uids = adata.obs["dataset_uid"].astype(str)
     n_obs = uids.value_counts()
     tech = adata.obs["technology"].astype(str)
-    dropped, readmits = {}, []
+    dropped, costs = {}, []
+
+    def inter(ps):
+        return set.intersection(*(set(p) for p in ps)) if ps else set()
+
     for t in tech.unique():
-        panels = {u: set(known.get(u, var)) & var for u in uids[(tech == t).to_numpy()].unique()}
-        order, out = [], {}
-        while len(panels) > 1 and len(set.intersection(*panels.values())) < MIN_GENES_FOR_QC:
-            # ponytail: O(members^2) set intersections per drop; fine for hundreds of members
-            rest = {u: set.intersection(*(g for v, g in panels.items() if v != u)) for u in panels}
-            worst = max(panels, key=lambda u: (len(rest[u]), -len(panels[u]), -n_obs[u]))
-            out[worst] = panels.pop(worst)
-            order.append(worst)
-        if not order:
+        units: dict[frozenset, list[str]] = {}
+        for u in uids[(tech == t).to_numpy()].unique():
+            units.setdefault(frozenset(set(known.get(u, var)) & var), []).append(u)
+        size = {p: int(sum(n_obs[u] for u in us)) for p, us in units.items()}
+        anchor = max(units, key=lambda p: (len(units[p]), size[p]))
+        keep, out, halved = set(units), [], {}
+        while len(keep) > 1 and len(inter(keep)) < MIN_GENES_FOR_QC:
+            # ponytail: O(units^2) set intersections per drop; fine for hundreds of panels
+            worst = max(keep - {anchor}, key=lambda p: (len(inter(keep - {p})), -len(p), -size[p]))
+            keep.discard(worst)
+            out.append(worst)
+        if not out:
             continue
-        shared = set.intersection(*panels.values())
-        for u in reversed(order):
-            if len(shared & out[u]) >= MIN_GENES_FOR_QC and len(shared) >= MIN_GENES_FOR_QC:
-                before = len(shared)
-                shared &= out.pop(u)
-                readmits.append(
+        for p in reversed(out[:]):
+            shared, new = inter(keep), inter(keep) & p
+            if len(new) >= MIN_GENES_FOR_QC and len(new) >= 0.5 * len(shared):
+                keep.add(p)
+                out.remove(p)
+        while len(keep) > 1:
+            shared = inter(keep)
+            without = {p: inter(keep - {p}) for p in keep}
+            p = max(keep - {anchor}, key=lambda p: (len(without[p]), -size[p]))
+            if len(shared) >= 0.5 * len(without[p]):
+                break
+            keep.discard(p)
+            out.append(p)
+            halved[p] = (len(without[p]), len(shared))
+        shared = inter(keep)
+        for p in out:
+            n = halved.get(p)
+            reason = (
+                f"dropped: panel would reduce {n[0]} shared genes to {n[1]}"
+                if n
+                else PANEL_DROP.format(n=len(p & shared))
+            )
+            dropped.update(dict.fromkeys(units[p], reason))
+            if n:
+                costs.append(
                     {
                         "technology": t,
-                        "uid": u,
-                        "genes_before": before,
-                        "genes_after": len(shared),
-                        "reason": f"readmitted: shares {len(shared)} of {before}",
+                        "uids": units[p],
+                        "genes_without": n[0],
+                        "genes_with": n[1],
+                        "kept": False,
+                        "reason": reason,
                     }
                 )
-        dropped.update({u: PANEL_DROP.format(n=len(g & shared)) for u, g in out.items()})
+        for p in keep - {anchor}:
+            alone = inter(keep - {p})
+            if len(alone) > len(shared):
+                costs.append(
+                    {
+                        "technology": t,
+                        "uids": units[p],
+                        "genes_without": len(alone),
+                        "genes_with": len(shared),
+                        "kept": True,
+                        "reason": f"kept: shares {len(shared)} of {len(alone)}",
+                    }
+                )
     if not dropped:
-        return adata, {}, readmits
-    return adata[~uids.isin(dropped).to_numpy()], dropped, readmits
+        return adata, {}, costs
+    return adata[~uids.isin(dropped).to_numpy()], dropped, costs
 
 
 def _family_views(family: str, adata: ad.AnnData) -> tuple[list[tuple[str, ad.AnnData, list[str], str]], dict]:
@@ -413,18 +455,18 @@ def embed_views(
     ``family``, ``genes`` (``measured``, ``used``, ``rule``, ``size_factors``), ``note``,
     ``views_skipped`` (technologies without a view and why), ``members_dropped_panel`` (members dropped
     because their panel kept their technology under 50 shared genes, see ``_drop_odd_panels``),
-    ``panel_readmits`` (dropped members taken back, with the view's shared genes before and after) and, for a cohort with two or more families,
+    ``panel_costs`` (panels that lower the view's shared genes, kept or dropped, see ``_drop_odd_panels``) and, for a cohort with two or more families,
     ``gates`` (``shared_genes`` left out). The joint view also records ``excluded`` technologies and their
     reasons. ``obsm["marker_expr"]`` is the log-normalised expression (obs x genes, a DataFrame) of every
     marker and fallback gene of ``marker_set`` that the view measured, matched without regard to case.
     """
-    views, skipped, dropped, readmits = {}, {}, {}, []
+    views, skipped, dropped, costs = {}, {}, {}, []
     markers = set().union(*_compartment_genes(marker_set).values())
     adatas = dict(adatas)
     for fam in adatas:  # before the family and joint gene sets, so an odd panel can't shrink them
-        adatas[fam], d, r = _drop_odd_panels(adatas[fam])
+        adatas[fam], d, c = _drop_odd_panels(adatas[fam])
         dropped.update(d)
-        readmits += r
+        costs += c
     for fam, a in adatas.items():
         parts, skip = _family_views(fam, a)
         skipped.update(skip)
@@ -454,7 +496,7 @@ def embed_views(
         v.uns["primer"]["views_skipped"] = skipped
         v.uns["primer"]["members_dropped_panel"] = dropped
         techs = set(v.obs["technology"].astype(str))
-        v.uns["primer"]["panel_readmits"] = [r for r in readmits if r["technology"] in techs]
+        v.uns["primer"]["panel_costs"] = [c for c in costs if c["technology"] in techs]
         v.uns["primer"]["floor"] = floor
         if gates is not None:
             v.uns["primer"]["gates"] = gates
