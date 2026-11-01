@@ -1,0 +1,189 @@
+# Candidate cohorts for the cohort primers (Task 0). Each cohort is a catalog query plus optional
+# include_uids and exclude_uids. scripts/cohort_report.py keeps only redistributable members and
+# limits technology to the listed families when the query names no technology.
+#
+# Families (primers.cohort.FAMILIES): spot = Visium, VisiumHD, SpatialTranscriptomics; imaging = Xenium, Merscope, MERFISH.
+# marker_set names a set in markers.yaml (Task 2). reserve: true marks candidates outside the approved 10;
+# reserve cohorts need a marker set before they can run.
+# n_obs__lte caps keep a cohort near 3M observations by leaving out the largest sections.
+
+cohorts:
+  - slug: human-colon
+    title: Human colon and colorectal cancer
+    query:
+      organism: human
+      tissue: [colon, colorectum]
+      n_obs__lte: 400000
+    include_uids:
+      - byYhE703lPTspj8i0000  # Oliveira 2025 Visium HD P2 (colorectal cancer), the spike's HD section
+    families: [spot, imaging]
+    marker_set: colon
+    rationale: Normal colon and colorectal cancer on Visium, Visium HD and Xenium; Oliveira 2025 was the mixing spike, here joined by GEO and 10x sections.
+
+  - slug: human-kidney
+    title: Human kidney in health and disease
+    query:
+      organism: human
+      tissue: kidney
+      n_obs__lte: 250000
+    exclude_uids:  # GSE286184 Xenium, a 50-gene panel that would cap the shared genes at 50
+      - QhWLkUPIwgReWxUl0000
+      - 7cvm04SitwDiUccp0000
+      - GrL6vmD9cQIX9kWy0000
+      - 0hvcEnilQM3UbBEX0000
+      - TPUEOPBx6Bl9XSwV0000
+      - RxMxBceGIVY7cunl0000
+      - 9ECHPci2ByJEXpmm0000
+      - xR5R5oIEI5vC5rw40000
+      - jVoLDQ0g9HrFR5090000
+      - L63qBPEi1Jb14kUM0000
+      - GIvMm2g196WM29FC0000
+      - WUuICN3yJz9v0cHY0000
+      - xtDuriWbektArUTi0000
+      - sVYWy3ftQNgttMRP0000
+      - H7X7fQqJO0v9XX8T0000
+      - NHyd5DFysygNrkdu0000
+      - kZEVJcHN2Kwfs9W70000
+      - sGZxtkw1WXUZ7YFq0000
+    families: [spot, imaging]
+    marker_set: kidney
+    rationale: Diabetic, glomerular and cancer kidney on Visium, Visium HD and Xenium across many labs; the cap leaves out the largest Xenium and HD sections, and a 50-gene Xenium series is left out.
+
+  - slug: human-lung
+    title: Human lung in health, fibrosis and cancer
+    query:
+      organism: human
+      tissue: lung
+      n_obs__lte: 500000
+    families: [spot, imaging]
+    marker_set: lung
+    rationale: Normal, fibrotic, sarcoid and cancer lung on Visium, Visium HD and Xenium; many independent Visium studies.
+
+  - slug: human-pancreatic-cancer
+    title: Human pancreatic cancer
+    query:
+      organism: human
+      tissue: pancreas
+      disease:
+        - pancreatic ductal adenocarcinoma
+        - pancreatic adenocarcinoma
+        - exocrine pancreatic carcinoma
+        - malignant pancreatic neoplasm
+        - pancreatic cancer
+      n_obs__gt: 0
+    families: [spot, imaging]
+    marker_set: pancreas
+    rationale: Pancreatic ductal adenocarcinoma on Visium (one large 107-section study plus smaller ones) and Xenium; one disease context.
+
+  - slug: human-lymph-node
+    reserve: true  # not in the 10 approved by the Lead on 2026-11-01
+    title: Human lymph node
+    query:
+      organism: human
+      tissue: lymph node
+      n_obs__lte: 600000
+    families: [spot, imaging]
+    marker_set: lymph_node
+    rationale: Lymph nodes (normal, lymphoma, metastasis-draining) on Visium, Visium HD and Xenium; clear immune compartments.
+
+  - slug: human-tonsil
+    reserve: true  # not in the 10 approved by the Lead on 2026-11-01
+    title: Human tonsil
+    query:
+      organism: human
+      tissue: tonsil
+    exclude_uids:
+      - Yfldiu1V2eahFVo40001  # 1.35M-cell Xenium section; the other Xenium section stays
+      - OVOvhiiutOr0ZlrZ0000  # one of four Visium HD fresh-frozen sections
+    families: [spot, imaging]
+    marker_set: tonsil
+    rationale: Tonsil on Visium HD and Xenium; every member is a 10x Genomics demo release, so its papers are not independent labs.
+
+  - slug: human-ovarian-cancer
+    title: Human ovarian cancer
+    query:
+      organism: human
+      tissue: ovary
+      n_obs__lte: 500000
+    exclude_uids:  # 10x targeted-panel Visium (about 1,100 genes)
+      - cmp4e4nFkMWds59W0000
+      - 8tzX3kVY3InHDexb0000
+    families: [spot, imaging]
+    marker_set: ovary
+    rationale: Mostly high-grade serous ovarian cancer on Visium, Visium HD and Xenium; the cap leaves out one 1.8M-bin HD and one 1.2M-cell Xenium section.
+
+  - slug: human-liver
+    title: Human liver
+    query:
+      organism: human
+      tissue: liver
+    families: [spot, imaging]
+    marker_set: liver
+    rationale: Normal and diseased liver (hepatoblastoma, HCC, cholangiopathies, metastases) on Visium, Visium HD and Xenium; about 20 Visium studies.
+
+  - slug: human-skin
+    title: Human skin
+    query:
+      organism: human
+      tissue: [skin of body, zone of skin]
+    families: [spot, imaging]
+    marker_set: skin
+    rationale: Inflammatory skin disease, melanoma and squamous cell carcinoma on ST, Visium, Visium HD and Xenium; many studies, small total size.
+
+  - slug: human-breast-cancer
+    reserve: true  # not in the 10 approved by the Lead on 2026-11-01
+    title: Human breast cancer
+    query:
+      organism: human
+      tissue: breast
+      technology: [Visium, SpatialTranscriptomics]
+    include_uids:
+      - wXDHTRXZOfIgUPLy0000  # 10x Visium HD breast cancer section
+      - v5JBSw2qpBsBOR410000  # 10x Xenium FFPE breast with custom add-on panel
+    exclude_uids:
+      - Z8gwfzkMbDuIMbFu0000  # 10x targeted-panel Visium (1,056 genes)
+    families: [spot, imaging]
+    marker_set: breast
+    rationale: Breast cancer subtypes on ST and Visium from about 25 studies, plus one Visium HD and one Xenium section; all breast HD and Xenium data are 10x demos and 13M cells together, so only one of each is included.
+
+  - slug: human-glioma
+    reserve: true  # not in the 10 approved by the Lead on 2026-11-01
+    title: Human glioma
+    query:
+      organism: human
+      tissue: brain
+      disease: [glioblastoma, brain glioma, glioma]
+    exclude_uids:
+      - JMWLGRLBtbxuAJrZ0000  # 10x targeted-panel Visium (1,253 genes)
+    families: [spot, imaging]
+    marker_set: brain
+    rationale: Glioblastoma and glioma on Visium (many studies) and Xenium; one disease context in one organ.
+
+  - slug: mouse-liver
+    title: Mouse liver
+    query:
+      organism: mouse
+      tissue: liver
+    families: [spot, imaging]
+    marker_set: liver
+    rationale: Mouse liver zonation in health, steatohepatitis, cancer and infection on Visium (about 20 studies), MERSCOPE and Xenium.
+
+  - slug: mouse-kidney
+    title: Mouse kidney
+    query:
+      organism: mouse
+      tissue: kidney
+      n_obs__lte: 450000
+    families: [spot, imaging]
+    marker_set: kidney
+    rationale: Mouse kidney injury and fibrosis on Visium, Visium HD and Xenium; the cap leaves out the two largest HD sections.
+
+  - slug: mouse-brain-imaging
+    title: Normal adult mouse brain on imaging platforms
+    query:
+      organism: mouse
+      tissue: brain
+      disease: normal
+    families: [imaging]
+    marker_set: brain
+    rationale: Normal mouse brain on Xenium, MERSCOPE and MERFISH (Allen ABC atlas and GEO studies); one family, three platforms with different panels.

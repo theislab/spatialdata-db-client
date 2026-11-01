@@ -51,7 +51,7 @@ raw-options = { tag_regex = "^v(?P<version>\\d+\\.\\d+\\.\\d+.*)$", git_describe
 packages = [ "src/sddb" ]
 
 [tool.hatch.build.targets.sdist]
-exclude = [ "/docs", "/tests" ]
+exclude = [ "/docs", "/tests", "/primers" ]
 
 [tool.ruff]
 line-length = 120

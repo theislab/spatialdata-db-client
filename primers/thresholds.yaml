@@ -1,0 +1,37 @@
+# Per-technology QC thresholds and flag bounds for primers (Task 5). Each group lists its technologies,
+# the per-observation filters, the per-dataset flag bounds and a one-line reason, which the notebook
+# renders. Medians in the flag bounds are taken over all observations before filtering.
+#
+# The notebook shows each cohort's distributions against these values; a threshold that cuts into the
+# body of a distribution is revisited before publishing.
+
+spot:
+  technologies: [Visium, SpatialTranscriptomics]
+  min_counts: 500
+  min_genes: 250
+  max_pct_mt: 30
+  flag: {min_median_counts: 1000, min_share_kept: 0.5}
+  reason: >-
+    A Visium or ST spot holds about 1 to 10 cells, so a spot with under 500 UMIs or 250 genes is mostly
+    background or tissue edge; solid tissues often reach 20 to 30% mitochondrial reads, so the cap is 30%.
+
+binned_spot:
+  technologies: [VisiumHD]
+  table: square_016um  # summed from 2x2 square_008um bins where a store has no 16 um table
+  min_counts: 200
+  min_genes: 50
+  max_pct_mt: 30
+  flag: {min_median_counts: 200, min_share_kept: 0.5}
+  reason: >-
+    On the 5 Visium HD sections of oliveira-2024-colorectal, 16 um bins at 200 counts kept 74% of bins
+    with the same marker signal as 8 um bins at Oliveira et al.'s 100 (Nat Genet 57:1512-1523), which
+    kept 60%, and found T cells in all 5 sections against 3 (web tasks/2026-11-01-t094-hd-bin-size.md).
+
+imaging_cell:
+  technologies: [Xenium, Merscope, MERFISH]
+  min_counts: 10
+  min_genes: 3
+  flag: {min_median_counts: 30, min_share_kept: 0.5}
+  reason: >-
+    Targeted panels give tens to hundreds of decoded transcripts per segmented cell, and a cell with
+    under 10 transcripts or 3 genes cannot be given a type; the panels have no mitochondrial genes.

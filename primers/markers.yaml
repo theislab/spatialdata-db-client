@@ -1,0 +1,210 @@
+# Marker sets for the primer readings (Task 2). Only these sets are used to name compartments in a
+# primer, and they were fixed before any embedding was computed.
+#
+# Each set lists compartments with canonical marker genes as human symbols. Genes are matched to a panel
+# without regard to case, so the same symbols match mouse panels (Alb, Lrp2); every gene in a set that a
+# mouse cohort uses has a mouse ortholog with the same symbol. The compartments follow the cited atlas,
+# and the few genes per compartment are our choice of established markers for it.
+#
+# Some compartments sit inside others (goblet within epithelial, excitatory within neuron), so a reading
+# must not treat compartments as exclusive.
+#
+# `fallback` maps a panel id (printed by scripts/panel_check.py) to compartments that panel misses, each
+# with a `note` and either `genes` from that panel or `not_measured: true` when the panel has no usable
+# marker (readings then say the compartment cannot be named on that panel). All fallbacks below were
+# chosen on 2026-11-01 from the panel check on catalog 2026-10-28, after seeing the panels and before
+# any embedding.
+
+sets:
+  colon:
+    citation: [10.1016/j.cell.2019.06.029]  # Smillie et al. 2019, Cell
+    compartments:
+      epithelial: [EPCAM, KRT20, CDH17, CEACAM5]
+      goblet: [MUC2, TFF3, SPINK4]
+      stem: [LGR5, OLFM4, ASCL2]
+      fibroblast: [COL1A1, COL3A1, DCN, PDGFRA]
+      smooth_muscle: [ACTA2, DES, MYH11]
+      endothelial: [PECAM1, VWF, PLVAP]
+      t_cell: [CD3E, CD3D, CD2]
+      b_plasma: [MS4A1, CD79A, MZB1, JCHAIN]
+      myeloid: [CD68, CD14, CSF1R, C1QA]  # not LYZ, which Paneth cells also express
+    fallback:
+      Xenium-425-4d5186a6:
+        goblet: {genes: [CLCA1, SPDEF, ITLN1], note: "goblet-cell genes on this panel"}
+      Xenium-422-21ae9d3d:
+        goblet: {genes: [CLCA1, SPDEF, ITLN1], note: "goblet-cell genes on this panel"}
+      Xenium-325-2fc53225:
+        goblet: {genes: [CLCA1, SPDEF, ITLN1], note: "goblet-cell genes on this panel"}
+        fibroblast: {not_measured: true, note: "no fibroblast gene on this panel"}
+        smooth_muscle: {not_measured: true, note: "no smooth-muscle gene on this panel"}
+        endothelial: {genes: [AQP1], note: "the only endothelial gene on this panel; AQP1 is also in some epithelia, so weak alone"}
+
+  kidney:
+    citation: [10.1038/s41586-023-05769-3, 10.1126/science.aar2131]  # Lake et al. 2023, Nature; Park et al. 2018, Science (mouse)
+    compartments:
+      proximal_tubule: [LRP2, CUBN, SLC34A1]
+      thick_ascending_limb: [UMOD, SLC12A1]
+      distal_tubule: [SLC12A3, CALB1]
+      collecting_duct_principal: [AQP2, AQP3]
+      collecting_duct_intercalated: [ATP6V1B1, SLC4A1]
+      podocyte: [NPHS1, NPHS2, WT1]  # not PODXL, which glomerular endothelium also expresses
+      endothelial: [PECAM1, EMCN, PLVAP]
+      fibroblast: [DCN, COL1A1, PDGFRB]
+      immune: [PTPRC, CD68, CD3E]
+    fallback:
+      Xenium-5092-381adb2d:
+        collecting_duct_principal: {genes: [SCNN1G, HSD11B2], note: "principal-cell genes on this panel; GATA3 left out (also in distal segments)"}
+      Xenium-377-9193d582:
+        proximal_tubule: {genes: [SLC22A8], note: "OAT3, proximal-tubule transporter on this panel"}
+        distal_tubule: {genes: [PVALB], note: "distal convoluted tubule gene on this panel"}
+        podocyte: {not_measured: true, note: "no podocyte gene on this panel"}
+      Xenium-5106-e5f1ce69:
+        thick_ascending_limb: {genes: [Cldn16, Cldn10, Ptger3], note: "thick ascending limb genes on this panel"}
+
+  lung:
+    citation: [10.1038/s41586-020-2922-4]  # Travaglini et al. 2020, Nature
+    compartments:
+      at1: [AGER, RTKN2, CLIC5]  # not CAV1, which capillary endothelium expresses more
+      at2: [SFTPC, SFTPB, NAPSA]
+      airway: [SCGB1A1, FOXJ1, KRT5]
+      fibroblast: [COL1A2, DCN, PDGFRA]
+      smooth_muscle: [ACTA2, DES, MYH11]
+      endothelial: [PECAM1, CLDN5, VWF]
+      t_cell: [CD3E, CD3D, CD2]
+      b_plasma: [MS4A1, CD79A, MZB1]
+      myeloid: [MARCO, CD68, LYZ]
+    fallback:
+      Xenium-377-9193d582:
+        at2: {genes: [LAMP3], note: "AT2 gene on this panel"}
+      Xenium-392-2248ed9e:
+        at2: {genes: [SFTPD, ETV5], note: "AT2 genes on this panel; SFTPD is also in club cells"}
+      Xenium-289-b8cfbe0f:
+        at2: {genes: [SFTPD, ETV5], note: "AT2 genes on this panel; SFTPD is also in club cells"}
+      Xenium-5001-079a3380:
+        at2: {genes: [LAMP3, ABCA3, LPCAT1, ETV5], note: "AT2 genes on this panel"}
+        smooth_muscle: {genes: [MYLK, SYNPO2], note: "smooth-muscle genes on this panel; MYLK is also in myofibroblasts"}
+
+  pancreas:
+    citation: [10.1038/s41422-019-0195-y]  # Peng et al. 2019, Cell Research
+    compartments:
+      ductal: [KRT19, KRT7, SOX9, MUC1]
+      acinar: [PRSS1, CPA1, CELA3A]
+      endocrine: [INS, GCG, CHGA]
+      fibroblast: [COL1A1, LUM, DCN]
+      stellate_pericyte: [RGS5, PDGFRB]  # not ACTA2, which myofibroblastic CAFs share
+      endothelial: [PECAM1, VWF, CDH5]
+      t_cell: [CD3E, CD3D, CD2]
+      b_plasma: [MS4A1, CD79A, MZB1]
+      myeloid: [CD68, CD14, LYZ]
+    fallback:
+      Xenium-377-9193d582:
+        acinar: {genes: [AQP8], note: "the only acinar gene on this panel"}
+        fibroblast: {genes: [FBLN1, SFRP2], note: "fibroblast genes on this panel"}
+      Xenium-5101-5714379c:
+        acinar: {genes: [CTRL, SERPINI2, CUZD1], note: "acinar genes on this panel"}
+        fibroblast: {genes: [POSTN, FAP, CXCL12], note: "fibroblast and CAF genes on this panel"}
+
+  ovary:
+    citation: [10.1038/s41586-022-05496-1]  # Vazquez-Garcia et al. 2022, Nature
+    compartments:
+      cancer_epithelial: [PAX8, EPCAM, MUC16]  # not WT1, which stroma and mesothelium also express
+      fibroblast: [COL1A1, DCN, LUM]
+      endothelial: [PECAM1, VWF, CDH5]
+      t_cell: [CD3E, CD8A, CD2]
+      b_plasma: [MS4A1, CD79A, MZB1]
+      myeloid: [CD68, CD163, LYZ]
+    fallback:
+      Xenium-5001-079a3380:
+        fibroblast: {genes: [PDGFRA, FAP, POSTN], note: "fibroblast and CAF genes on this panel"}
+
+  liver:
+    citation: [10.1038/s41467-018-06318-7, 10.1016/j.cell.2021.12.018]  # MacParland et al. 2018, Nat Commun; Guilliams et al. 2022, Cell (mouse and human)
+    compartments:
+      hepatocyte: [ALB, APOA1, TTR]
+      hepatocyte_central: [CYP2E1, GLUL]
+      hepatocyte_portal: [HAL, SDS]
+      cholangiocyte: [KRT19, KRT7, SOX9]
+      endothelial: [STAB2, CLEC4G, PECAM1]  # STAB2 and CLEC4G for sinusoids; PECAM1 is low there and marks vessels
+      stellate: [DCN, RELN, LRAT]
+      kupffer: [VSIG4, MARCO, CD5L, TIMD4, CLEC4F]  # CLEC4F is weak in human Kupffer cells
+      t_nk: [CD3E, NKG7]
+      b_cell: [MS4A1, CD79A]
+    fallback:
+      Xenium-471-a89ec624:
+        hepatocyte: {genes: [APOA5, HPX, TAT, KNG1], note: "hepatocyte-secreted plasma protein genes on this panel"}
+        hepatocyte_central: {not_measured: true, note: "no pericentral hepatocyte gene on this panel"}
+        hepatocyte_portal: {not_measured: true, note: "no periportal hepatocyte gene on this panel"}
+        stellate: {genes: [PDGFRB, DES], note: "stellate genes on this panel; both are also in vascular mural cells"}
+      Xenium-377-9193d582:
+        hepatocyte: {genes: [APOA5, HPX, TAT, KNG1], note: "hepatocyte-secreted plasma protein genes on this panel"}
+        hepatocyte_central: {not_measured: true, note: "no pericentral hepatocyte gene on this panel"}
+        hepatocyte_portal: {not_measured: true, note: "no periportal hepatocyte gene on this panel"}
+        stellate: {genes: [PDGFRB, DES], note: "stellate genes on this panel; both are also in vascular mural cells"}
+      Xenium-474-9f41a2f3:
+        hepatocyte: {genes: [APOA5, HPX, TAT, MAT1A, KNG1], note: "hepatocyte-secreted plasma protein genes on this panel"}
+        hepatocyte_central: {not_measured: true, note: "no pericentral hepatocyte gene on this panel"}
+        hepatocyte_portal: {not_measured: true, note: "no periportal hepatocyte gene on this panel"}
+        stellate: {genes: [PDGFRB, DES], note: "stellate genes on this panel; both are also in vascular mural cells"}
+      Merscope-494-ea80599a:
+        hepatocyte: {genes: [Slc10a1, Baat, Hnf4a], note: "hepatocyte genes on this panel"}
+        hepatocyte_portal: {genes: [Cyp2f2, Pck1], note: "periportal hepatocyte genes on this panel"}
+      Xenium-477-7d85f056:
+        hepatocyte: {genes: [Hp], note: "the only hepatocyte gene on this panel"}
+        hepatocyte_central: {not_measured: true, note: "no pericentral hepatocyte gene on this panel"}
+        hepatocyte_portal: {genes: [Pck1], note: "periportal hepatocyte gene on this panel"}
+        endothelial: {genes: [Kdr], note: "endothelial gene on this panel"}
+        stellate: {genes: [Colec11, Pdgfrb, Des], note: "stellate genes on this panel"}
+        b_cell: {not_measured: true, note: "no B-cell gene on this panel"}
+
+  skin:
+    citation: [10.1126/science.aba6500]  # Reynolds et al. 2021, Science
+    compartments:
+      basal_keratinocyte: [KRT14, KRT5]
+      differentiated_keratinocyte: [KRT10, KRT1]
+      melanocyte: [PMEL, TYRP1, DCT, MLANA]
+      fibroblast: [COL1A1, DCN, PDGFRA]
+      smooth_muscle: [ACTA2, DES, MYH11]
+      endothelial: [PECAM1, VWF]
+      t_cell: [CD3E, CD3D, CD2]
+      myeloid: [CD68, CD14, CSF1R]
+      langerhans: [CD207, CD1A]
+    fallback:
+      Xenium-5101-9ddba058:
+        basal_keratinocyte: {genes: [KRT15, COL17A1, TP63], note: "basal keratinocyte genes on this panel"}
+      Xenium-377-9193d582:
+        basal_keratinocyte: {genes: [COL17A1], note: "basal keratinocyte gene on this panel"}
+        differentiated_keratinocyte: {genes: [LY6D, SERPINB3], note: "suprabasal keratinocyte genes on this panel"}
+      Xenium-360-97551f14:
+        differentiated_keratinocyte: {genes: [KRTDAP, KRT2], note: "differentiated keratinocyte genes on this panel"}
+      Xenium-480-18bfc240:
+        differentiated_keratinocyte: {not_measured: true, note: "only stress keratins (KRT6A, KRT16) on this panel, which do not mark differentiation"}
+        fibroblast: {genes: [LUM, MMP2], note: "fibroblast genes on this panel"}
+
+  brain:
+    citation: [10.1016/j.cell.2018.06.021]  # Zeisel et al. 2018, Cell (mouse)
+    compartments:
+      neuron: [SNAP25, RBFOX3, SYT1]
+      excitatory_neuron: [SLC17A7, SLC17A6]
+      inhibitory_neuron: [GAD1, GAD2, SLC32A1]
+      astrocyte: [AQP4, ALDH1L1, GFAP]  # GFAP is low in grey-matter astrocytes
+      oligodendrocyte: [MBP, PLP1, MOG]
+      opc: [PDGFRA]  # not CSPG4, which pericytes share; OLIG2 and SOX10 are shared with oligodendrocytes
+      microglia: [CX3CR1, P2RY12, TMEM119]
+      endothelial: [CLDN5, FLT1, PECAM1]
+    fallback:
+      Xenium-347-cce0810f:
+        neuron: {genes: [Slc17a7, Slc17a6, Gad1, Gad2], note: "no pan-neuronal gene on this panel; excitatory plus inhibitory markers cover neurons"}
+      Xenium-347-30279cd9:
+        neuron: {genes: [Slc17a7, Slc17a6, Gad1, Gad2], note: "no pan-neuronal gene on this panel; excitatory plus inhibitory markers cover neurons"}
+      Xenium-348-3974002b:
+        neuron: {genes: [Slc17a7, Slc17a6, Gad1, Gad2], note: "no pan-neuronal gene on this panel; excitatory plus inhibitory markers cover neurons"}
+      Xenium-347-696b1080:
+        neuron: {genes: [Slc17a7, Slc17a6, Gad1, Gad2], note: "no pan-neuronal gene on this panel; excitatory plus inhibitory markers cover neurons"}
+      MERFISH-1122-5c75344a:
+        neuron: {genes: [Slc17a7, Slc17a6, Gad2, Slc32a1], note: "no pan-neuronal gene on this panel; excitatory plus inhibitory markers cover neurons"}
+        opc: {genes: [Vcan, Sox10], note: "OPC genes on this panel; SOX10 is also in oligodendrocytes"}
+        microglia: {genes: [Sall1], note: "the only microglia-specific gene on this panel"}
+      Merscope-500-5085e6ca:
+        neuron: {genes: [Slc17a7, Slc17a6, Gad2, Slc32a1], note: "no pan-neuronal gene on this panel; excitatory plus inhibitory markers cover neurons"}
+        opc: {genes: [Vcan, Sox10], note: "OPC genes on this panel; SOX10 is also in oligodendrocytes"}
+        microglia: {not_measured: true, note: "no microglia gene on this panel"}

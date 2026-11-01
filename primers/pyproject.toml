@@ -1,0 +1,47 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatchling" ]
+
+[project]
+name = "sddb-primers"
+description = "Builds and runs cohort primers: curated, query-defined cohorts described in a notebook."
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = [
+  "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.3",
+  "scanpy",
+  "pyarrow",
+  "papermill",
+  "nbconvert",
+  "pyyaml",
+  "harmonypy>=2.1.0",
+  "igraph",
+  "scikit-misc",
+  "spatialdata-plot",
+]
+
+[project.optional-dependencies]
+gpu = [ "rapids-singlecell" ]
+
+[dependency-groups]
+test = [ "ipykernel", "pytest" ]
+
+# The client is not on PyPI, so a pinned pip install of primers takes it from its git tag.
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = [ "primers" ]
+
+# The cohort, marker and threshold files ship inside the package, so a pinned pip install can run a primer.
+[tool.hatch.build.targets.wheel.force-include]
+"cohorts.yaml" = "primers/cohorts.yaml"
+"markers.yaml" = "primers/markers.yaml"
+"thresholds.yaml" = "primers/thresholds.yaml"
+
+# The client lives one directory up in this repo.
+[tool.uv.sources]
+spatialdata-db = { path = "..", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = [ "tests" ]
