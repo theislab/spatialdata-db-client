@@ -101,6 +101,19 @@ CATALOG_COLUMNS: dict[str, str] = {
     "treatment": "string",
     "genotype": "string",
     "condition": "string",
+    # What one table row is (cells / spots / bins / pixels; null when unknown) and, for cells, who
+    # segmented them: depositor / vendor / spatialdata-db (null without cells). segmentation_method is set
+    # only for spatialdata-db segmentation, e.g. "Cellpose-SAM (cellpose 4.2.1, cpsam)".
+    "obs_unit": "string",
+    "segmentation_source": "string",
+    "segmentation_method": "string",
+    # Re-releases of one 10x library (curation's source_metadata.same_section): group id (newest member),
+    # relation (rerelease / relisted_page / none), Space Ranger release, and the other libraries' groups on the
+    # same tissue section. Null / empty when the dataset is in no group.
+    "same_section_group": "string",
+    "same_section_relation": "string",
+    "same_section_release": "string",
+    "same_section_panel_of": "list[string]",
 }
 
 REQUIRED_COLUMNS: tuple[str, ...] = ("uid", "technology", "assay", "organism", "validation_status", "zarr_url")

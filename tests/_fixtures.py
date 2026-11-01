@@ -86,8 +86,16 @@ def make_fixture_catalog() -> pd.DataFrame:
             "n_transcripts": [None] * n,
             "capture_area": [None] * n,
             # study + per-sample condition columns (optional; null in the base fixture)
-            **{c: [None] * n for c in ("sample_title", "timepoint", "timepoint_kind", "treatment", "genotype", "condition")},
+            **{
+                c: [None] * n
+                for c in ("sample_title", "timepoint", "timepoint_kind", "treatment", "genotype", "condition")
+            },
             "timepoint_days": [None] * n,
+            "obs_unit": ["cells"] * n,
+            "segmentation_source": ["vendor"] * n,
+            "segmentation_method": [None] * n,
+            **dict.fromkeys(("same_section_group", "same_section_relation", "same_section_release"), [None] * n),
+            "same_section_panel_of": [[] for _ in range(n)],
             # superset list columns, derived per-row so the fixture stays len(_ROWS)-agnostic
             "collections": [[f"c-{i}"] if i % 3 else [] for i in range(n)],
             "staining_method": [["H&E", "IF"] if i % 2 else None for i in range(n)],
@@ -215,17 +223,75 @@ def make_fixture_feature_index() -> pd.DataFrame:
     """Small multi-modal feature index keyed to the fixture catalog uids."""
     rows = [
         # raw_label, type, modality, uid, counts, frac, ref_ids, ref_id_types, ref_relations, ref_conf, gene_xref
-        ("EPCAM", "gene", "rna", "uid0001", 5000.0, 0.4, ["ENSG00000119888"], ["ensembl_gene"], ["is"], [1.0], ["ENSG00000119888"]),
-        ("EPCAM", "gene", "rna", "uid0002", 3000.0, 0.3, ["ENSG00000119888"], ["ensembl_gene"], ["is"], [1.0], ["ENSG00000119888"]),
-        ("anti-EpCAM", "protein", "protein", "uid0003", 90.0, 0.8, ["P16422"], ["uniprot"], ["targets"], [0.9], ["ENSG00000119888"]),
-        ("EPCAM", "gene_activity", "atac", "uid0005", 10.0, 0.1, ["ENSG00000119888"], ["ensembl_gene"], ["is"], [1.0], ["ENSG00000119888"]),
-        ("KRT8", "gene", "rna", "uid0001", 9000.0, 0.6, ["ENSG00000170421"], ["ensembl_gene"], ["is"], [1.0], ["ENSG00000170421"]),
+        (
+            "EPCAM",
+            "gene",
+            "rna",
+            "uid0001",
+            5000.0,
+            0.4,
+            ["ENSG00000119888"],
+            ["ensembl_gene"],
+            ["is"],
+            [1.0],
+            ["ENSG00000119888"],
+        ),
+        (
+            "EPCAM",
+            "gene",
+            "rna",
+            "uid0002",
+            3000.0,
+            0.3,
+            ["ENSG00000119888"],
+            ["ensembl_gene"],
+            ["is"],
+            [1.0],
+            ["ENSG00000119888"],
+        ),
+        (
+            "anti-EpCAM",
+            "protein",
+            "protein",
+            "uid0003",
+            90.0,
+            0.8,
+            ["P16422"],
+            ["uniprot"],
+            ["targets"],
+            [0.9],
+            ["ENSG00000119888"],
+        ),
+        (
+            "EPCAM",
+            "gene_activity",
+            "atac",
+            "uid0005",
+            10.0,
+            0.1,
+            ["ENSG00000119888"],
+            ["ensembl_gene"],
+            ["is"],
+            [1.0],
+            ["ENSG00000119888"],
+        ),
+        (
+            "KRT8",
+            "gene",
+            "rna",
+            "uid0001",
+            9000.0,
+            0.6,
+            ["ENSG00000170421"],
+            ["ensembl_gene"],
+            ["is"],
+            [1.0],
+            ["ENSG00000170421"],
+        ),
         ("Glucose", "metabolite", "msi", "uid0004", 500.0, 0.9, ["HMDB0000122"], ["hmdb"], ["is"], [1.0], []),
     ]
     cols = list(FEATURE_INDEX_COLUMNS)
-    df = pd.DataFrame(
-        [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10]) for r in rows], columns=cols
-    )
+    df = pd.DataFrame([(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10]) for r in rows], columns=cols)
     for c in ("raw_label", "feature_type", "modality", "uid"):
         df[c] = df[c].astype("string")
     for c in ("total_counts", "fraction_obs_detected"):
