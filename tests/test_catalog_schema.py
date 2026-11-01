@@ -207,7 +207,15 @@ def test_capture_area_column_present():
 def test_obs_unit_and_segmentation_columns_present():
     from sddb import _catalog_schema as schema
 
-    for col in ("obs_unit", "segmentation_source", "segmentation_method"):
+    assert schema.CATALOG_COLUMNS["same_section_panel_of"] == "list[string]"
+    for col in (
+        "obs_unit",
+        "segmentation_source",
+        "segmentation_method",
+        "same_section_group",
+        "same_section_relation",
+        "same_section_release",
+    ):
         assert schema.CATALOG_COLUMNS[col] == "string"
         assert col not in schema.REQUIRED_COLUMNS
 

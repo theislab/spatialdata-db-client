@@ -94,6 +94,8 @@ def make_fixture_catalog() -> pd.DataFrame:
             "obs_unit": ["cells"] * n,
             "segmentation_source": ["vendor"] * n,
             "segmentation_method": [None] * n,
+            **dict.fromkeys(("same_section_group", "same_section_relation", "same_section_release"), [None] * n),
+            "same_section_panel_of": [[] for _ in range(n)],
             # superset list columns, derived per-row so the fixture stays len(_ROWS)-agnostic
             "collections": [[f"c-{i}"] if i % 3 else [] for i in range(n)],
             "staining_method": [["H&E", "IF"] if i % 2 else None for i in range(n)],

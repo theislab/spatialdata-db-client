@@ -107,6 +107,13 @@ CATALOG_COLUMNS: dict[str, str] = {
     "obs_unit": "string",
     "segmentation_source": "string",
     "segmentation_method": "string",
+    # Re-releases of one 10x library (curation's source_metadata.same_section): group id (newest member),
+    # relation (rerelease / relisted_page / none), Space Ranger release, and the other libraries' groups on the
+    # same tissue section. Null / empty when the dataset is in no group.
+    "same_section_group": "string",
+    "same_section_relation": "string",
+    "same_section_release": "string",
+    "same_section_panel_of": "list[string]",
 }
 
 REQUIRED_COLUMNS: tuple[str, ...] = ("uid", "technology", "assay", "organism", "validation_status", "zarr_url")
