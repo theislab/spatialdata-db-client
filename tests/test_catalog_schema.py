@@ -204,6 +204,14 @@ def test_capture_area_column_present():
     assert "capture_area" not in schema.REQUIRED_COLUMNS
 
 
+def test_obs_unit_and_segmentation_columns_present():
+    from sddb import _catalog_schema as schema
+
+    for col in ("obs_unit", "segmentation_source", "segmentation_method"):
+        assert schema.CATALOG_COLUMNS[col] == "string"
+        assert col not in schema.REQUIRED_COLUMNS
+
+
 _NEW_DATASET_COLUMNS = {
     "sample_title": "string",
     "timepoint": "string",

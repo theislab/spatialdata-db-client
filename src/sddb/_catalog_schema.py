@@ -101,6 +101,12 @@ CATALOG_COLUMNS: dict[str, str] = {
     "treatment": "string",
     "genotype": "string",
     "condition": "string",
+    # What one table row is (cells / spots / bins / pixels; null when unknown) and, for cells, who
+    # segmented them: depositor / vendor / spatialdata-db (null without cells). segmentation_method is set
+    # only for spatialdata-db segmentation, e.g. "Cellpose-SAM (cellpose 4.2.1, cpsam)".
+    "obs_unit": "string",
+    "segmentation_source": "string",
+    "segmentation_method": "string",
 }
 
 REQUIRED_COLUMNS: tuple[str, ...] = ("uid", "technology", "assay", "organism", "validation_status", "zarr_url")
