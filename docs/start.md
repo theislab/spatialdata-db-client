@@ -91,7 +91,7 @@ ds = cat.dataset("geo:GSM9778330")  # by canonical_key; a uid or a stem works as
 print(ds.uid)  # the uid of that version, which you can record
 ```
 
-Record the release date together with the uids. A `manifest.json` written from `Catalog()` without `version` has `catalog_version` set to null, so open the catalog with `version=` when the manifest should record the release. To go back to the exact data later, open the same release and pass the uids. {doc}`tutorials/03_cohorts_and_manifests` shows how to freeze a cohort and check that the catalog file has not changed.
+Record the release date together with the uids. Every `manifest.json` records the release it was downloaded from in `catalog_release`, also when you open `Catalog()` without `version`. To go back to the exact data later, open the same release and pass the uids. {doc}`tutorials/03_cohorts_and_manifests` shows how to freeze a cohort and check that the catalog file has not changed.
 
 (cli)=
 ## Command line

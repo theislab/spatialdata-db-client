@@ -196,6 +196,11 @@ class Catalog:
         self._features: FeatureIndex | None = None
         self._path = fetch_catalog(url, cache_dir=cache_dir, refresh=refresh)
         self._sha256 = _file_sha256(self._path)  # recorded in every cohort's Source, checked by verify()
+        # The dated release behind this file: catalog-latest is an alias of the newest one, whose date is the
+        # parquet's sddb_generated_at. Only the default release URLs have a release.
+        self.release = version if version_applied else None
+        if url.endswith(_ROLLING_SUFFIX):
+            self.release = (self.generated_at or "")[:10] or None
         try:
             df = pd.read_parquet(self._path)
         except Exception as err:
@@ -235,7 +240,7 @@ class Catalog:
         return value.decode() if value else None
 
     def _source(self) -> Source:
-        return Source(self.url, self._cache_dir, self.version, self._refresh, self._sha256)
+        return Source(self.url, self._cache_dir, self.version, self._refresh, self._sha256, self.release)
 
     @property
     def genes(self) -> GeneIndex:
@@ -487,7 +492,7 @@ class Catalog:
                 raise KeyError(f"canonical_key {uid!r} matches several uids: {sorted(hit['uid'])}; pass the full uid")
         if hit.empty:
             raise KeyError(f"uid not in catalog: {uid!r}")
-        return Dataset(hit.iloc[0])
+        return Dataset(hit.iloc[0], self._source())
 
     def collection(self, slug: str) -> SpatialDataCohort:
         """The members of one collection as a cohort, by its slug (the last part of its web page URL).
