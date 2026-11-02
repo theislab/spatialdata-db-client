@@ -17,7 +17,7 @@ uv pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-
 
 This installs the alpha release, v0.1.3. The `main` branch may be ahead of it, and you get the newest code if you leave out `@v0.1.3`. The package needs Python 3.12 or newer. It is not on PyPI yet, so install it from GitHub. The name `sddb` on PyPI belongs to an unrelated package.
 
-The client keeps its cache in the user cache directory of the platform, in a folder called `sddb`. Set `SDDB_CACHE_DIR` to put it somewhere else, for example on a larger disk. The first call to `Catalog()` downloads the catalog (about 7 MB) from a GitHub release. Later calls check for a newer catalog and download it again only when one has been published.
+The client keeps its cache in the user cache directory of the platform, in a folder called `sddb`. Set `SDDB_CACHE_DIR` to put it somewhere else, for example on a larger disk. The first call to `Catalog()` downloads the catalog (under 10 MB) from a GitHub release. Later calls check for a newer catalog and download it again only when one has been published.
 
 (one-dataset)=
 ## One dataset
@@ -91,7 +91,7 @@ ds = cat.dataset("geo:GSM9778330")  # by canonical_key; a uid or a stem works as
 print(ds.uid)  # the uid of that version, which you can record
 ```
 
-Record the release date together with the uids. To go back to the exact data later, open the same release and pass the uids. {doc}`tutorials/03_cohorts_and_manifests` shows how to freeze a cohort and check that the catalog file has not changed.
+Record the release date together with the uids. A `manifest.json` written from `Catalog()` without `version` has `catalog_version` set to null, so open the catalog with `version=` when the manifest should record the release. To go back to the exact data later, open the same release and pass the uids. {doc}`tutorials/03_cohorts_and_manifests` shows how to freeze a cohort and check that the catalog file has not changed.
 
 (cli)=
 ## Command line
