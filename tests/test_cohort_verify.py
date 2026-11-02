@@ -163,3 +163,27 @@ def test_verify_raises_when_release_unreachable_but_catalog_falls_back(tmp_path,
     assert url in str(ei.value)
     assert "could not be verified" in str(ei.value)
     assert "network is down" in str(ei.value)
+
+
+def test_rolling_catalog_records_its_release_and_verify_checks_that_release(tmp_path, monkeypatch):
+    """catalog-latest takes its release from sddb_generated_at, and verify() then checks the dated release strictly."""
+
+    import pyarrow.parquet as pq
+
+    _alive(monkeypatch)
+    path = write_fixture_catalog(tmp_path / "catalog.parquet")
+    table = pq.read_table(path)
+    pq.write_table(table.replace_schema_metadata({**table.schema.metadata, b"sddb_generated_at": b"2026-11-01"}), path)
+    rolling = "https://example.org/releases/download" + _ROLLING_SUFFIX
+    fetched = []
+    monkeypatch.setattr("sddb.catalog.fetch_catalog", lambda url, **_: path)
+    monkeypatch.setattr("sddb._cache.fetch_catalog", lambda url, **_: (fetched.append(url), path)[1])
+    cat = Catalog(rolling)
+    assert cat.release == "2026-11-01"
+    coh = cat.query(validation=None)
+    assert coh._source.release == "2026-11-01"
+    coh.verify()
+    assert fetched == ["https://example.org/releases/download/catalog-2026-11-01/catalog.parquet"]
+    stale = SpatialDataCohort(coh.members, source=Source(rolling, sha256="sha256:old", release="2026-11-01"))
+    with pytest.raises(CatalogChangedError):
+        stale.verify()  # a changed file for a recorded release raises, where catalog-latest alone only warns
