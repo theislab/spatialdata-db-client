@@ -53,6 +53,9 @@ CATALOG_COLUMNS: dict[str, str] = {
     "slug": "string",
     "title": "string",
     "pathological": "boolean",
+    # True when the primary table has < 100 observations (spots/cells/bins) — a low-N review flag
+    # (null when n_obs is unknown). Computed by the cut from n_obs, not a per-dataset stored field.
+    "low_obs": "boolean",
     "product": "string",
     "modality": "string",
     # All modalities present in the dataset (multimodal); scalar `modality` kept for back-compat.
