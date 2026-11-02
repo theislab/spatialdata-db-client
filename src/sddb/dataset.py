@@ -67,6 +67,7 @@ class Source:
     version: str | None = None
     refresh: bool = False
     sha256: str | None = None
+    release: str | None = None  # the dated release the catalog resolved to (also for catalog-latest), if known
 
 
 _ATTRS = (
@@ -92,8 +93,9 @@ def _clean(value: Any) -> Any:
 class Dataset:
     """One catalog row: a published dataset. Column values are exposed as attributes."""
 
-    def __init__(self, row: pd.Series) -> None:
+    def __init__(self, row: pd.Series, source: Source | None = None) -> None:
         self._row = row
+        self._source = source  # the catalog it came from, recorded in a dest manifest
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
@@ -116,7 +118,8 @@ class Dataset:
         """
         from sddb.cohort import SpatialDataCohort
 
-        return SpatialDataCohort(self._row.to_frame().T).to_list(elements=elements, dest=dest, workers=1)[0]
+        cohort = SpatialDataCohort(self._row.to_frame().T, source=self._source)
+        return cohort.to_list(elements=elements, dest=dest, workers=1)[0]
 
     def elements(self) -> dict[str, dict[str, Any]]:
         """Return element shapes/dtypes without loading data."""

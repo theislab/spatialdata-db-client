@@ -155,23 +155,28 @@ class SpatialDataCohort(Sequence[Dataset]):
 
         If the cohort recorded its catalog's sha256 (cohorts from a ``Catalog``, manifests written since
         this field was added), the catalog is fetched again from its url and hashed first. A dated release whose
-        bytes changed raises ``CatalogChangedError``; a changed ``catalog-latest`` only warns. If the url cannot be
+        bytes changed raises ``CatalogChangedError``; a changed ``catalog-latest`` only warns, unless the cohort
+        recorded the release it resolved to, which is then checked like a dated release. If the url cannot be
         fetched, raise ``CatalogUnavailableError``: a cached copy is never used in its place. Then raise
         ``CohortDriftError`` if any pinned store no longer resolves: a pinned version may stop resolving when a
         dataset is republished. Not called by :meth:`download`, which runs its own inline liveness loop; not
         run by cheap ops.
         """
         from sddb._cache import _file_sha256, fetch_catalog
+        from sddb.catalog import _ROLLING_SUFFIX
         from sddb.manifest import CatalogUnavailableError, CohortDriftError, _check_catalog_sha
 
         src = self._source
-        if src.sha256 and src.url:
+        url = src.url
+        if url and src.release and url.endswith(_ROLLING_SUFFIX):  # check against the release it resolved to
+            url = url.removesuffix(_ROLLING_SUFFIX) + f"/catalog-{src.release}/catalog.parquet"
+        if src.sha256 and url:
             try:
-                path = fetch_catalog(src.url, cache_dir=src.cache_dir, fallback=False)
+                path = fetch_catalog(url, cache_dir=src.cache_dir, fallback=False)
             except OSError as err:  # includes URLError/HTTPError and a missing local file
-                raise CatalogUnavailableError(src.url, f"{type(err).__name__}: {err}") from err
+                raise CatalogUnavailableError(url, f"{type(err).__name__}: {err}") from err
             current = _file_sha256(path)
-            _check_catalog_sha(src.url, src.sha256, current)
+            _check_catalog_sha(url, src.sha256, current)
         pairs = [(str(r.uid), str(r.zarr_url)) for r in self._df.itertuples(index=False)]
 
         def resolves(uid: str, url: str) -> tuple[str, bool]:
@@ -468,7 +473,7 @@ class SpatialDataCohort(Sequence[Dataset]):
                     hint="use a new dest, or run cohort.download(dest, allow_version_change=True) first",
                 )
                 pairs = list(zip(self._df["uid"].astype(str), urls, strict=True))
-                return _localize_all(pairs, list(elements), Path(dest), workers)
+                return _localize_all(pairs, list(elements), Path(dest), workers, release=self._source.release)
             # per-uid root: zarr_url carries no version, so a republish must not reuse an older partial copy
             roots = [cache_dir() / "elements" / str(uid) for uid in self._df["uid"]]
             with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
@@ -512,11 +517,11 @@ class SpatialDataCohort(Sequence[Dataset]):
     def __getitem__(self, i: int | slice) -> Dataset | SpatialDataCohort:
         if isinstance(i, slice):
             return self._derive(self._df.iloc[i], self._filter)
-        return Dataset(self._df.iloc[i])
+        return Dataset(self._df.iloc[i], self._source)
 
     def __iter__(self) -> Iterator[Dataset]:
         for i in range(len(self)):
-            yield Dataset(self._df.iloc[i])
+            yield Dataset(self._df.iloc[i], self._source)
 
     def __repr__(self) -> str:
         return f"<SpatialDataCohort: {len(self)} datasets>"

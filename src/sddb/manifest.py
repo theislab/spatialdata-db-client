@@ -106,7 +106,12 @@ class CohortManifest:
         head: dict[str, Any] = {
             "schema_version": self.schema_version,
             "created_at": self.created_at,
-            "source": {"url": self.source.url, "version": self.source.version, "sha256": self.source.sha256},
+            "source": {
+                "url": self.source.url,
+                "version": self.source.version,
+                "sha256": self.source.sha256,
+                "release": self.source.release,
+            },
             "filter": self.filter,
             "hash": self.hash,
             "n_members": len(self.members),
@@ -131,7 +136,8 @@ class CohortManifest:
         else:
             members = pd.DataFrame(head["members"], columns=head.get("members_columns"))
         raw = head["source"]
-        src = Source(url=raw["url"], version=raw["version"], sha256=raw.get("sha256"))  # sha256 absent in old manifests
+        # sha256 and release are absent in old manifests
+        src = Source(url=raw["url"], version=raw["version"], sha256=raw.get("sha256"), release=raw.get("release"))
         return cls(head["schema_version"], head["created_at"], src, head["filter"], head["hash"], members)
 
 
@@ -151,17 +157,23 @@ class ManifestEntry:
 
 @dataclass
 class Manifest:
-    """What was downloaded, where, and from which catalog (``catalog_version`` is None when not pinned)."""
+    """What was downloaded, where, and from which catalog.
+
+    ``catalog_version`` is the pin that later downloads into the same folder check, and is None when not
+    pinned. ``catalog_release`` records the dated release the catalog resolved to, pinned or not.
+    """
 
     generated_at: str
     catalog_version: str | None
     entries: list[ManifestEntry]
+    catalog_release: str | None = None
 
     @classmethod
     def read(cls, path: str | Path) -> Manifest:
         """Read a manifest written by :meth:`write`."""
         raw = json.loads(Path(path).read_text())
-        return cls(raw["generated_at"], raw.get("catalog_version"), [ManifestEntry(**e) for e in raw["entries"]])
+        entries = [ManifestEntry(**e) for e in raw["entries"]]
+        return cls(raw["generated_at"], raw.get("catalog_version"), entries, raw.get("catalog_release"))
 
     def refetch(self, dest: str | Path, *, workers: int = 4) -> Manifest:
         """Re-download exactly the stores recorded in this manifest to ``dest`` (reproducible re-fetch).
@@ -173,10 +185,10 @@ class Manifest:
         """
         root = Path(dest)
         pairs = [(e.uid, e.zarr_url) for e in self.entries if e.status != "partial"]
-        _fetch_all(pairs, root, self.catalog_version, workers)
+        _fetch_all(pairs, root, self.catalog_version, workers, catalog_release=self.catalog_release)
         for e in self.entries:
             if e.status == "partial":
-                _localize_all([(e.uid, e.zarr_url)], e.elements or [], root, workers)
+                _localize_all([(e.uid, e.zarr_url)], e.elements or [], root, workers, release=self.catalog_release)
         return Manifest.read(root / "manifest.json")
 
     def write(self, path: str | Path) -> Path:
@@ -219,6 +231,7 @@ def _fetch_all(
     catalog_version: str | None,
     workers: int,
     sizes: dict[str, int] | None = None,
+    catalog_release: str | None = None,
 ) -> Manifest:
     """Copy each ``(uid, zarr_url)`` to ``root/<uid>.zarr`` (skipping completed ones) and write the manifest."""
     root.mkdir(parents=True, exist_ok=True)
@@ -226,7 +239,7 @@ def _fetch_all(
     done: dict[str, ManifestEntry] = {}
     if mpath.exists():
         done = {e.uid: e for e in Manifest.read(mpath).entries if e.status == "complete"}
-    manifest = Manifest(datetime.now(UTC).isoformat(), catalog_version, [])
+    manifest = Manifest(datetime.now(UTC).isoformat(), catalog_version, [], catalog_release)
     lock = threading.Lock()
     by_uid: dict[str, ManifestEntry] = {}
 
@@ -271,7 +284,9 @@ def _fetch_all(
     return manifest
 
 
-def _localize_all(pairs: list[tuple[str, str]], elements: list[str], root: Path, workers: int) -> list[Path]:
+def _localize_all(
+    pairs: list[tuple[str, str]], elements: list[str], root: Path, workers: int, *, release: str | None = None
+) -> list[Path]:
     """Copy only ``elements`` of each ``(uid, zarr_url)`` to ``root/<uid>.zarr``, recorded as ``"partial"`` in the manifest.
 
     A complete store already in ``root`` is opened as it is. A partial copy is reused when it holds the requested
@@ -311,6 +326,7 @@ def _localize_all(pairs: list[tuple[str, str]], elements: list[str], root: Path,
         with lock:
             m = Manifest.read(mpath) if mpath.exists() else Manifest("", None, [])
             m.generated_at = datetime.now(UTC).isoformat()
+            m.catalog_release = release or m.catalog_release
             kept = [e for e in m.entries if e.uid != uid] + ([entry] if entry else [])
             m.entries = sorted(kept, key=lambda e: order.get(e.uid, -1))
             m.write(mpath)
@@ -471,4 +487,4 @@ def download(
     if missing:
         raise CohortDriftError(missing)
     sizes = dict(zip(results._df["uid"].astype(str), _sizes(results._df), strict=True))
-    return _fetch_all(pairs, root, current if pinned else None, workers, sizes)
+    return _fetch_all(pairs, root, current if pinned else None, workers, sizes, results._source.release)
