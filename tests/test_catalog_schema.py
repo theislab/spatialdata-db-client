@@ -138,6 +138,12 @@ def test_new_producer_columns_present_and_typed():
     assert "database_version" not in cs.FACETS
 
 
+def test_low_obs_column_present_and_typed():
+    # low_obs: a nullable boolean low-N review flag the cut computes from n_obs (< 100).
+    assert cs.CATALOG_COLUMNS["low_obs"] == "boolean"
+    assert "low_obs" not in cs.REQUIRED_COLUMNS
+
+
 def test_new_producer_columns_validate_populated_and_null(tmp_path):
     df = make_fixture_catalog()
     df["donor_id"] = ["donor-1"] * len(df)
