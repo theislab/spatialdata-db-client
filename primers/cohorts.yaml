@@ -55,6 +55,8 @@ cohorts:
       organism: human
       tissue: lung
       n_obs__lte: 500000
+    exclude_uids:  # GSM8768597 Visium stores exactly 2,000 genes (likely an HVG subset; asked curation), which cut the spot view from about 18,000 shared genes to 1,929
+      - ADgyHXEKFq7YjJTb0001
     families: [spot, imaging]
     marker_set: lung
     rationale: Normal, fibrotic, sarcoid and cancer lung on Visium, Visium HD and Xenium; many independent Visium studies.

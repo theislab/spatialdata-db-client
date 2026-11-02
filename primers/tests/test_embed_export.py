@@ -793,3 +793,12 @@ def test_manifest_records_the_full_spec(tmp_path):
     m = json.loads((out / "manifest.json").read_text())
     assert set(m["spec"]) == {"query", "include_uids", "exclude_uids", "families"}
     assert m["spec"]["query"] == m["query"]
+
+
+def test_rule_names_the_panels_a_view_shares():
+    """A view whose members use different panels says how many panels and how many genes they share."""
+    fam = _members([("m1", "Merscope", IMAGING), ("m2", "Merscope", SHARED + [f"Y{i}" for i in range(30)])])
+    rule = embed_views({"imaging_cell": fam}, MARKERS, floor=0, use_gpu=False)["imaging_cell"].uns["primer"]["genes"]["rule"]
+    assert rule.endswith("; its 2 gene panels have 270 to 280 genes each and share 250")
+    one = embed_views({"imaging_cell": _family(["x1", "x2"], IMAGING, "Xenium")}, MARKERS, floor=0, use_gpu=False)
+    assert "gene panels" not in one["imaging_cell"].uns["primer"]["genes"]["rule"]

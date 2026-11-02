@@ -262,6 +262,11 @@ def _embed(
         rule = f"{N_HVG} highly variable genes of the {a.n_vars} measured, expressed genes (seurat_v3 on raw counts, {how})"
     else:
         rule = f"all {a.n_vars} measured, expressed genes of the view"
+    known = adata.uns.get("member_genes") or {}
+    panels = {frozenset(known[u]) for u in a.obs["dataset_uid"].astype(str).unique() if u in known}
+    if len(panels) > 1:  # say why the view has fewer genes than its members measure
+        sizes = sorted(len(p) for p in panels)
+        rule += f"; its {len(panels)} gene panels have {sizes[0]:,} to {sizes[-1]:,} genes each and share {len(genes):,}"
     totals = np.asarray(a.X.sum(axis=1)).ravel()
     a.obs["size_factor"] = totals / np.median(totals[totals > 0])
     sc.pp.normalize_total(a)  # to the median library size over all measured genes
