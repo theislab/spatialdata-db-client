@@ -37,6 +37,7 @@ CATALOG_COLUMNS: dict[str, str] = {
     "license_noncommercial": "boolean",
     "license_redistributable": "boolean",
     "license_unknown": "boolean",
+    "non_integer_counts": "boolean",
     # headline stats
     "n_obs": "Int64",
     "n_features": "Int64",

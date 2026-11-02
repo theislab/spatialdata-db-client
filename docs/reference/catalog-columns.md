@@ -18,6 +18,7 @@ Every column of the catalog schema. "Facet" columns are categorical filters (`Ca
 |---|---|
 | `validation_status` | Result of schema validation, `pass` or `fail`. In the current catalog every dataset passes validation, so this filter changes nothing yet. Filter on `tier` (`silver`, `bronze`) for quality. |
 | `tier` | Curation tier: `gold`, `silver` or `bronze`, from most to least curated. Some datasets have no tier yet. |
+| `non_integer_counts` | True when a count table is stored as deposited with fractional values (mostly x.5 or x.25). The values aren't rounded, and the depositor doesn't state the cause. |
 
 ## Study and condition columns
 
