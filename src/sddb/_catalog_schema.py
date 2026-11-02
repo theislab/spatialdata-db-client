@@ -14,7 +14,6 @@ CATALOG_COLUMNS: dict[str, str] = {
     "canonical_key": "string",
     "study_id": "string",
     "collection_name": "string",
-    "issue_url": "string",
     # biology
     "organism": "string",
     "organism_id": "string",
@@ -26,7 +25,6 @@ CATALOG_COLUMNS: dict[str, str] = {
     # technology
     "technology": "string",
     "assay": "string",
-    "technology_version": "string",
     "panel_size": "Int64",
     # validation
     "validation_status": "string",
@@ -48,12 +46,10 @@ CATALOG_COLUMNS: dict[str, str] = {
     "vitessce_url": "string",
     "size_bytes": "Int64",
     # provenance
-    "container_tag": "string",
-    "sddb_version": "string",
     "published_at": "string",
     # presentation / curation superset — consumed by the website build; the pip
     # client carries them through to_df() but does not require them. chemistry_version
-    # (reagent-kit version) is a SEPARATE attribute from technology_version above.
+    # below is the reagent-kit version (a distinct attribute).
     "slug": "string",
     "title": "string",
     "pathological": "boolean",
@@ -92,7 +88,6 @@ CATALOG_COLUMNS: dict[str, str] = {
     "disease_details": "string",
     "default_table": "string",
     "dataset_url": "string",
-    "thumbnail_url": "string",
     "collections": "list[string]",
     # Per-sample study / condition metadata (optional; null when the source has none).
     "sample_title": "string",

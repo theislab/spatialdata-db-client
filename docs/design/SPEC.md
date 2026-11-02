@@ -131,14 +131,14 @@ CAT-05 (`fleet/index.parquet`), finally published. **Parquet** (columnar, typed,
 by pandas/arrow/polars/R — supports the deferred R path). Column groups (authoritative list in
 `specs/qc_and_viz.md` §6):
 
-- **Identity:** `uid`, `canonical_key`, `study_id`, `collection_name`, `issue_url`
+- **Identity:** `uid`, `canonical_key`, `study_id`, `collection_name`
 - **Biology:** `organism`, `tissue`, `disease`, `development_stage` (+ ontology IDs)
-- **Technology:** `technology`, `technology_version`, `panel_size`
+- **Technology:** `technology`, `panel_size`
 - **Flags + validation:** every PLAYBOOK §6.2 flag, plus `validation_status`, `tier`
 - **License:** `license_spdx`, `license_text`, `license_unknown`
 - **Stats:** headline stats (`qc_and_viz` §1.1) + per-family keys
 - **Access:** `zarr_url` (direct `s3://`), `card_url`, `vitessce_url`, `size_bytes`
-- **Provenance:** `container_tag`, `sddb_version`, `published_at`
+- **Provenance:** `published_at`
 
 Companions: `gene_index.parquet` (`symbol`, `feature_id`, `uid`, `total_counts`,
 `fraction_obs_detected`) and `citations.bib` (one entry per study).
