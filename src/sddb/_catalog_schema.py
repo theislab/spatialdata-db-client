@@ -56,6 +56,13 @@ CATALOG_COLUMNS: dict[str, str] = {
     # True when the primary table has < 100 observations (spots/cells/bins) — a low-N review flag
     # (null when n_obs is unknown). Computed by the cut from n_obs, not a per-dataset stored field.
     "low_obs": "boolean",
+    # "under_review" when the dataset is live but flagged for a substantive metadata-correctness
+    # question (disease/tissue/organism/panel/TMA/relabel/…); null otherwise. Derived by the cut from
+    # the candidate's current review reasons (a frozen rule), so clearing the reason drops the marker at
+    # the next cut. review_reason carries the human-readable reason text. Bare needs_review flags and
+    # provenance-only notes get no marker.
+    "review_status": "string",
+    "review_reason": "string",
     "product": "string",
     "modality": "string",
     # All modalities present in the dataset (multimodal); scalar `modality` kept for back-compat.
