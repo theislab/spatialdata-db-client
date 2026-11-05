@@ -1,3 +1,7 @@
+---
+og:description: A catalog of public spatial omics datasets as SpatialData Zarr stores, with a Python client to query, download and load them.
+---
+
 # spatialdata-db: spatial omics datasets as SpatialData
 
 spatialdata-db is a catalog of public spatial omics datasets, from Visium and Xenium to MERSCOPE, CosMx and mass spectrometry imaging.
