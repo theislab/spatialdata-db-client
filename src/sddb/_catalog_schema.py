@@ -22,6 +22,17 @@ CATALOG_COLUMNS: dict[str, str] = {
     "disease": "string",
     "disease_id": "string",
     "development_stage": "string",
+    # Facet hierarchy, computed at the cut from the pinned UBERON/MONDO node graphs + the hub's ordered
+    # anchor tables (first anchor by id over the term + its ancestors wins; self-anchor is its own organ).
+    # Unmapped tissue -> system "other tissues"; unmapped disease -> "other conditions"; unknown stays null.
+    "tissue_system": "string",
+    "tissue_system_id": "string",
+    "tissue_organ": "string",
+    "tissue_organ_id": "string",
+    "disease_class": "string",
+    "disease_class_id": "string",
+    "disease_group": "string",
+    "disease_group_id": "string",
     # technology
     "technology": "string",
     "assay": "string",

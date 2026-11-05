@@ -226,6 +226,25 @@ def test_obs_unit_and_segmentation_columns_present():
         assert col not in schema.REQUIRED_COLUMNS
 
 
+def test_facet_hierarchy_columns_present():
+    # tissue_system/organ + disease_class/group (+ UBERON/MONDO ids) the cut computes from the pinned
+    # ontology node graphs + anchor tables; nullable strings, not required.
+    from sddb import _catalog_schema as schema
+
+    for col in (
+        "tissue_system",
+        "tissue_system_id",
+        "tissue_organ",
+        "tissue_organ_id",
+        "disease_class",
+        "disease_class_id",
+        "disease_group",
+        "disease_group_id",
+    ):
+        assert schema.CATALOG_COLUMNS[col] == "string"
+        assert col not in schema.REQUIRED_COLUMNS
+
+
 _NEW_DATASET_COLUMNS = {
     "sample_title": "string",
     "timepoint": "string",
