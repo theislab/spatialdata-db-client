@@ -62,6 +62,13 @@ def setup(app):
 
 intersphinx_mapping = intersphinx()
 ogp_social_cards = {"enable": False}  # needs matplotlib, and the pages have no card artwork
+# Link previews (Slack, X): the site's PNG social card, since previews don't render the SVG logo, and descriptions
+# sized for previews. twitter:card isn't emitted by sphinxext-opengraph, so it goes in as a custom tag.
+ogp_site_url = "https://spatialdata-db.readthedocs.io/en/latest/"
+ogp_image = f"{SITE_URL}/og.png"  # the site's card; on www once SITE_URL moves there
+ogp_image_alt = "The SpatialData-DB logo and name"
+ogp_description_length = 150
+ogp_custom_meta_tags = ['<meta name="twitter:card" content="summary_large_image" />']
 xref_overrides = {"pandas.core.series.Series": "pandas.Series"}
 nitpick_ignore = [
     # Internal classes that appear in signatures but are not exported from `sddb`.
@@ -75,7 +82,7 @@ nitpick_ignore = [
     ("py:class", "integer -- return first index of value."),
 ]
 
-html_logo = "_static/logo.svg"  # og:image and the fallback; the sidebar shows the wordmarks below
+html_logo = "_static/logo.svg"  # the sidebar fallback (og:image is ogp_image above); the sidebar shows the wordmarks below
 html_favicon = "_static/logo.svg"
 html_static_path = ["_static"]
 html_css_files = ["css/sddb.css"]
