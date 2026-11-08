@@ -34,6 +34,8 @@ cat.query(organism="human")
 
 `from_file` accepts absolute or relative paths and `file://` URLs, and validates the file against the catalog schema.
 
+Catalog schema version: the client loads any catalog up to schema version `2`; a catalog cut under a newer schema is refused with a clear error asking you to `pip install -U spatialdata-db-client`. A legacy catalog that declares no version loads unchanged.
+
 Remote datasets: query the catalog, inspect with `elements()` (no download), or load it with `to_sdata()` (copies the store to the cache). Lazy/partial remote open is not supported yet (spatialdata upstream limitation); local stores open lazily.
 
 ## Releasing

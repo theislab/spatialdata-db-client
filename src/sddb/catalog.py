@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import operator
 import os
 import re
@@ -152,6 +153,38 @@ def facet_values(df: pd.DataFrame, field: str | None = None) -> list[str]:
     return _distinct(df[field])
 
 
+def _catalog_schema_version(path: Path) -> int | None:
+    """The catalog's declared ``catalog_schema_version``, or ``None`` for a legacy catalog without one.
+
+    Read from the parquet ``sddb_release_info`` metadata — a JSON copy of release_info.json that the
+    producer embeds in the parquet so it travels with the file (through both remote download and the
+    local-copy cache, exactly like ``sddb_generated_at``).
+
+    Fail closed on broken provenance: a release that ships a corrupt ``sddb_release_info`` or a
+    non-integer ``catalog_schema_version`` is a bug, so both raise ``ValueError``. Only genuine absence
+    is legacy — no ``sddb_release_info`` at all, or provenance that declares no ``catalog_schema_version``
+    — and returns ``None`` (the caller treats ``None`` as supported).
+    """
+    try:
+        raw = (pq.read_metadata(path).metadata or {}).get(b"sddb_release_info")
+    except Exception:  # an unreadable parquet is reported with a clear message by read_parquet
+        return None
+    if raw is None:
+        return None  # no provenance at all -> legacy
+    try:
+        info = json.loads(raw.decode())
+    except Exception as err:
+        raise ValueError(
+            f"catalog sddb_release_info is not valid JSON; a release with broken provenance must not load: {err}"
+        ) from err
+    if "catalog_schema_version" not in info:
+        return None  # provenance present, version absent -> legacy
+    ver = info["catalog_schema_version"]
+    if not isinstance(ver, int) or isinstance(ver, bool):
+        raise ValueError(f"catalog_schema_version must be an integer, got {ver!r}")
+    return ver
+
+
 class Catalog:
     """The dataset catalog: fetched, cached and validated on construction."""
 
@@ -195,6 +228,12 @@ class Catalog:
         self._genes: GeneIndex | None = None
         self._features: FeatureIndex | None = None
         self._path = fetch_catalog(url, cache_dir=cache_dir, refresh=refresh)
+        ver = _catalog_schema_version(self._path)
+        if ver is not None and ver > schema.SUPPORTED_CATALOG_SCHEMA:
+            raise ValueError(
+                f"catalog at {url} declares schema version {ver}, but this sddb client supports up to "
+                f"{schema.SUPPORTED_CATALOG_SCHEMA}. Upgrade with `pip install -U spatialdata-db-client`."
+            )
         self._sha256 = _file_sha256(self._path)  # recorded in every cohort's Source, checked by verify()
         # The dated release behind this file: catalog-latest is an alias of the newest one, whose date is the
         # parquet's sddb_generated_at. Only the default release URLs have a release.
