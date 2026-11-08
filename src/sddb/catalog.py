@@ -158,16 +158,31 @@ def _catalog_schema_version(path: Path) -> int | None:
 
     Read from the parquet ``sddb_release_info`` metadata — a JSON copy of release_info.json that the
     producer embeds in the parquet so it travels with the file (through both remote download and the
-    local-copy cache, exactly like ``sddb_generated_at``). Absent or unreadable provenance is a legacy
-    catalog, not an error — the caller treats ``None`` as supported.
+    local-copy cache, exactly like ``sddb_generated_at``).
+
+    Fail closed on broken provenance: a release that ships a corrupt ``sddb_release_info`` or a
+    non-integer ``catalog_schema_version`` is a bug, so both raise ``ValueError``. Only genuine absence
+    is legacy — no ``sddb_release_info`` at all, or provenance that declares no ``catalog_schema_version``
+    — and returns ``None`` (the caller treats ``None`` as supported).
     """
     try:
         raw = (pq.read_metadata(path).metadata or {}).get(b"sddb_release_info")
-        info = json.loads(raw.decode()) if raw else {}
-    except Exception:  # absent/corrupt provenance is legacy, never fatal
-        info = {}
-    ver = info.get("catalog_schema_version")
-    return int(ver) if isinstance(ver, int) and not isinstance(ver, bool) else None
+    except Exception:  # an unreadable parquet is reported with a clear message by read_parquet
+        return None
+    if raw is None:
+        return None  # no provenance at all -> legacy
+    try:
+        info = json.loads(raw.decode())
+    except Exception as err:
+        raise ValueError(
+            f"catalog sddb_release_info is not valid JSON; a release with broken provenance must not load: {err}"
+        ) from err
+    if "catalog_schema_version" not in info:
+        return None  # provenance present, version absent -> legacy
+    ver = info["catalog_schema_version"]
+    if not isinstance(ver, int) or isinstance(ver, bool):
+        raise ValueError(f"catalog_schema_version must be an integer, got {ver!r}")
+    return ver
 
 
 class Catalog:
