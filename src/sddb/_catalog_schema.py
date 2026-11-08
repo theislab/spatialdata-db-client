@@ -200,6 +200,12 @@ FACETS: tuple[str, ...] = (
     "collections",
 )
 
+# The newest catalog schema version this client understands. A catalog that declares a higher
+# ``catalog_schema_version`` (in release_info.json / the parquet metadata) is refused on load; a
+# catalog that declares none is a legacy (<= 2) catalog and loads. Bump when the client learns a
+# new schema's columns.
+SUPPORTED_CATALOG_SCHEMA = 2
+
 # Columns the client derives on load (not in the published parquet): ``source`` is the lowercased
 # ``study_id`` prefix before ":" (geo, hest, 10x, ...), null for rows without a study_id.
 DERIVED_COLUMNS: dict[str, str] = {"source": "string"}
