@@ -122,6 +122,12 @@ CATALOG_COLUMNS: dict[str, str] = {
     # segmented them: depositor / vendor / spatialdata-db (null without cells). segmentation_method is set
     # only for spatialdata-db segmentation, e.g. "Cellpose-SAM (cellpose 4.2.1, cpsam)".
     "obs_unit": "string",
+    # The same in spatialdata-io's vocabulary (spot_or_bin / cell / subcellular_bin / region), the spot diameter or
+    # bin side in µm (null for cells and when unknown), and where they came from: "table" (the reader's
+    # uns["spatialdata_io"]) or "technology_map" (zarrs written before the reader recorded them).
+    "observation_unit": "string",
+    "unit_size_um": "Float64",
+    "observation_unit_source": "string",
     "segmentation_source": "string",
     "segmentation_method": "string",
     # Re-releases of one 10x library (curation's source_metadata.same_section): group id (newest member),

@@ -221,9 +221,12 @@ def test_obs_unit_and_segmentation_columns_present():
         "same_section_group",
         "same_section_relation",
         "same_section_release",
+        "observation_unit",
+        "observation_unit_source",
     ):
         assert schema.CATALOG_COLUMNS[col] == "string"
         assert col not in schema.REQUIRED_COLUMNS
+    assert schema.CATALOG_COLUMNS["unit_size_um"] == "Float64"
 
 
 def test_facet_hierarchy_columns_present():
