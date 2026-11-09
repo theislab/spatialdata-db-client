@@ -34,7 +34,12 @@ CATALOG_COLUMNS: dict[str, str] = {
     "disease_group": "string",
     "disease_group_id": "string",
     # technology
+    # From schema 3: ``technology`` is the vocabulary id (e.g. "10x_visium"), ``vendor`` its vendor id (required in a
+    # schema-3 catalog) and ``variant`` one of the technology's variant ids or null; labels are in technology.json.
+    # ``assay`` stays as the legacy label.
     "technology": "string",
+    "vendor": "string",
+    "variant": "string",
     "assay": "string",
     "panel_size": "Int64",
     # validation
@@ -191,6 +196,8 @@ FACETS: tuple[str, ...] = (
     "disease",
     "development_stage",
     "technology",
+    "vendor",
+    "variant",
     "assay",
     "modalities",
     "tier",
@@ -210,7 +217,7 @@ FACETS: tuple[str, ...] = (
 # ``catalog_schema_version`` (in release_info.json / the parquet metadata) is refused on load; a
 # catalog that declares none is a legacy (<= 2) catalog and loads. Bump when the client learns a
 # new schema's columns.
-SUPPORTED_CATALOG_SCHEMA = 2
+SUPPORTED_CATALOG_SCHEMA = 3
 
 # Columns the client derives on load (not in the published parquet): ``source`` is the lowercased
 # ``study_id`` prefix before ":" (geo, hest, 10x, ...), null for rows without a study_id.

@@ -227,6 +227,7 @@ class Catalog:
         self._refresh = refresh
         self._genes: GeneIndex | None = None
         self._features: FeatureIndex | None = None
+        self._technologies: dict[str, Any] | None = None
         self._path = fetch_catalog(url, cache_dir=cache_dir, refresh=refresh)
         ver = _catalog_schema_version(self._path)
         if ver is not None and ver > schema.SUPPORTED_CATALOG_SCHEMA:
@@ -252,6 +253,8 @@ class Catalog:
                     pass  # left for validate() to report
         try:
             schema.validate(df)
+            if ver is not None and ver >= 3 and "vendor" not in df.columns:
+                raise schema.SchemaError("a schema-3 catalog needs a 'vendor' column")
         except schema.SchemaError as err:
             raise schema.SchemaError(f"catalog at {url} is invalid: {err}") from err
         if "study_id" in df.columns and "source" not in df.columns:
@@ -270,6 +273,28 @@ class Catalog:
             Cache directory override.
         """
         return cls(str(path), cache_dir=cache_dir)
+
+    def technologies(self) -> dict[str, Any]:
+        """The release's technology vocabulary (``technology.json`` beside the catalog).
+
+        ``{"schema_version", "release", "readouts", "vendors", "technologies"}``: each technology has its ``id`` (the
+        catalog's ``technology``), ``label``, ``vendor_id``, ``readout``, ``modality``, ``variants`` (``id`` and
+        ``label``, the catalog's ``variant``) and the ``legacy_assay`` labels it replaces. Raises ``ValueError`` for a
+        file whose schema major version is newer than this client supports.
+        """
+        if self._technologies is None:
+            from sddb.features import sibling_url
+
+            url = sibling_url(self.url, "technology.json")
+            vocab = json.loads(fetch_catalog(url, cache_dir=self._cache_dir, refresh=self._refresh).read_text())
+            major = int(str(vocab.get("schema_version", "0")).split(".")[0])
+            if major > schema.SUPPORTED_CATALOG_SCHEMA:
+                raise ValueError(
+                    f"technology.json at {url} has schema version {vocab['schema_version']}, but this sddb client "
+                    f"supports up to {schema.SUPPORTED_CATALOG_SCHEMA}. Upgrade with `pip install -U spatialdata-db-client`."
+                )
+            self._technologies = vocab
+        return self._technologies
 
     @property
     def generated_at(self) -> str | None:
