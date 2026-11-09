@@ -29,19 +29,19 @@ The `sddb-cli` command and the `sddb-mcp` server give the shell and AI agents th
 
 :::{tab-item} pip
 ```bash
-pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.3"
+pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.4"
 ```
 :::
 
 :::{tab-item} uv
 ```bash
-uv pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.3"
+uv pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.4"
 ```
 :::
 
 ::::
 
-This installs the alpha release, v0.1.3. The `main` branch may be ahead of it, and you get the newest code if you leave out `@v0.1.3`.
+This installs the alpha release, v0.1.4. The `main` branch may be ahead of it, and you get the newest code if you leave out `@v0.1.4`.
 
 The client needs Python 3.12 or newer. It is not on PyPI yet, so install it from GitHub.
 

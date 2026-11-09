@@ -30,7 +30,14 @@ def test_mcp_page_lists_all_tools():
 
 def test_mcp_page_lists_tool_parameters():
     text = (REF / "mcp.md").read_text()
-    for fn in (tools.query_tool, tools.describe_tool, tools.genes_tool, tools.facets_tool, tools.cite_tool, tools.download_tool):
+    for fn in (
+        tools.query_tool,
+        tools.describe_tool,
+        tools.genes_tool,
+        tools.facets_tool,
+        tools.cite_tool,
+        tools.download_tool,
+    ):
         for param in inspect.signature(fn).parameters:
             if param in {"catalog_url", "bib_url", "workers", "facets"}:  # internal / not exposed by server.py
                 continue
