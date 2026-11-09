@@ -193,7 +193,12 @@ FACETS: tuple[str, ...] = (
     "doi",
     "organism",
     "tissue",
+    # Ontology roll-ups the hub cut writes: each row has its anchor, so equality includes everything under it.
+    "tissue_system",
+    "tissue_organ",
     "disease",
+    "disease_class",
+    "disease_group",
     "development_stage",
     "technology",
     "vendor",
