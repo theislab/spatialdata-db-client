@@ -4,7 +4,8 @@
 #   bash docs/execute_notebooks.sh
 # 01_find_and_filter downloads the gene index (about 900 MB) and needs about 40 GB of RAM to query it, so run
 # this on an HPC node rather than a laptop. The Visium atlas is a GPU run with its own environment and is not
-# executed here (see docs/use_cases/visium_atlas/pixi.toml).
+# executed here (see docs/use_cases/visium_atlas/pixi.toml). Primers run one at a time in their own environments
+# with docs/primers/run_primer.sh <slug>.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export SDDB_CACHE_DIR="${SDDB_CACHE_DIR:-$(mktemp -d)}"
