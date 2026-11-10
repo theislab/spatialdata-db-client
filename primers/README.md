@@ -46,7 +46,8 @@ Each primer writes a bundle to `<out>/<slug>/`.
   - n_cells_before, n_cells_after, n_flagged;
   - versions (sddb, scanpy, rapids_singlecell, spatialdata); Harmony is the rapids-singlecell GPU implementation, so its version is the rapids-singlecell version;
   - seeds, hardware, runtime_s, path, corrected and mixing stats.
-- `umap.parquet`: `view` (a family name, `<family>:<technology>` when a family is split, or "joint"), `x`, `y`, `x_harmony`, `y_harmony`, `dataset_uid`, `paper`, `technology`, `tissue`, `total_counts` and `n_genes`. At most 50,000 rows per view, with an equal share per dataset.
+- `umap.parquet`: `view` (a family name, `<family>:<technology>` when a family is split, or "joint"), `x`, `y`, `x_harmony`, `y_harmony`, `dataset_uid`, `paper`, `technology`, `tissue`, `total_counts` and `n_genes`. At most 100,000 rows per view, with an equal share per dataset (the sample the site draws first).
+- `umap_all.parquet`: the same columns for every observation of each view, shuffled per view with the seed, so any prefix is an even sample (the site streams it after `umap.parquet`).
 - The manifest also records `views` (per view its `family`, `note` and `genes`: `measured`, `used`, `rule`, `size_factors`), `views_skipped` (a technology with under 50 shared genes and the reason), `gates` (with each excluded technology and its reason), `paper_inference`, `member_genes` (per kept member `n_genes` and `n_ensembl`, how many of its symbol-keyed genes also have an Ensembl id) and `embedding_h5ad_bytes`.
 - Members with no cells after QC are dropped in the manifest and `cohort.parquet`, and the kept counts leave them out; fewer than 3 papers after QC stops the export.
 - `qc.parquet`, `cohort.parquet`.

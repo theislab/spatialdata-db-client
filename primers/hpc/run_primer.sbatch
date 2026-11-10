@@ -9,7 +9,9 @@
 #SBATCH -t 04:00:00
 #SBATCH -o logs/primers-primer-%j.log
 # Usage: sbatch --export=ALL,SLUG=human-colon[,SMOKE=3][,RELEASE=2026-10-28][,PUBLISH=1] hpc/run_primer.sbatch
-# Runs the primer notebook for one cohort and writes primer.ipynb and primer.html into its bundle.
+# Runs the primer notebook for one cohort and writes primer.ipynb and primer.html into its bundle, and a copy of
+# the notebook to $WORK/docs/primers/<slug>/primer.ipynb for the client docs (T139; io opens the docs PR from it).
+# The executed notebook must stay at or under 20 MB (DOCS_MAX_MB), or the run fails.
 # PRIMERS_REF is the commit of the code checkout, so the notebook's install line and source links name the
 # code that ran. A development run (the default) may use a dirty checkout or a commit that no remote branch
 # holds; the notebook then shows a banner saying so. PUBLISH=1 refuses both.
@@ -48,6 +50,15 @@ run papermill "$WORK/code/primers/notebooks/primer.ipynb" "$BUNDLE/primer.ipynb"
   -p slug "$SLUG" -p release "${RELEASE:-2026-10-28}" -p out_dir bundles -p primers_ref "$PRIMERS_REF" \
   -p dev_note "$DEV_NOTE" ${SMOKE:+-p smoke $SMOKE}
 run python "$WORK/code/primers/scripts/clean_notebook.py" "$BUNDLE/primer.ipynb"  # papermill's absolute paths
+SIZE=$(stat -c %s "$BUNDLE/primer.ipynb")
+if [ "$SIZE" -gt $(( ${DOCS_MAX_MB:-20} * 1000000 )) ]; then
+  echo "primer.ipynb is $SIZE bytes, over the ${DOCS_MAX_MB:-20} MB docs cap" >&2
+  exit 1
+fi
+if [ -z "$SMOKE" ]; then
+  mkdir -p "$WORK/docs/primers/$SLUG"
+  cp "$BUNDLE/primer.ipynb" "$WORK/docs/primers/$SLUG/primer.ipynb"
+fi
 # cells tagged hide-input (the title, the banner and the install line) show only their output
 run jupyter nbconvert --to html --TagRemovePreprocessor.remove_input_tags=hide-input "$BUNDLE/primer.ipynb"
 kill $SMI

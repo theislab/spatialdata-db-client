@@ -20,7 +20,7 @@ def _bundle(root, slug, *, release="2026-10-28", path="gpu", dev_note="", files=
     b = root / slug
     b.mkdir(parents=True)
     (b / "manifest.json").write_text(json.dumps({"slug": slug, "release": release, "path": path}))
-    for f in files or ("umap.parquet", "qc.parquet", "cohort.parquet", "embedding.h5ad", "primer.html"):
+    for f in files or ("umap.parquet", "umap_all.parquet", "qc.parquet", "cohort.parquet", "embedding.h5ad", "primer.html"):
         (b / f).write_bytes(b"x" * 10)
     nb = {"metadata": {"papermill": {"parameters": {"slug": slug, "dev_note": dev_note}}}, "cells": []}
     (b / "primer.ipynb").write_text(json.dumps(nb))
@@ -40,6 +40,7 @@ def test_ready_bundle_staged_in_the_site_shape(tmp_path):
     assert set(files) == {
         "manifest.json",
         "umap.parquet",
+        "umap_all.parquet",
         "qc.parquet",
         "cohort.parquet",
         "embedding.h5ad",
@@ -59,7 +60,7 @@ def test_ready_bundle_staged_in_the_site_shape(tmp_path):
 def test_embedding_parts_staged_from_the_manifest(tmp_path):
     """A split embedding is staged part by part, as the manifest lists it; a missing part blocks publishing."""
     pub = _pub()
-    b = _bundle(tmp_path / "bundles", "mouse-brain", files=("umap.parquet", "qc.parquet", "cohort.parquet"))
+    b = _bundle(tmp_path / "bundles", "mouse-brain", files=("umap.parquet", "umap_all.parquet", "qc.parquet", "cohort.parquet"))
     parts = [{"file": f"embedding-{i}.h5ad", "bytes": 10, "n_obs": 1, "dataset_uids": [f"u{i}"]} for i in (1, 2)]
     m = json.loads((b / "manifest.json").read_text())
     (b / "manifest.json").write_text(json.dumps({**m, "embedding": parts}))
@@ -79,7 +80,7 @@ def test_embedding_parts_staged_from_the_manifest(tmp_path):
         ({"path": "cpu"}, "a", "GPU run"),
         ({"release": "2026-10-16"}, "a", "not '2026-10-28'"),
         ({"dev_note": "Development run: ..."}, "a", "development run"),
-        ({"files": ("umap.parquet", "qc.parquet")}, "a", "misses cohort.parquet"),
+        ({"files": ("umap.parquet", "qc.parquet")}, "a", "cohort.parquet"),
     ],
 )
 def test_bundle_refused_with_reason(tmp_path, kwargs, slug, reason):

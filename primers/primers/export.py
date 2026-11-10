@@ -1,4 +1,4 @@
-"""Write a primer's bundle (Task 6): manifest.json, umap.parquet, qc.parquet, cohort.parquet, embedding.h5ad.
+"""Write a primer's bundle (Task 6): manifest.json, umap.parquet, umap_all.parquet, qc.parquet, cohort.parquet, embedding.h5ad.
 
 See README.md, "Bundle contract". The notebook and its HTML are added by the runner (Task 7).
 """
@@ -18,7 +18,8 @@ from primers.cohort import MIN_PAPERS
 from primers.embed import N_PCS, SEED, _host, mixing_stats
 from primers.qc import NO_CELLS
 
-WEB_CAP = 50_000
+# the web sample the site draws first (T139, Tim 2026-11-10: a stratified 100k, then every cell streams in)
+WEB_CAP = 100_000
 MAX_H5AD_BYTES = 2 * 1024**3  # GitHub's release-asset limit
 EMBEDDING_TARGET = 1024**3  # per embedding file; a cohort over it is split into parts of whole datasets
 UMAP_COLUMNS = ["dataset_uid", "paper", "technology", "tissue", "total_counts", "n_genes"]
@@ -185,6 +186,15 @@ def _umap_table(views: dict[str, ad.AnnData], picked: dict[str, np.ndarray]) -> 
     return out[["view", "x", "y", "x_harmony", "y_harmony", *UMAP_COLUMNS]]
 
 
+def _umap_all_table(views: dict[str, ad.AnnData], seed: int = SEED) -> pd.DataFrame:
+    """Every observation of each view, in the umap.parquet columns, shuffled per view (seeded).
+
+    The site streams it in chunks after the web sample, so any prefix of a view is an even sample of it.
+    """
+    order = {name: np.random.default_rng(seed).permutation(v.n_obs) for name, v in views.items()}
+    return _umap_table(views, order)
+
+
 def mixing_by_view(views: dict[str, ad.AnnData]) -> dict:
     """Mixing statistics per view, before and after Harmony, as ``{view: {batch: {basis: stats}}}``.
 
@@ -253,6 +263,7 @@ def export_bundle(
     picked = _subsamples(views)
     parts = _write_embedding(_embedding(views, picked), out, min(embedding_target, MAX_H5AD_BYTES - 1))
     _parquet(_umap_table(views, picked), out / "umap.parquet")
+    _parquet(_umap_all_table(views), out / "umap_all.parquet")
     _parquet(qc, out / "qc.parquet")
     _parquet(cohort, out / "cohort.parquet")
 

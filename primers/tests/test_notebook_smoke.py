@@ -16,7 +16,7 @@ from conftest import member, write_spatial_store
 from primers.markers import load_markers
 
 NOTEBOOK = Path(__file__).resolve().parents[1] / "notebooks" / "primer.ipynb"
-BUNDLE_FILES = {"manifest.json", "umap.parquet", "qc.parquet", "cohort.parquet", "embedding.h5ad"}
+BUNDLE_FILES = {"manifest.json", "umap.parquet", "umap_all.parquet", "qc.parquet", "cohort.parquet", "embedding.h5ad"}
 N_OBS = 150
 
 MARKER_GENES = list(dict.fromkeys(g for genes in load_markers()["colon"]["compartments"].values() for g in genes))

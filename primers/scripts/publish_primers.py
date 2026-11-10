@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 
 REPO = "theislab/spatialdata-db-client"
-REQUIRED = ("manifest.json", "umap.parquet", "qc.parquet", "cohort.parquet")
+REQUIRED = ("manifest.json", "umap.parquet", "umap_all.parquet", "qc.parquet", "cohort.parquet")
 OPTIONAL = ("primer.ipynb", "primer.html")
 MAX_ASSET_BYTES = 2 * 1024**3  # GitHub's release-asset limit
 

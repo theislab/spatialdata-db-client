@@ -802,3 +802,19 @@ def test_rule_names_the_panels_a_view_shares():
     assert rule.endswith("; its 2 gene panels have 270 to 280 genes each and share 250")
     one = embed_views({"imaging_cell": _family(["x1", "x2"], IMAGING, "Xenium")}, MARKERS, floor=0, use_gpu=False)
     assert "gene panels" not in one["imaging_cell"].uns["primer"]["genes"]["rule"]
+
+
+def test_umap_all_has_every_observation_shuffled(tmp_path):
+    """umap_all.parquet holds each view's every observation once, in the umap.parquet columns, not in obs order."""
+    fams = {"spot": _family(["v1", "v2"], SPOT, "Visium"), "imaging_cell": _family(["x1", "x2"], IMAGING, "Xenium")}
+    views = embed_views(fams, MARKERS, floor=10, use_gpu=False)
+    out = _bundle(tmp_path, views=views)
+    full = pd.read_parquet(out / "umap_all.parquet")
+    sample = pd.read_parquet(out / "umap.parquet")
+    assert list(full.columns) == list(sample.columns)
+    for name, v in views.items():
+        rows = full[full["view"] == name]
+        assert len(rows) == v.n_obs
+        assert sorted(rows["x"]) == sorted(v.obsm["X_umap"][:, 0].tolist())
+        assert rows["x"].tolist() != v.obsm["X_umap"][:, 0].tolist()  # shuffled
+    assert full["total_counts"].dtype.kind == "i"
