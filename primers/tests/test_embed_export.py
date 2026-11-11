@@ -815,6 +815,30 @@ def test_umap_all_has_every_observation_shuffled(tmp_path):
     for name, v in views.items():
         rows = full[full["view"] == name]
         assert len(rows) == v.n_obs
-        assert sorted(rows["x"]) == sorted(v.obsm["X_umap"][:, 0].tolist())
-        assert rows["x"].tolist() != v.obsm["X_umap"][:, 0].tolist()  # shuffled
+        assert np.allclose(sorted(rows["x"]), sorted(v.obsm["X_umap"][:, 0].astype(np.float32)))
+        assert not np.allclose(rows["x"].to_numpy(), v.obsm["X_umap"][:, 0])  # shuffled
+        counts = rows["dataset_uid"].astype(str).value_counts()
+        assert counts[counts > 0].to_dict() == v.obs["dataset_uid"].astype(str).value_counts().to_dict()
     assert full["total_counts"].dtype.kind == "i"
+
+
+def test_umap_all_keeps_missing_labels_null(tmp_path):
+    """A missing paper stays null in umap_all.parquet, as in umap.parquet."""
+    fams = {"spot": _family(["v1", "v2"], SPOT, "Visium"), "imaging_cell": _family(["x1", "x2"], IMAGING, "Xenium")}
+    fams["spot"].obs.loc[fams["spot"].obs["dataset_uid"] == "v1", "paper"] = None
+    views = embed_views(fams, MARKERS, floor=10, use_gpu=False)
+    full = pd.read_parquet(_bundle(tmp_path, views=views) / "umap_all.parquet")
+    spot = full[full["view"] == "spot"]
+    assert spot.loc[spot["dataset_uid"] == "v1", "paper"].isna().all()
+    assert "nan" not in set(full["paper"].dropna())
+
+
+def test_embedding_writes_an_obs_column_of_mixed_types(tmp_path):
+    """A cell_id of numbers in one dataset and strings in another is written as strings (catalog 2026-11-08)."""
+    from primers.export import _h5ad_safe
+
+    obs = pd.DataFrame({"cell_id": [1, "aa-1", None], "paper": ["p", "q", "r"]})
+    safe = _h5ad_safe(obs)
+    assert safe["cell_id"].tolist() == ["1", "aa-1", ""]
+    assert safe["paper"].tolist() == ["p", "q", "r"]
+    ad.AnnData(obs=safe.set_index(pd.Index(["a", "b", "c"]))).write_h5ad(tmp_path / "x.h5ad")

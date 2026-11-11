@@ -55,7 +55,7 @@ if [ "$SIZE" -gt $(( ${DOCS_MAX_MB:-20} * 1000000 )) ]; then
   echo "primer.ipynb is $SIZE bytes, over the ${DOCS_MAX_MB:-20} MB docs cap" >&2
   exit 1
 fi
-if [ -z "$SMOKE" ]; then
+if [ -z "${SMOKE:-}" ]; then
   mkdir -p "$WORK/docs/primers/$SLUG"
   cp "$BUNDLE/primer.ipynb" "$WORK/docs/primers/$SLUG/primer.ipynb"
 fi

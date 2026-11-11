@@ -120,7 +120,7 @@ def _embedding(views: dict[str, ad.AnnData], picked: dict[str, np.ndarray]) -> a
             width = N_PCS if key.startswith("X_pca") else 2
             frame = pd.DataFrame(_pad(_host(j.obsm[key]), width).astype(np.float32), index=j.obs_names)
             obsm[f"{key}_joint"] = frame.reindex(obs.index).to_numpy(dtype=np.float16)
-    return ad.AnnData(obs=obs, obsm=obsm)
+    return ad.AnnData(obs=_h5ad_safe(obs), obsm=obsm)
 
 
 def _part(path: Path, adata: ad.AnnData, uids: list[str]) -> dict:
@@ -186,13 +186,59 @@ def _umap_table(views: dict[str, ad.AnnData], picked: dict[str, np.ndarray]) -> 
     return out[["view", "x", "y", "x_harmony", "y_harmony", *UMAP_COLUMNS]]
 
 
-def _umap_all_table(views: dict[str, ad.AnnData], seed: int = SEED) -> pd.DataFrame:
-    """Every observation of each view, in the umap.parquet columns, shuffled per view (seeded).
+def _dictionary(s: pd.Series, order: np.ndarray):
+    """``s`` reordered by ``order`` as a string dictionary array (missing values null), without a Python string per row."""
+    import pyarrow as pa
 
-    The site streams it in chunks after the web sample, so any prefix of a view is an even sample of it.
+    cat = s if isinstance(s.dtype, pd.CategoricalDtype) else pd.Series(pd.Categorical(s.astype(object).where(s.notna(), None)))
+    codes = cat.cat.codes.to_numpy()[order].astype(np.int32)
+    return pa.DictionaryArray.from_arrays(pa.array(codes, mask=codes < 0), pa.array([str(c) for c in cat.cat.categories], pa.string()))
+
+
+def write_umap_all(views: dict[str, ad.AnnData], path: Path, seed: int = SEED) -> None:
+    """umap_all.parquet: every observation of each view, in the umap.parquet columns, shuffled per view (seeded).
+
+    The site streams it in chunks after the web sample, so any prefix of a view is an even sample of it. Written one
+    view at a time, with labels as dictionary columns and coordinates as float32, so a view of millions of cells costs
+    a few bytes per cell instead of a Python string per label (the reruns of 2026-11-10 ran out of memory on that).
     """
-    order = {name: np.random.default_rng(seed).permutation(v.n_obs) for name, v in views.items()}
-    return _umap_table(views, order)
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    writer = None
+    try:
+        for name, v in views.items():
+            order = np.random.default_rng(seed).permutation(v.n_obs)
+            u = _host(v.obsm["X_umap"])[order]
+            h = _host(v.obsm["X_umap_harmony"])[order] if "X_umap_harmony" in v.obsm else np.full((v.n_obs, 2), np.nan)
+            cols = {"view": pa.DictionaryArray.from_arrays(pa.array(np.zeros(v.n_obs, np.int32)), pa.array([name]))}
+            for key, arr in (("x", u[:, 0]), ("y", u[:, 1]), ("x_harmony", h[:, 0]), ("y_harmony", h[:, 1])):
+                cols[key] = pa.array(np.asarray(arr, np.float32))
+            for col in UMAP_COLUMNS:
+                s = v.obs[col] if col in v.obs else pd.Series([None] * v.n_obs, dtype=object)
+                if col in ("total_counts", "n_genes"):
+                    vals = pd.to_numeric(s, errors="coerce").to_numpy(dtype=float)[order]
+                    cols[col] = pa.array(np.round(np.nan_to_num(vals)).astype(np.int64), mask=np.isnan(vals))
+                else:
+                    cols[col] = _dictionary(s.reset_index(drop=True), order)
+            table = pa.table(cols)
+            writer = writer or pq.ParquetWriter(path, table.schema, compression="zstd")
+            writer.write_table(table)
+    finally:
+        if writer:
+            writer.close()
+
+
+def _h5ad_safe(obs: pd.DataFrame) -> pd.DataFrame:
+    """obs with every object column of mixed types as strings (missing as ""), because h5py writes no mixed column.
+
+    catalog 2026-11-08 has a ``cell_id`` column of numbers in some datasets and strings in others.
+    """
+    obs = obs.copy()
+    for col in obs.columns:
+        if obs[col].dtype == object and not obs[col].map(lambda x: isinstance(x, str)).all():
+            obs[col] = obs[col].map(lambda x: x if isinstance(x, str) else ("" if pd.isna(x) else str(x)))
+    return obs
 
 
 def mixing_by_view(views: dict[str, ad.AnnData]) -> dict:
@@ -263,7 +309,7 @@ def export_bundle(
     picked = _subsamples(views)
     parts = _write_embedding(_embedding(views, picked), out, min(embedding_target, MAX_H5AD_BYTES - 1))
     _parquet(_umap_table(views, picked), out / "umap.parquet")
-    _parquet(_umap_all_table(views), out / "umap_all.parquet")
+    write_umap_all(views, out / "umap_all.parquet")
     _parquet(qc, out / "qc.parquet")
     _parquet(cohort, out / "cohort.parquet")
 
