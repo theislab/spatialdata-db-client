@@ -39,6 +39,19 @@ jobs:
         with:
           use_oidc: true
 
+  primers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Test (CPU)
+        run: uv run --directory primers --group test pytest tests
+
   docs:
     runs-on: ubuntu-latest
     steps:
@@ -53,7 +66,7 @@ jobs:
 
   check:
     if: always()
-    needs: [test, docs]
+    needs: [test, primers, docs]
     runs-on: ubuntu-latest
     steps:
       - uses: re-actors/alls-green@release/v1
