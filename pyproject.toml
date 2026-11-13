@@ -32,6 +32,13 @@ dependencies = [
 viz = [ "vitessce", "easy_vitessce", "spatialdata-plot", "anndata<0.13" ]
 mcp = [ "mcp" ]
 llm = [ ]
+loader = [
+  "pydantic>=2",
+  "squidpy>=1.8.2",
+  "spatialbatch",  # TODO(T144): pin to the merged SHA, "spatialbatch @ git+https://github.com/rushin682/spatialbatch@<sha>"
+  "snakemake>=9",
+  "snakemake-executor-plugin-slurm",
+]
 
 [project.scripts]
 sddb-cli = "sddb.cli:app"
