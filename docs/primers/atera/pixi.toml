@@ -3,7 +3,7 @@
 # spatial figures and nbconvert to execute the notebook.
 # Follows rapids-singlecell's recommended conda env (conda/rsc_rapids_26.10_cuda13.yml): RAPIDS 26.10 from
 # conda plus the prebuilt rapids-singlecell-cu13 wheel, so nothing is compiled.
-# Run on a GPU node from this directory: `pixi run execute` (or `pixi run jupyter lab`)
+# Run on a GPU node from the repository root: `bash docs/primers/run_primer.sh atera` (locked env, 20 MB cap; `pixi run jupyter lab` to explore)
 [workspace]
 name = "sddb-atera-primer"
 channels = ["rapidsai", "nvidia", "conda-forge"]

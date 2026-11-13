@@ -1,6 +1,6 @@
-"""T138: segmentation and control fields of the low-count core vs the rest, per section (sddb-lead option c, 2026-11-12).
+"""Segmentation and control fields of the low-count core vs the rest of the cells, per section.
 
-Core = Leiden 2 of the 100k "scale" run (qc_test_cpu_out/obs_scale.parquet, job 43230893). Reads the obs of all six Atera
+Core = Leiden 2 of the 100,000-cell "scale" run of qc_sample_check.py (its obs_scale.parquet). Reads the obs of all six Atera
 tables of catalog-2026-11-12 through the client and writes core_vs_rest.csv (100k sample) and section_fields.csv (every
 cell of each table: the distributions a rule on the full data would act on).
 

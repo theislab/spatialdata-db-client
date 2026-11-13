@@ -49,11 +49,15 @@ import spatialdata_plot  # noqa: F401  (registers sdata.pl)
 
 import sddb
 
+import logging
+
+logging.getLogger("ome_zarr").setLevel(logging.WARNING)  # its INFO lines per image read add tens of kB to the outputs
+
 CATALOG_VERSION = "2026-11-12"  # pinned catalog release (tag catalog-2026-11-12)
 OUT = Path(os.environ.get("ATERA_OUT", "atera_out"))  # site tables and figures, not in git (see .gitignore)
 OUT.mkdir(exist_ok=True)
 SEED, N_HVG, N_PCS, SAMPLE = 0, 2_000, 50, 100_000
-LOW_DEPTH, N_NEIGHBORS, RESOLUTION, LABEL_MARGIN = 0.25, 30, 1.0, 0.1  # chosen on a 100k test (T138, 2026-11-12); see the QC and label sections
+LOW_DEPTH, N_NEIGHBORS, RESOLUTION, LABEL_MARGIN = 0.25, 30, 1.0, 0.1  # chosen on a 100,000-cell test (qc_sample_check.py, core_qc.py); see the QC and label sections
 RULES = f"qc: 50/20, 5 MAD per section, {LOW_DEPTH} x median; hvg seurat_v3 per section by median rank; scale 10; nn {N_NEIGHBORS}; leiden {RESOLUTION}; label margin {LABEL_MARGIN}"
 CREDIT = "Data: 10x Genomics, CC BY 4.0"
 sc.set_figure_params(dpi=80, facecolor="white", fontsize=9)
@@ -88,6 +92,7 @@ elif ZARRS:
     cohort = pd.DataFrame(rows)
 else:
     catalog = sddb.Catalog(version=CATALOG_VERSION)
+    print("catalog release", catalog.release, "|", catalog.url)
     atera = catalog.query(technology="10x_atera")  # catalog schema 3 stores technology ids (technology.json)
     cohort = atera.members[["uid", "canonical_key", "tissue", "disease", "preservation_method", "n_obs", "n_features", "license"]]
 cohort = cohort.assign(preservation=cohort["preservation_method"].replace({"Fresh Frozen": "FF"}).fillna(cohort["canonical_key"].str.extract(r"-(ffpe|ff)-", expand=False).str.upper()))  # the release spells FF out ("Fresh Frozen"); the -ff- keys and the figures use FF
@@ -97,6 +102,7 @@ if EXPECT and not ROWS:
     got = cohort.set_index("canonical_key")[["tissue", "disease", "preservation"]].set_axis(want.columns, axis=1)
     assert sorted(got.index) == sorted(want.index) and got.loc[want.index].astype(str).equals(want.astype(str)), (got, want)
 cohort.to_csv(OUT / "cohort.csv", index=False)
+keys = dict(zip(cohort["uid"], cohort["canonical_key"]))
 cohort
 
 # %% [markdown]
@@ -146,6 +152,7 @@ def load(uid):
     a.var_names = a.var_names.astype(str)
     a.var_names_make_unique()
     a.X = a.X.astype(np.float32)  # some sections store integer counts; GPU sparse matrices need floats
+    # the catalog tables also carry a csc_counts layer (the same counts, column-compressed); X depends on it, so it stays
     return a, s
 
 
@@ -325,6 +332,28 @@ credit(fig)
 fig.savefig(OUT / "fig_umap_tissue_preservation_leiden.png", dpi=150, facecolor="white", bbox_inches="tight")
 
 # %% [markdown]
+# Per Leiden cluster: its size, the median counts of its cells, and how evenly it draws on the six sections (the
+# entropy of its section shares divided by the log of six: 0 for one section, 1 for an even mix). The shallowest
+# clusters come first.
+
+# %%
+depth = pd.concat([d[["total_counts"]].assign(dataset=keys[u]) for u, d in qc_obs.items()]).rename_axis("cell_id").reset_index()
+obs = adata.obs[["dataset", "cell_id", "section", "leiden"]].astype({"dataset": str}).merge(depth, on=["dataset", "cell_id"], how="left")
+
+
+def section_entropy(s):
+    p = s.value_counts(normalize=True).to_numpy()
+    p = p[p > 0]
+    return float(-(p * np.log(p)).sum() / np.log(len(cohort)))
+
+
+clusters = obs.groupby("leiden", observed=True).agg(cells=("cell_id", "size"), median_counts=("total_counts", "median"),
+                                                     section_entropy=("section", section_entropy),
+                                                     main_section=("section", lambda s: s.value_counts().index[0]))
+print(len(clusters), "Leiden clusters;", int(obs["total_counts"].isna().sum()), "cells without a depth")
+clusters.sort_values("median_counts").round(2).head(8)
+
+# %% [markdown]
 # ## Biology: automated, cursory cell types
 #
 # For each broad class, a marker-gene score per cell (scanpy `score_genes` on the log-normalised counts of the
@@ -355,7 +384,7 @@ PALETTE = dict(zip(list(MARKERS) + ["unassigned", "low quality"], ["#1f77b4", "#
 label = z.idxmax(axis=1).where(assigned, "unassigned")
 adata.obs["cell_type"] = pd.Categorical(label, categories=[c for c in PALETTE if c in set(label)])
 adata.uns["cell_type_colors"] = [PALETTE[c] for c in adata.obs["cell_type"].cat.categories]
-pd.crosstab(adata.obs["cell_type"], adata.obs["tissue"])
+pd.crosstab(adata.obs["cell_type"], adata.obs["section"])
 
 # %%
 fig, axs = plt.subplots(1, 2, figsize=(W, 4.6), gridspec_kw={"width_ratios": [1.2, 1]})
@@ -384,7 +413,8 @@ fig.savefig(OUT / "fig_cell_types.png", dpi=150, facecolor="white", bbox_inches=
 has_az = ~adata.obs["azimuth_broad"].astype(str).isin(["not available", "nan"])
 if has_az.any():
     o = adata.obs.loc[has_az, ["dataset", "azimuth_broad", "cell_type"]].astype(str)
-    match = o.groupby("azimuth_broad")["cell_type"].agg(lambda c: c.value_counts().index[0])
+    # each 10x label is matched to the type most of its assigned cells get, so an unassigned cell never agrees
+    match = o[o["cell_type"] != "unassigned"].groupby("azimuth_broad")["cell_type"].agg(lambda c: c.value_counts().index[0])
     o["agree"] = o["cell_type"].values == o["azimuth_broad"].map(match).values
     agreement = o.groupby("dataset")["agree"].mean().rename("agreement").to_frame()
     agreement.to_csv(OUT / "cell_types_vs_10x.csv")
@@ -436,7 +466,6 @@ def shapes_table(s, extra_obs=None):
     return region
 
 
-keys = dict(zip(cohort["uid"], cohort["canonical_key"]))
 n = len(cohort)
 ncol = min(n, 3)
 nrow = -(-n // ncol)
@@ -509,7 +538,7 @@ per = SAMPLE // um["dataset"].nunique()
 sample = pd.concat([d.iloc[rng.choice(len(d), min(per, len(d)), replace=False)] for _, d in um.groupby("dataset")])
 sample.to_json(OUT / "umap_sample_100k.json", orient="records")
 adata.write_h5ad(OUT / "atera_integrated.h5ad")
-manifest = {"catalog_version": None if ROWS else CATALOG_VERSION, "pre_release_rows": ROWS, "cache": "hit" if HIT else "miss", "sddb": sddb.__version__, "rapids_singlecell": rsc.__version__, "scanpy": version("scanpy"),
+manifest = {"catalog_version": None if (ROWS or ZARRS) else CATALOG_VERSION, "pre_release_rows": ROWS, "cache": "hit" if HIT else "miss", "sddb": sddb.__version__, "rapids_singlecell": rsc.__version__, "scanpy": version("scanpy"),
             "spatialdata": sd.__version__, "datasets": cohort.to_dict("records"), "n_cells": int(adata.n_obs), "n_genes_joint": len(genes),
             "seed": SEED, "credit": CREDIT}
 (OUT / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str))
@@ -518,11 +547,16 @@ print(len(um), "cells;", len(sample), "in the sample")
 # %% [markdown]
 # ## Reproduce
 #
-# On a Linux machine with an NVIDIA GPU (CUDA 13 driver), from `docs/primers/atera`:
+# The heavy steps (quality control, variable genes, scaling, PCA, Harmony, neighbours, UMAP and Leiden) ran once,
+# in a run of about 28 minutes on one NVIDIA H100 GPU, on catalog release 2026-11-12, and wrote their result to `OUT/cache`. The
+# outputs shown here were rendered from that cache: the notebook loads it when the section uids and the rules match
+# the stored ones, and recomputes everything otherwise. To rerun, on a Linux machine with an NVIDIA GPU (CUDA 13
+# driver), from the repository root:
 #
 # ```
-# pixi run execute
+# bash docs/primers/run_primer.sh atera
 # ```
 #
-# The environment is pinned in `pixi.lock`, and the catalog release in `CATALOG_VERSION` above, so the same sections
-# and counts come back. Data: 10x Genomics, CC BY 4.0.
+# The script uses the locked environment (`pixi run --frozen`) and refuses a notebook above 20 MB. The environment is
+# pinned in `pixi.lock`, and the catalog release in `CATALOG_VERSION` above, so the same sections and counts come
+# back. Data: 10x Genomics, CC BY 4.0.

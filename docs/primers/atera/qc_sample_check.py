@@ -1,4 +1,4 @@
-"""T138 preprocessing test on a stratified 100k sample of the six Atera sections (catalog-2026-11-12), before any QC.
+"""Preprocessing test on a stratified 100,000-cell sample of the six Atera sections (catalog-2026-11-12), before any QC.
 
 Runs the primer's current settings and two proposed variants on the same cells, and writes per-section QC losses and
 UMAP grids (uncorrected and Harmony; coloured by section, log1p total counts and cell type) to OUT.
@@ -7,14 +7,14 @@ Sources for the proposed rules:
 - Lower-tail QC by median absolute deviations (MAD) of log1p total counts and log1p genes per cell, 5 MADs: "we mark
   cells as outliers if they differ by 5 MADs which is a relatively permissive filtering strategy"
   (sc-best-practices.org, Quality Control chapter). Applied per section here because depth differs ~6x between
-  sections (qc_per_dataset.csv of job 43189110); the chapter does not say per sample. 3 MADs reported for comparison.
+  sections (qc_per_dataset.csv of a first run); the chapter does not say per sample. 3 MADs reported for comparison.
 - HVGs: scanpy highly_variable_genes(flavor="seurat_v3", batch_key=section) on counts: "count data is expected"; "genes
   are selected within each batch separately and merged ... This simple process avoids the selection of batch-specific
   genes and acts as a lightweight batch correction method" (scanpy docs, pp.highly_variable_genes).
 - Scaling: scanpy pp.scale "Scale data to unit variance and zero mean"; max_value "Clip (truncate) to this value after
   scaling" (scanpy docs, pp.scale).
 
-    pixi run python -I qc_test.py OUT        (GPU node, from docs/primers/atera; SDDB_CACHE_DIR set)
+    pixi run python -I qc_sample_check.py OUT        (GPU node, from docs/primers/atera; SDDB_CACHE_DIR set)
 """
 import sys
 from pathlib import Path
