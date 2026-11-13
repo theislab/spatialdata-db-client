@@ -37,8 +37,10 @@ import numpy as np
 
 # The crop window, chosen by the rule in `choose_window` from the bundle below; the run checks it again.
 BUNDLE_NAME = "Atera_v1_WTA_S4C_Breast_Cancer_FF"
-UID = "sddb_a722jfj3pq"  # the candidate id of the bundle (sddb-frontier/atera_root/candidates); not a catalog uid
-STUDY_ID = "candidate:sddb_a722jfj3pq"
+# the released record of this bundle (candidate sddb_a722jfj3pq, same canonical_key); Catalog().release is "2026-11-12"
+UID = "Oc0RVwT6WdZXOkAv0000"
+STUDY_ID = "10x:atera-wta-ff-human-breast-cancer"
+CATALOG_RELEASE = "2026-11-12"
 SIDE_UM = 400.0  # 1000 um gave 83.5 MB zipped (X 88 of 105 MB on disk); see the T144 task-6 report
 BIN_UM = 100.0
 # (x0, y0, x1, y1) in microns of the global frame; the densest 1000 um window was (4800, 1600, 5800, 2600)
@@ -190,8 +192,10 @@ def main() -> None:
     # Both are optional in the contract; this fixture tests the contract and the loader, and the full chain is checked
     # on whole Atera slides in T144 Task 7.
     chain = [Rasterize(MPP_TARGET), Centroids()]
+    # a member list has no catalog; carry the release the way a Cohort does (materialize._release reads _source)
+    cohort = type("FixtureCohort", (list,), {"_source": type("Release", (), {"release": CATALOG_RELEASE})})
     materialize(
-        [Member(UID, STUDY_ID, crop_path)],
+        cohort([Member(UID, STUDY_ID, crop_path)]),
         dest,
         adapters=chain,
         role="he",
