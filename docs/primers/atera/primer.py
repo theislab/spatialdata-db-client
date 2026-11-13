@@ -31,7 +31,12 @@
 import hashlib
 import json
 import os
+import warnings
+from importlib.metadata import version
 from pathlib import Path
+
+warnings.filterwarnings("ignore", message="IProgress not found")  # tqdm in a non-widget kernel
+warnings.filterwarnings("ignore", message="Converting `region_key: region` to categorical dtype")  # spatialdata, per table built below
 
 import anndata as ad
 import matplotlib.pyplot as plt
@@ -51,7 +56,7 @@ SEED, N_HVG, N_PCS, SAMPLE = 0, 2_000, 50, 100_000
 LOW_DEPTH, N_NEIGHBORS, RESOLUTION, LABEL_MARGIN = 0.25, 30, 1.0, 0.1  # chosen on a 100k test (T138, 2026-11-12); see the QC and label sections
 RULES = f"qc: 50/20, 5 MAD per section, {LOW_DEPTH} x median; hvg seurat_v3 per section by median rank; scale 10; nn {N_NEIGHBORS}; leiden {RESOLUTION}; label margin {LABEL_MARGIN}"
 CREDIT = "Data: 10x Genomics, CC BY 4.0"
-sc.settings.set_figure_params(dpi=80, facecolor="white", fontsize=9)
+sc.set_figure_params(dpi=80, facecolor="white", fontsize=9)
 plt.rcParams.update({"font.size": 9, "axes.titlesize": 9, "axes.labelsize": 9, "xtick.labelsize": 8, "ytick.labelsize": 8, "legend.fontsize": 8})
 W = 1600 / 150  # hero figures: 1600 px wide at 150 dpi, so text has one size across them
 
@@ -59,7 +64,7 @@ W = 1600 / 150  # hero figures: 1600 px wide at 150 dpi, so text has one size ac
 def credit(fig):
     """The data credit as a small footer, clear of the panel titles."""
     fig.text(0.01, 0.005, CREDIT, fontsize=7, color="#555555", ha="left", va="bottom")
-print("sddb", sddb.__version__, "| rapids-singlecell", rsc.__version__, "| scanpy", sc.__version__, "| catalog", CATALOG_VERSION)
+print("sddb", sddb.__version__, "| rapids-singlecell", rsc.__version__, "| scanpy", version("scanpy"), "| catalog", CATALOG_VERSION)
 
 # %% [markdown]
 # ## Cohort
@@ -175,7 +180,7 @@ def sha256(f):
 
 meta = json.loads((CACHE / "heavy.json").read_text()) if (CACHE / "heavy.json").exists() else {}
 HIT = meta.get("uids") == UIDS and meta.get("rules") == RULES and all(sha256(CACHE / f) == h for f, h in meta.get("sha256", {}).items())
-print("cache", "hit" if HIT else "miss", CACHE)
+print("cache", "hit" if HIT else "miss", f"{OUT.name}/cache")  # relative: no machine paths in the committed outputs
 if HIT:
     qc_obs = {u: d.drop(columns="uid") for u, d in pd.read_parquet(CACHE / "qc_obs.parquet").groupby("uid")}
 
@@ -504,7 +509,7 @@ per = SAMPLE // um["dataset"].nunique()
 sample = pd.concat([d.iloc[rng.choice(len(d), min(per, len(d)), replace=False)] for _, d in um.groupby("dataset")])
 sample.to_json(OUT / "umap_sample_100k.json", orient="records")
 adata.write_h5ad(OUT / "atera_integrated.h5ad")
-manifest = {"catalog_version": None if ROWS else CATALOG_VERSION, "pre_release_rows": ROWS, "cache": "hit" if HIT else "miss", "sddb": sddb.__version__, "rapids_singlecell": rsc.__version__, "scanpy": sc.__version__,
+manifest = {"catalog_version": None if ROWS else CATALOG_VERSION, "pre_release_rows": ROWS, "cache": "hit" if HIT else "miss", "sddb": sddb.__version__, "rapids_singlecell": rsc.__version__, "scanpy": version("scanpy"),
             "spatialdata": sd.__version__, "datasets": cohort.to_dict("records"), "n_cells": int(adata.n_obs), "n_genes_joint": len(genes),
             "seed": SEED, "credit": CREDIT}
 (OUT / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str))
