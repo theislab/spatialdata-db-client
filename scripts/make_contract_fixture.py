@@ -282,7 +282,9 @@ def _overlay(dest: Path, path: Path) -> None:
     # Centroids are pixel-index means; spatialdata puts pixel j's centre at j + 0.5
     pts = pd.DataFrame({"x": xy[:, 0] + 0.5, "y": xy[:, 1] + 0.5})
     s = sd.SpatialData(
-        images={"he": Image2DModel.parse(np.asarray(g["images"]["he"][...]), dims=("c", "y", "x"))},
+        images={
+            "he": Image2DModel.parse(np.asarray(g["images"]["he"][...]), dims=("c", "y", "x"), c_coords=["r", "g", "b"])
+        },
         labels={"cells": Labels2DModel.parse(np.asarray(g["labels"]["cells"][...]), dims=("y", "x"))},
         points={"centroids": PointsModel.parse(pts)},
     )

@@ -772,7 +772,7 @@ class StainNormalize(_Adapter):
     Which pixels change: squidpy's transform maps every pixel through one linear operator in optical-density space and
     then puts the source pixels back outside ``labels["tissue"]`` (``preserve_background=True``, squidpy 1.8.4
     ``_stain/_normalize.py:375-380``, default in ``_reference.py:132``). Inside the tissue mask, glass and lumen pixels
-    with almost no stain are mapped too, and on the Atera Preview breast they came out pale green. So :meth:`build` also
+    with almost no stain are mapped too, by an operator fitted on stained pixels. So :meth:`build` also
     keeps the source pixel wherever every channel's optical density ``-log10(I / I0)`` (``I0`` the reference's white
     point) is below `keep_below_od`. The default 0.15 is Macenko et al. 2009's threshold for "pixels with nearly no
     stain (low OD)" (ISBI 2009, p. 1108, Algorithm 1 step 2). In the paper the threshold only removes those pixels from

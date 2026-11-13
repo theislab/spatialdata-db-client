@@ -219,7 +219,7 @@ def batch_figure(batch, path: Path, n: int = 16) -> None:
         if i >= min(n, len(he)):
             continue
         view = sd.SpatialData(
-            images={"he": Image2DModel.parse(he[i], dims=("c", "y", "x"))},
+            images={"he": Image2DModel.parse(he[i], dims=("c", "y", "x"), c_coords=["r", "g", "b"])},
             labels={"cells": Labels2DModel.parse(cells[i], dims=("y", "x"))},
         )
         (

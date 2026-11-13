@@ -180,7 +180,7 @@ def _tissue_figure(dest: Path, slides: dict, path: Path, side: int = 900) -> Non
         small = np.asarray(he[:, ::f, ::f].compute())
         mask = np.asarray(da.from_zarr(g["labels"]["tissue"])[::f, ::f].compute())
         view = sd.SpatialData(
-            images={"he": Image2DModel.parse(small, dims=("c", "y", "x"))},
+            images={"he": Image2DModel.parse(small, dims=("c", "y", "x"), c_coords=["r", "g", "b"])},
             labels={"tissue": Labels2DModel.parse(mask, dims=("y", "x"))},
         )
         (
