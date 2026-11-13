@@ -83,6 +83,7 @@ def _table(dest, key):
 def test_materialize_synthetic_cohort_validates(cohort, tmp_path, caplog):
     members, sources = cohort
     dest = tmp_path / "collection.zarr"
+    state = tmp_path / "collection.zarr.sddb"
     out = materialize(
         members,
         dest,
@@ -130,17 +131,19 @@ def test_materialize_synthetic_cohort_validates(cohort, tmp_path, caplog):
         np.testing.assert_array_equal(
             np.asarray(table.X.todense() if hasattr(table.X, "todense") else table.X), counts[source_rows][:, cols]
         )
-        assert (dest / ".sddb_done" / uid).is_file()
-        assert json.loads((dest / ".sddb_done" / uid).read_text())["key"] == key
+        assert (state / "done" / uid).is_file()
+        assert json.loads((state / "done" / uid).read_text())["key"] == key
     assert references[0] is not None
     assert references[0] == references[1]  # one pooled reference for the cohort
     assert "2 features that are not Gene Expression" in caplog.text
-    assert not (dest / ".sddb" / "scratch").exists()
+    assert not (state / "scratch").exists()
+    assert sorted(p.name for p in dest.iterdir() if not p.name.startswith("zarr.json")) == ["dataset_0", "dataset_1"]
 
 
 def test_rerun_skips_done_members(cohort, tmp_path, monkeypatch):
     members, _ = cohort
     dest = tmp_path / "collection.zarr"
+    state = tmp_path / "collection.zarr.sddb"
     kwargs = {"role": "he", "roles": ROLES, "mpp_native": {"uidA": 0.25, "uidB": 0.25}}
     materialize(members, dest, adapters=default_chain(0.5), **kwargs)
     reference = _contract(dest, "dataset_0").stain_reference
@@ -156,7 +159,7 @@ def test_rerun_skips_done_members(cohort, tmp_path, monkeypatch):
     assert written == []
 
     # a member without its marker is written again, under the same key, with the cohort's stain reference
-    (dest / ".sddb_done" / "uidB").unlink()
+    (state / "done" / "uidB").unlink()
     materialize(members, dest, adapters=default_chain(0.5), **kwargs)
     assert written == ["dataset_1"]
     assert _contract(dest, "dataset_1").stain_reference == reference
@@ -168,6 +171,7 @@ def test_rerun_skips_done_members(cohort, tmp_path, monkeypatch):
 def test_rerun_refuses_a_changed_cohort(cohort, tmp_path):
     members, _ = cohort
     dest = tmp_path / "collection.zarr"
+    tmp_path / "collection.zarr.sddb"
     chain = [Rasterize(0.5), Centroids()]
     kwargs = {"role": "he", "roles": ROLES, "mpp_native": {"uidA": 0.25, "uidB": 0.25}}
     materialize(members, dest, adapters=chain, **kwargs)
@@ -178,6 +182,7 @@ def test_rerun_refuses_a_changed_cohort(cohort, tmp_path):
 def test_mixed_grids_refused_at_collection(cohort, tmp_path):
     members, _ = cohort
     dest = tmp_path / "collection.zarr"
+    tmp_path / "collection.zarr.sddb"
     kwargs = {"adapters": [Rasterize(0.5), Centroids()], "role": "he", "roles": ROLES, "mpp_native": {"uidA": 0.25}}
     with pytest.raises(ValueError, match=r"mixes.*target.*uidA.*native.*uidB"):
         materialize(members, dest, **kwargs)
@@ -218,6 +223,7 @@ def test_loader_iterates_materialized(cohort, tmp_path):
 
     members, sources = cohort
     dest = tmp_path / "collection.zarr"
+    tmp_path / "collection.zarr.sddb"
     # target mpp = native mpp: the written grid is the source grid, so tiles can be checked against the source image
     chain = [Rasterize(0.25), Centroids(), TissueMask()]
     materialize(members, dest, adapters=chain, role="he", roles=ROLES, mpp_native={"uidA": 0.25, "uidB": 0.25})
@@ -289,6 +295,7 @@ def test_failed_member_not_marked_and_rewritten(cohort, tmp_path, monkeypatch):
 
     members, _ = cohort
     dest = tmp_path / "c.zarr"
+    state = tmp_path / "c.zarr.sddb"
     kwargs = {"adapters": [Rasterize(0.5), Centroids()], "role": "he", "roles": ROLES}
     kwargs["mpp_native"] = {"uidA": 0.25, "uidB": 0.25}
     with monkeypatch.context() as m:
@@ -296,8 +303,43 @@ def test_failed_member_not_marked_and_rewritten(cohort, tmp_path, monkeypatch):
         with pytest.raises(ContractError, match=r"dataset_0 \(uidA\): synthetic issue"):
             materialize(members, dest, **kwargs)
     assert (dest / "dataset_0").is_dir()
-    assert not (dest / ".sddb_done").exists()
+    assert not (state / "done").exists()
 
     materialize(members, dest, **kwargs)  # the leftover dataset_0 is replaced
     assert validate(dest) == []
-    assert sorted(p.name for p in (dest / ".sddb_done").iterdir()) == ["uidA", "uidB"]
+    assert sorted(p.name for p in (state / "done").iterdir()) == ["uidA", "uidB"]
+
+
+def test_collection_holds_only_zarr(cohort, tmp_path):
+    import warnings
+
+    from spatialbatch.io import SpatialDatasetCollection
+    from zarr.errors import ZarrUserWarning
+
+    members, _ = cohort
+    dest = tmp_path / "c.zarr"
+    chain = [Rasterize(0.5), Centroids()]
+    materialize(members, dest, adapters=chain, role="he", roles=ROLES, mpp_native={"uidA": 0.25, "uidB": 0.25})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ZarrUserWarning)
+        assert validate(dest) == []
+        assert len(list(SpatialDatasetCollection(dest))) == 2
+        materialize(members, dest, adapters=chain, role="he", roles=ROLES, mpp_native={"uidA": 0.25, "uidB": 0.25})
+
+
+def test_materialize_records_are_not_rebuilt(cohort, tmp_path):
+    from sddb.loader import MATERIALIZE_RECORDS, adapter_from_record
+
+    members, _ = cohort
+    dest = tmp_path / "c.zarr"
+    chain = [Rasterize(0.5), Centroids()]
+    materialize(members, dest, adapters=chain, role="he", roles=ROLES, mpp_native={"uidA": 0.25, "uidB": 0.25})
+    records = _contract(dest, "dataset_0").adapters
+    assert MATERIALIZE_RECORDS == ("GeneKey",)
+    assert records[0].name in MATERIALIZE_RECORDS
+    with pytest.raises(ValueError, match="step of materialize.*MATERIALIZE_RECORDS"):
+        adapter_from_record(records[0])
+    rebuilt = [adapter_from_record(r) for r in records if r.name not in MATERIALIZE_RECORDS]
+    assert [a.to_record() for a in rebuilt] == records[1:]
+    with pytest.raises(ValueError, match="no loader adapter named 'Nope'"):
+        adapter_from_record(records[1].model_copy(update={"name": "Nope"}))

@@ -10,6 +10,7 @@ This subpackage imports squidpy, dask-image and pydantic and is not imported by 
 
 from sddb.loader._adapters import (
     ADAPTERS,
+    MATERIALIZE_RECORDS,
     Centroids,
     Rasterize,
     StainNormalize,
@@ -24,6 +25,7 @@ __all__ = [
     "ADAPTERS",
     "Centroids",
     "LoaderItem",
+    "MATERIALIZE_RECORDS",
     "Rasterize",
     "StainNormalize",
     "TissueMask",

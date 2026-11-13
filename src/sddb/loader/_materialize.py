@@ -30,6 +30,7 @@ from sddb.contract import (
     assert_valid,
     validate_dataset,
 )
+from sddb.loader._adapters import GENE_KEY as _GENE_KEY
 from sddb.loader._adapters import Rasterize, StainNormalize
 from sddb.loader._item import LoaderItem
 
@@ -42,7 +43,6 @@ logger = logging.getLogger(__name__)
 
 _DATASET = re.compile(r"^dataset_\d+$")
 _GENE_EXPRESSION = "Gene Expression"
-_GENE_KEY = "GeneKey"  # the record of the var re-keying, the first of a dataset's adapters
 _GENE_KEY_VERSION = "0.1.0"
 
 
@@ -62,23 +62,30 @@ def materialize(
 ) -> Path:
     """Write every member of `cohort` as one dataset of a loader collection at `dest`, and validate it.
 
-    Members are opened lazily (``to_sdata``) and written in uid order as ``dataset_0``, ``dataset_1``, ... Per
-    member:
+    Members are opened lazily (``to_sdata``) and written in uid order as ``dataset_0``, ``dataset_1``, ... The run
+    state lives beside the collection, in ``<dest>.sddb/`` (``done/<uid>`` markers and ``scratch/``), so that `dest`
+    holds only zarr groups. Per member:
 
     1. its table is re-keyed to Ensembl ids (``gene_key="ensembl"`` of :meth:`~sddb.SpatialDataCohort.to_anndata`).
-       Only features whose ``var["feature_types"]`` is ``"Gene Expression"`` are kept, if the column exists, and only
-       the genes every member shares, in sorted order, so that every dataset has the same var. What is left out is
-       counted in the ``GeneKey`` record, the first of ``uns["sddb_contract"]["adapters"]``, and logged;
+       Only features whose ``var["feature_types"]`` is ``"Gene Expression"`` are kept, if the column exists. The
+       shared var is the intersection of the members' Gene Expression Ensembl ids, sorted, so that every dataset has
+       the same var. On a rerun the var of the datasets already written is binding, and a member that lacks any of
+       its genes raises. What is left out is counted in the ``GeneKey`` record, the first of
+       ``uns["sddb_contract"]["adapters"]`` (a step of this function, not an adapter: see
+       :data:`~sddb.loader.MATERIALIZE_RECORDS`), and logged;
     2. the adapters run in order. An adapter with a ``fit`` method and no ``reference`` (:class:`StainNormalize`) is
        fit once on all members at that point of the chain, or takes the reference of the members already written;
     3. after the step that makes ``labels["cells"]`` (:class:`Rasterize`), the labels are written once to
-       ``dest/.sddb/scratch`` and reread from there, so that the later steps and the final write do not draw the
-       cells again;
+       ``<dest>.sddb/scratch`` and reread from there, so that the later steps and the final write do not draw the
+       cells again. They are deleted once the member is validated and marked done;
     4. the dataset is written with :func:`spatialbatch.write_collection_dataset` with ``uns["sddb_contract"]`` and
        ``uns["spatial"][uid]``, and checked with :func:`~sddb.contract.validate_dataset`. Then
-       ``dest/.sddb_done/<uid>`` is written, and a rerun skips the members that have it.
+       ``<dest>.sddb/done/<uid>`` is written, and a rerun skips the members that have it.
 
     Last, the whole collection is checked with :func:`~sddb.contract.validate`.
+
+    Memory: the tables of all members not yet written are held in memory until each is written, since the shared var
+    and a pooled fit need all of them. Images and labels stay lazy (dask) and are written block by block.
 
     Parameters
     ----------
@@ -185,9 +192,7 @@ def materialize(
                 allow_mixed_grids=allow_mixed_grids,
                 written=written,
             )
-        shutil.rmtree(dest / ".sddb" / "scratch", ignore_errors=True)
-        if (dest / ".sddb").is_dir() and not any((dest / ".sddb").iterdir()):
-            (dest / ".sddb").rmdir()
+        shutil.rmtree(_state(dest) / "scratch", ignore_errors=True)
     assert_valid(dest)
     return dest
 
@@ -222,7 +227,7 @@ def _run(
 
     fits = [i for i, step in enumerate(adapters) if _needs_fit(step)]
     split = fits[-1] if fits else 0
-    scratch = dest / ".sddb" / "scratch"
+    scratch = _state(dest) / "scratch"
     for i, step in enumerate(adapters[:split]):
         if i in fits:
             _fit_or_reuse(step, list(items.values()), root, written)
@@ -239,7 +244,7 @@ def _run(
         _write(root, dest, key, item, by_uid[uid], obs_columns, release, allow_mixed_grids)
         if issues := validate_dataset(root[key]):
             raise ContractError([f"{key} ({uid}): {issue}" for issue in issues])
-        marker = dest / ".sddb_done" / uid
+        marker = _state(dest) / "done" / uid
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(json.dumps({"uid": uid, "key": key, "contract": CONTRACT_VERSION}))
         shutil.rmtree(scratch / uid, ignore_errors=True)
@@ -262,6 +267,11 @@ def _build(step: Any, item: LoaderItem, scratch: Path) -> LoaderItem:
     return dataclasses.replace(item, labels={**item.labels, "cells": _persist(cells, path)})
 
 
+def _state(dest: Path) -> Path:
+    """The run state of the collection at `dest`, beside it so that the collection holds only zarr groups."""
+    return dest.parent / f"{dest.name}.sddb"
+
+
 def _rasterize_step(adapters: Sequence[Any]) -> Rasterize:
     found = [a for a in adapters if isinstance(a, Rasterize)]
     if len(found) != 1:
@@ -276,7 +286,7 @@ def _grid(mpp: float | None, mpp_native: float | None) -> Literal["target", "nat
 
 def _is_done(dest: Path, uid: str, key: str) -> bool:
     """Whether `uid` was written and validated at `key`; a marker for another key means the cohort changed."""
-    marker = dest / ".sddb_done" / uid
+    marker = _state(dest) / "done" / uid
     if not marker.is_file():
         return False
     recorded = json.loads(marker.read_text()).get("key")
@@ -286,7 +296,7 @@ def _is_done(dest: Path, uid: str, key: str) -> bool:
             "new dest"
         )
     if not (dest / key).is_dir():
-        raise ValueError(f"{dest} has a done marker for {uid} but no {key}; remove .sddb_done/{uid} to rewrite it")
+        raise ValueError(f"{dest} has a done marker for {uid} but no {key}; remove {marker} to rewrite it")
     return True
 
 

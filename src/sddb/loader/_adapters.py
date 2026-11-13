@@ -686,6 +686,10 @@ def _reference_dict(ref: StainFit) -> dict[str, Any]:
 # -- chain -------------------------------------------------------------------------------------------------------------
 
 ADAPTERS: dict[str, type[_Adapter]] = {a.name: a for a in (Rasterize, Centroids, TissueMask, StainNormalize)}
+GENE_KEY = "GeneKey"
+#: Records that :func:`~sddb.loader.materialize` writes for its own steps, not for an adapter, so they are not rebuilt
+#: by :func:`adapter_from_record`: ``GeneKey`` is the re-keying of var to the shared Ensembl index.
+MATERIALIZE_RECORDS = (GENE_KEY,)
 
 
 def adapter_from_record(rec: AdapterRecord) -> _Adapter:
@@ -694,8 +698,14 @@ def adapter_from_record(rec: AdapterRecord) -> _Adapter:
     Raises
     ------
     ValueError
-        If no loader adapter has the record's name.
+        If no loader adapter has the record's name, also for the steps of materialize itself
+        (:data:`MATERIALIZE_RECORDS`), which a caller rebuilding a chain skips.
     """
+    if rec.name in MATERIALIZE_RECORDS:
+        raise ValueError(
+            f"{rec.name!r} records a step of materialize, not an adapter, and cannot be rebuilt; skip the records in "
+            "MATERIALIZE_RECORDS"
+        )
     if rec.name not in ADAPTERS:
         raise ValueError(f"no loader adapter named {rec.name!r}; known: {sorted(ADAPTERS)}")
     return ADAPTERS[rec.name].from_record(rec)
