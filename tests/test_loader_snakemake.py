@@ -292,3 +292,36 @@ def test_parallel_members_consolidated(tmp_path):
     # two members were written at once: two dataset jobs started before the first one finished
     log = (tmp_path / "c.zarr.sddb" / "snakemake.log").read_text()
     assert log[: log.index("Finished jobid")].count("rule dataset_") == 2
+
+
+def test_jobs_read_x_lazily_and_write_it_whole(tmp_path):
+    """The jobs keep X as dask until the write (_run_one._read_store), and write what the in-process run writes."""
+    import dask.array as da
+    import spatialdata as sd
+    from scipy import sparse
+
+    from sddb.loader import _run_one
+
+    members = []
+    for uid, seed in (("uidA", 0), ("uidB", 1)):
+        path = write_member(tmp_path, uid, seed=seed, extra_gene=uid == "uidB")[0]
+        sdata = sd.read_zarr(path)
+        table = sdata.tables["table"]
+        table.X = sparse.csr_matrix(table.X)  # Atera's X is CSR
+        sparse_path = tmp_path / f"{uid}_csr.zarr"
+        sdata.write(sparse_path)
+        members.append(FakeMember(uid, sparse_path))
+        lazy = _run_one._read_store(sparse_path).tables["table"]
+        assert isinstance(lazy.X, da.Array)
+        assert sparse.issparse(lazy.X.compute())
+        np.testing.assert_array_equal(lazy.X.compute().toarray(), table.X.toarray())
+    cohort = FakeCohort(members)
+    kwargs = {"adapters": [Rasterize(0.5), Centroids()], "role": "he", "roles": ROLES, "mpp_native": MPP}
+    local = materialize(cohort, tmp_path / "local.zarr", **kwargs)
+    snake = materialize(cohort, tmp_path / "snake.zarr", runner="snakemake", **kwargs)
+    assert validate(snake) == []
+    for key in ("dataset_0", "dataset_1"):
+        a, b = zarr.open_group(local / key, mode="r"), zarr.open_group(snake / key, mode="r")
+        assert a["X"].attrs["encoding-type"] == b["X"].attrs["encoding-type"] == "csr_matrix"
+        for part in ("data", "indices", "indptr"):
+            np.testing.assert_array_equal(a["X"][part][...], b["X"][part][...], err_msg=f"{key} X/{part}")

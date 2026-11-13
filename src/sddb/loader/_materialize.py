@@ -101,7 +101,9 @@ def materialize(
     (:func:`~sddb.loader.adapter_from_record`), so every adapter must be a loader adapter.
 
     Memory: the tables of all members not yet written are held in memory until each is written, since the shared var
-    and a pooled fit need all of them. Images and labels stay lazy (dask) and are written block by block.
+    and a pooled fit need all of them; a member whose ``to_sdata`` gives a dask ``X`` keeps it lazy until its write.
+    The snakemake jobs read ``X`` so (``_run_one._read_store``), and each member job holds one table in memory.
+    Images and labels stay lazy (dask) and are written block by block.
 
     Parameters
     ----------
@@ -643,6 +645,8 @@ def _write(group: Any, key: str, item: LoaderItem, plan: Mapping[str, Any]) -> N
     )
 
     table = item.table.copy()
+    if isinstance(table.X, da.Array):  # a lazy X (the snakemake jobs read it so): annbatch writes it from memory
+        table.X = table.X.compute()
     table.obs["uid"] = item.uid
     table.obs["study_id"] = item.study_id
     for col, value in plan["members"][item.uid]["obs"].items():
