@@ -1,0 +1,40 @@
+name: release
+
+# Publish to PyPI on a v* tag push via trusted publishing (no token secrets).
+# Creates no GitHub release; cut those separately (see README, "Releasing").
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # hatch-vcs derives the version from the tag
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+      - name: Build
+        run: uv build
+      - name: Check
+        run: uvx twine check dist/*
+      - uses: actions/upload-artifact@v5
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/spatialdata-db
+    permissions:
+      id-token: write  # mandatory for trusted publishing
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: python-package-distributions
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
