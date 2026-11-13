@@ -279,6 +279,18 @@ def test_label_id_check_reads_a_window_without_shapes():
         _check_label_column(source, pd.Series(ids), ids + 100, None, None, "cell_labels")
 
 
+def test_label_id_check_refuses_duplicate_shape_index():
+    from sddb.loader._item import _check_label_column
+
+    labels = draw_cells(4, 40, 40)
+    source = SimpleNamespace(cells=xr.DataArray(da.from_array(labels), dims=("y", "x")), cells_to_cs=np.eye(3))
+    shapes = squares([(10, 10), (30, 10), (10, 30), (30, 30)], 6)
+    shapes.index = [7, 7, 8, 9]
+    ids = np.arange(1, 5)
+    with pytest.raises(ValueError, match="duplicated index"):
+        _check_label_column(source, pd.Series([7, 7, 8, 9]), ids, shapes, np.eye(3), "cell_labels")
+
+
 def test_shapes_index_mismatch_raises():
     shapes = squares([(8, 8), (24, 24)], 6)
     shapes.index = [1, 2]
@@ -449,6 +461,16 @@ def test_dtype_float_in_unit_range_scales():
     item = _rasterized(img)
     np.testing.assert_array_equal(item.image.values, np.floor(img * 255 + 0.5).astype(np.uint8))
     assert "[0, 1]" in item.dtype_rule
+    assert "judged on full resolution" in item.dtype_rule  # a single-level image
+
+
+def test_dtype_rule_says_coarsest_level_on_a_pyramid():
+    img = np.random.default_rng(6).integers(0, 256, (3, 32, 32)).astype(np.uint16)
+    sdata = make_sdata(img, shapes=squares([(8, 8)], 4), scale_factors=[2])
+    item = Rasterize(None).build(item_of(sdata))
+    assert "judged on the coarsest pyramid level" in item.dtype_rule
+    assert "clipped to uint8" in item.dtype_rule
+    np.testing.assert_array_equal(item.image.values, img)
 
 
 def test_dtype_int32_if_keeps_values():
@@ -545,73 +567,108 @@ def test_chain_never_computes_whole_image():
 
 # -- registration: image and cells on different affines ----------------------------------------------------------------
 
-ATERA = np.array([[0.0024, 1.289, 10.0], [-1.289, 0.0024, 268.0], [0, 0, 1]])  # the Atera H&E linear part
-
-
-def _similarity(scale, deg, t):
-    c, s_ = np.cos(np.deg2rad(deg)), np.sin(np.deg2rad(deg))
-    return np.array([[scale * c, -scale * s_, t[0]], [scale * s_, scale * c, t[1]], [0, 0, 1]])
+SHEAR = np.array([[1.10, 0.25, 30.0], [-0.05, 0.85, 12.0], [0, 0, 1]])  # image: sheared and anisotropic
+LABELS_TF = np.array([[0.80, -0.15, 85.0], [0.10, 0.95, 20.0], [0, 0, 1]])  # another non-similarity affine
+SHAPES_TF = np.array([[0.90, 0.20, 60.0], [-0.10, 1.05, 30.0], [0, 0, 1]])
+H0, W0 = 160, 200
+_CORNERS = (SHEAR @ np.array([[0, W0, W0, 0], [0, 0, H0, H0], [1, 1, 1, 1]]))[:2]
+X0, Y0 = _CORNERS.min(axis=1)
+X1, Y1 = _CORNERS.max(axis=1)
 
 
 def _tf(m):
     return Affine(m, input_axes=("x", "y"), output_axes=("x", "y"))
 
 
-def _paint(value_at_cs, h0=160, w0=200):
-    """An H&E image whose every pixel is f(cell under its centre) = id mod 251 + 1, through the ATERA affine."""
-    yy, xx = np.mgrid[:h0, :w0] + 0.5
-    cs = ATERA @ np.stack([xx.ravel(), yy.ravel(), np.ones(xx.size)])
-    f = (value_at_cs(cs[0], cs[1]).reshape(h0, w0) % 251 + 1).astype(np.uint8)
-    return np.repeat(f[None], 3, axis=0)
+def _paint(value_at_cs):
+    """A float H&E image in [0, 1] through the SHEAR affine, computed at each pixel centre's cs position.
+
+    Channel 0 is f(cell) = (id mod 251 + 1) / 255, constant per cell. Channels 1 and 2 are linear ramps in cs x and
+    y over the footprint, which bilinear resampling reproduces exactly, so they locate the image to a fraction of a
+    pixel.
+    """
+    yy, xx = np.mgrid[:H0, :W0] + 0.5
+    cs = SHEAR @ np.stack([xx.ravel(), yy.ravel(), np.ones(xx.size)])
+    cell = value_at_cs(cs[0], cs[1]) % 251 + 1
+    channels = [cell / 255, (cs[0] - X0) / (X1 - X0), (cs[1] - Y0) / (Y1 - Y0)]
+    return np.stack([c.reshape(H0, W0) for c in channels])
 
 
-def _interior_match(item):
-    """Share of interior written pixels (label constant within 2 px, off the border) where image = f(labels)."""
-    img = item.image.values[0].astype(np.int64)
+def _grid_cs(item, ratio):
+    """The cs position (x, y) of each written pixel centre: origin at the footprint's corner, one step per pixel."""
+    step = np.sqrt(abs(np.linalg.det(SHEAR[:2, :2]))) * ratio
+    h, w = item.labels["cells"].shape
+    yy, xx = np.mgrid[:h, :w] + 0.5
+    return X0 + step * xx, Y0 + step * yy
+
+
+def _share(a, b, mask):
+    return float(np.mean(a[mask] == b[mask]))
+
+
+def _check_registration(item, value_at, ratio):
     lab = item.labels["cells"].values.astype(np.int64)
-    same = np.ones(lab.shape, bool)
-    for dy in range(-2, 3):
-        for dx in range(-2, 3):
-            same &= np.roll(lab, (dy, dx), axis=(0, 1)) == lab
-    same[:3], same[-3:], same[:, :3], same[:, -3:] = False, False, False, False
-    cells = same & (lab > 0)
-    return float(np.mean(img[same] == lab[same] % 251 + 1)), int(cells.sum())
+    img = item.image.values.astype(np.float64)
+    x, y = _grid_cs(item, ratio)
+    border = np.zeros(lab.shape, bool)
+    border[2:-2, 2:-2] = True
+
+    # labels against the forward model (the cell under each written pixel centre): no erosion, every pixel counts
+    expected = value_at(x.ravel(), y.ravel()).reshape(lab.shape)
+    fg = border & ((lab > 0) | (expected > 0))
+    assert fg.sum() > 300
+    assert _share(lab, expected, fg) >= 0.99
+    for shift in [(1, 0), (0, 1), (-1, 0), (0, -1)]:  # negative control: a 1 px offset is seen
+        assert _share(np.roll(lab, shift, axis=(0, 1)), expected, fg) < 0.99
+
+    # the image ramps against the forward model, inside the footprint (2 cs units in from its edge)
+    inside = border & shapely.contains_xy(shapely.Polygon(_CORNERS.T).buffer(-2), x, y)
+    ramp_x, ramp_y = 255 * (x - X0) / (X1 - X0), 255 * (y - Y0) / (Y1 - Y0)
+    for ch, ramp in ((1, ramp_x), (2, ramp_y)):
+        err = (img[ch] - ramp)[inside]
+        assert np.abs(err).max() < 1  # two roundings: the uint8 source and the uint8 output
+        assert abs(err.mean()) < 0.05  # no sub-pixel bias: half a pixel would be about 0.5
+    assert np.abs(np.roll(img[1], 1, axis=1) - ramp_x)[inside].mean() > 0.6  # negative control, x
+    assert np.abs(np.roll(img[2], 1, axis=0) - ramp_y)[inside].mean() > 0.6  # negative control, y
+
+    # image and labels together: f(written labels) on foreground pixels eroded by 1 px
+    core = border & (lab > 0)
+    for dy in range(-1, 2):
+        for dx in range(-1, 2):
+            core &= np.roll(lab, (dy, dx), axis=(0, 1)) == lab
+    assert _share(img[0], lab % 251 + 1, core) >= 0.99
 
 
 @pytest.mark.parametrize("ratio", [1.0, 1.6])
 def test_registration_labels_path(ratio):
-    labels = draw_cells(20, 150, 130)
-    to_cs = _similarity(0.9, 15, (70, 60))
-    inv = np.linalg.inv(to_cs)
+    labels = draw_cells(20, 100, 160)
+    inv = np.linalg.inv(LABELS_TF)
 
     def value_at(x, y):
         lx, ly = (inv @ np.stack([x, y, np.ones_like(x)]))[:2]
         ix, iy = np.floor(lx).astype(int), np.floor(ly).astype(int)
-        ok = (ix >= 0) & (ix < 130) & (iy >= 0) & (iy < 150)
-        return np.where(ok, labels[np.clip(iy, 0, 149), np.clip(ix, 0, 129)], 0)
+        ok = (ix >= 0) & (ix < 160) & (iy >= 0) & (iy < 100)
+        return np.where(ok, labels[np.clip(iy, 0, 99), np.clip(ix, 0, 159)], 0)
 
     sdata = make_sdata(
         _paint(value_at),
-        image_tf=_tf(ATERA),
+        image_tf=_tf(SHEAR),
         labels=labels,
-        labels_tf=_tf(to_cs),
+        labels_tf=_tf(LABELS_TF),
         annotate="cell_labels",
         image_chunks=48,
     )
     roles = {**TABLE_ROLES, "labels": "^labels/cell_labels$"}
     item = Rasterize(0.25 * ratio, tile=48).build(item_of(sdata, roles=roles, mpp_native=0.25))
-    share, n_cell_px = _interior_match(item)
-    assert n_cell_px > 150  # interior cell pixels; the rest is background
-    assert share >= 0.99
+    _check_registration(item, value_at, ratio)
 
 
 @pytest.mark.parametrize("ratio", [1.0, 1.6])
 def test_registration_shapes_path(ratio):
-    centres = [(x, y) for y in range(10, 150, 30) for x in range(10, 125, 30)]
+    centres = [(x, y) for y in range(15, 90, 30) for x in range(15, 150, 30)]
     geoms = [shapely.Point(c).buffer(10, quad_segs=3) for c in centres]
     cells = gpd.GeoDataFrame(geometry=geoms, index=[f"cell-{i}" for i in range(len(geoms))])
-    to_cs = _similarity(1.1, -20, (40, 70))
-    inv = np.linalg.inv(to_cs)
+    inv = np.linalg.inv(SHAPES_TF)
 
     def value_at(x, y):
         lx, ly = (inv @ np.stack([x, y, np.ones_like(x)]))[:2]
@@ -620,18 +677,27 @@ def test_registration_shapes_path(ratio):
             out[shapely.contains_xy(g, lx, ly)] = i + 1  # label id = row position + 1 (string ids)
         return out
 
-    sdata = make_sdata(_paint(value_at), image_tf=_tf(ATERA), shapes=cells, shapes_tf=_tf(to_cs), image_chunks=48)
+    sdata = make_sdata(_paint(value_at), image_tf=_tf(SHEAR), shapes=cells, shapes_tf=_tf(SHAPES_TF), image_chunks=48)
     item = Rasterize(0.25 * ratio, tile=48).build(item_of(sdata, mpp_native=0.25))
     assert item.label_rule == "row position + 1"
-    share, n_cell_px = _interior_match(item)
-    assert n_cell_px > 150  # interior cell pixels; the rest is background
-    assert share >= 0.99
+    _check_registration(item, value_at, ratio)
+
+
+def test_registration_cells_inside_image_footprint():
+    """The test geometry is valid: every cell lies inside the image's footprint, so no cell is cut by glass."""
+    footprint = shapely.Polygon(_CORNERS.T)
+    labels_box = shapely.Polygon((LABELS_TF @ np.array([[0, 160, 160, 0], [0, 0, 100, 100], [1, 1, 1, 1]]))[:2].T)
+    shapes_box = shapely.Polygon((SHAPES_TF @ np.array([[5, 145, 145, 5], [5, 5, 85, 85], [1, 1, 1, 1]]))[:2].T)
+    assert footprint.buffer(-3).contains(labels_box)
+    assert footprint.buffer(-3).contains(shapes_box)
 
 
 @pytest.mark.parametrize(("role", "glass"), [("he", 255), ("if", 0)])
 def test_outside_footprint_is_glass(role, glass):
     img = np.full((3, 40, 40), 100, np.uint8 if role == "he" else np.uint16)
-    tf = _tf(_similarity(1.0, 45, (0, 0)))
+    tf = _tf(
+        np.array([[np.cos(np.pi / 4), -np.sin(np.pi / 4), 0], [np.sin(np.pi / 4), np.cos(np.pi / 4), 0], [0, 0, 1]])
+    )
     item = Rasterize(None).build(item_of(make_sdata(img, image_tf=tf, shapes=squares([(0, 28)], 4)), role=role))
     out = item.image.values
     h, w = out.shape[1:]

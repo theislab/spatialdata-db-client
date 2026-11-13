@@ -264,6 +264,12 @@ def _check_label_column(
     data = labels.data if isinstance(labels.data, da.Array) else da.from_array(np.asarray(labels.data))
     h, w = data.shape
     if shapes is not None and shapes_to_cs is not None:
+        if not shapes.index.is_unique:
+            dup = shapes.index[shapes.index.duplicated()].unique()
+            raise ValueError(
+                f"the shapes the table annotates have {len(dup)} duplicated index values (e.g. {list(dup[:3])}); "
+                "each row must locate one shape"
+            )
         rng = np.random.default_rng(0)
         rows = np.sort(rng.choice(len(ids), min(_CHECK_ROWS, len(ids)), replace=False))
         found = shapes.index.get_indexer(instance.to_numpy()[rows])

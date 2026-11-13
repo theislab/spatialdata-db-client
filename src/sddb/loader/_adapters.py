@@ -186,7 +186,9 @@ class Rasterize(_Adapter):
         level = _pick_level([(lv.shape[-2], lv.shape[-1]) for lv in src.levels], item.mpp_native, self.mpp)
         lv = src.levels[level]
         level_scale = np.array([w0 / lv.shape[-1], h0 / lv.shape[-2]])
-        data, dtype_rule = _to_role_dtype(_dask(lv), item.role, _dask(src.levels[-1]), self.value_range, item.uid)
+        data, dtype_rule = _to_role_dtype(
+            _dask(lv), item.role, _dask(src.levels[-1]), self.value_range, item.uid, single=len(src.levels) == 1
+        )
         if item.role == "he":
             if data.shape[0] == 4:
                 data = data[:3]
@@ -289,9 +291,13 @@ def _dask(arr: xr.DataArray) -> da.Array:
 
 
 def _to_role_dtype(
-    data: da.Array, role: str, coarse: da.Array, value_range: Sequence[float] | None, uid: str
+    data: da.Array, role: str, coarse: da.Array, value_range: Sequence[float] | None, uid: str, *, single: bool
 ) -> tuple[da.Array, str | None]:
-    """Convert pixels to the role's dtype, elementwise, and say how; never guess a range (see Rasterize)."""
+    """Convert pixels to the role's dtype, elementwise, and say how; never guess a range (see Rasterize).
+
+    The range is judged on the coarsest pyramid level (a streamed reduction over the full resolution when the image
+    has one level). Values outside it are clipped, not counted, since counting would need another full read.
+    """
     out = _DTYPES[role]
     src = np.dtype(data.dtype)
     top = int(np.iinfo(out).max)
@@ -303,17 +309,23 @@ def _to_role_dtype(
     if src == out:
         return data, None
     vmin, vmax = (float(v) for v in dask.compute(coarse.min(), coarse.max()))
+    if single:
+        judged = f"range judged on full resolution: [{vmin:g}, {vmax:g}]"
+    else:
+        judged = (
+            f"range judged on the coarsest pyramid level: [{vmin:g}, {vmax:g}]; full-resolution values outside it "
+            f"are clipped to {out}"
+        )
     if src == np.bool_:
         return data.astype(out) * out.type(top), f"bool -> {out}: True = {top}"
     if np.issubdtype(src, np.floating) and vmin >= 0 and vmax <= 1:
         conv = data.map_blocks(lambda b: np.floor(np.clip(b, 0, 1) * top + 0.5).astype(out), dtype=out)
-        return conv, f"{src} -> {out}: round(x * {top}), values in [0, 1] (coarsest level: [{vmin:g}, {vmax:g}])"
+        return conv, f"{src} -> {out}: round(clip(x, 0, 1) * {top}), values in [0, 1] ({judged})"
     if np.issubdtype(src, np.integer) and vmin >= 0 and vmax <= top:
         conv = data.map_blocks(lambda b: np.clip(b, 0, top).astype(out), dtype=out)
-        return conv, f"{src} -> {out}: values kept, they fit {out} (coarsest level: [{vmin:g}, {vmax:g}])"
+        return conv, f"{src} -> {out}: values kept, they fit {out} ({judged})"
     raise ValueError(
-        f"cannot convert the {src} image of {uid} to {out} without guessing: its coarsest level spans "
-        f"[{vmin:g}, {vmax:g}]; pass value_range=(lo, hi) to Rasterize to map it linearly"
+        f"cannot convert the {src} image of {uid} to {out} without guessing ({judged}); pass value_range=(lo, hi) to Rasterize to map it linearly"
     )
 
 
