@@ -52,7 +52,7 @@ jobs:
         run: python -m pip install -U pip
       - name: Install spatialbatch
         # rushin682/spatialbatch#3 (obsm centres, crop at read time); move to rushin682/spatialbatch once merged
-        run: pip install "spatialbatch @ git+https://github.com/timtreis/spatialbatch@93f49aa120dae38aead17b86e6b5745ee2529e7b"
+        run: pip install "spatialbatch @ git+https://github.com/timtreis/spatialbatch@cb23d0630ee5ce4f7411545a13326bfa9f0b5cac"
       - name: Install
         run: pip install -e ".[loader]" --group test
       - name: Test
