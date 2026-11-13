@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 
 _ROLES = {"image": "images", "table": "tables", "labels": "labels"}
 _MAX_LABEL = 2**32 - 1  # labels/cells is written as uint32
+# obs columns that spatialdata-io fills with each row's value in the cell labels when the table annotates shapes:
+# atera's "label_id" (readers/atera.py) and xenium's "cell_labels" (readers/xenium.py:473, cells_as_circles=True)
+_LABEL_COLUMNS = ("label_id", "cell_labels")
 
 
 @dataclass(frozen=True)
@@ -162,8 +165,10 @@ class LoaderItem:
 
         1. `label_column`;
         2. the instance ids, if the cells are the labels element the table annotates;
-        3. ``obs["label_id"]``, the spatialdata-io convention when the labels values differ from the instance ids
-           (Atera: the table annotates ``cell_boundaries`` by ``cell_id``, ``cell_labels`` holds ``label_id``).
+        3. ``obs["label_id"]``, else ``obs["cell_labels"]``: the spatialdata-io conventions when the labels values
+           differ from the instance ids (Atera: the table annotates ``cell_boundaries`` by ``cell_id``,
+           ``cell_labels`` holds ``label_id``; Xenium read with ``cells_as_circles=True``: the table annotates
+           ``cell_circles`` by ``cell_id`` and ``obs["cell_labels"]`` holds each row's value in ``cell_labels``).
            With existing labels it is checked on a sample: the labels at 200 rows' shape centroids, or, without
            shapes, the values of a central 512 x 512 window, must match for at least 95%;
         4. with existing labels nothing else applies, so a ``ValueError`` asks for `label_column`;
@@ -220,12 +225,12 @@ class LoaderItem:
             ids, rule = obs[label_column], f"obs[{label_column!r}]"
         elif cells_kind == "labels" and cells_name == region:
             ids, rule = instance, f"instance id obs[{instance_key!r}] (the table annotates the labels)"
-        elif "label_id" in obs:
-            ids, rule = obs["label_id"], "obs['label_id']"
+        elif column := next((c for c in _LABEL_COLUMNS if c in obs), None):
+            ids, rule = obs[column], f"obs[{column!r}]"
         elif cells_kind == "labels":
             raise ValueError(
                 f"cannot tell which value of labels {cells_name!r} each row of {names['table']!r} has: the table "
-                f"annotates {region!r} and has no obs['label_id']; pass label_column"
+                f"annotates {region!r} and has none of {[f'obs[{c!r}]' for c in _LABEL_COLUMNS]}; pass label_column"
             )
         elif pd.api.types.is_integer_dtype(instance) and len(instance) and instance.min() > 0:
             ids, rule = instance, f"instance id obs[{instance_key!r}]"
@@ -258,7 +263,7 @@ class LoaderItem:
             region_to_cs=_affine(annotated_el, cs),
             region=region,
         )
-        if rule == "obs['label_id']" and cells_kind == "labels":
+        if rule in {f"obs[{c!r}]" for c in _LABEL_COLUMNS} and cells_kind == "labels":
             region_el = sdata.shapes[region] if region in sdata.shapes else None
             region_to_cs = _affine(region_el, cs) if region_el is not None else None
             _check_label_column(source, instance, ids, region_el, region_to_cs, cells_name)
@@ -284,7 +289,9 @@ _CHECK_WINDOW = 512  # side of the labels window read when no shapes locate the 
 def _check_label_column(
     source: _Source, instance: pd.Series, ids: np.ndarray, shapes: Any, shapes_to_cs: np.ndarray | None, name: str
 ) -> None:
-    """Check on a sample that ``obs["label_id"]`` holds each row's value in the labels, without a full read.
+    """Check on a sample that the label column holds each row's value in the labels, without a full read.
+
+    The column is ``obs["label_id"]`` or ``obs["cell_labels"]`` (see :meth:`LoaderItem.from_sdata`).
 
     With shapes, the labels are read at the centroids of a seeded sample of rows (point reads). Without, a window
     at the centre of the labels is read and its label values must be among the ids.
@@ -328,7 +335,7 @@ def _check_label_column(
         share, what = float(np.isin(values, ids).mean()), f"{len(values)} label values in a central window"
     if share < _CHECK_SHARE:
         raise ValueError(
-            f"obs['label_id'] does not hold the values of labels {name!r}: only {share:.0%} of {what} match; "
+            f"the label column does not hold the values of labels {name!r}: only {share:.0%} of {what} match; "
             "pass label_column"
         )
 

@@ -273,6 +273,14 @@ def test_existing_labels_need_a_row_mapping():
     sdata = make_sdata(np.zeros((3, 40, 40), np.uint8), shapes=shapes(), labels=labels, obs={"label_id": [4, 3, 2, 1]})
     with pytest.raises(ValueError, match=r"0% of 4 sampled rows.*label_column"):
         item_of(sdata, roles=roles)
+    # the Xenium layout (cells_as_circles=True): obs["cell_labels"] holds the values, checked the same way
+    obs = {"cell_labels": [1, 2, 3, 4]}
+    item = item_of(make_sdata(np.zeros((3, 40, 40), np.uint8), shapes=shapes(), labels=labels, obs=obs), roles=roles)
+    assert item.label_rule == "obs['cell_labels']"
+    assert item.table.obs["label_id"].tolist() == [1, 2, 3, 4]
+    obs = {"cell_labels": [4, 3, 2, 1]}
+    with pytest.raises(ValueError, match=r"0% of 4 sampled rows.*label_column"):
+        item_of(make_sdata(np.zeros((3, 40, 40), np.uint8), shapes=shapes(), labels=labels, obs=obs), roles=roles)
 
 
 def test_label_id_check_reads_a_window_without_shapes():
