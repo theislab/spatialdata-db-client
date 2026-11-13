@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import shutil
+import warnings
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -19,8 +20,10 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import zarr
+from annbatch.io import V1_ENCODING  # type: ignore[import-untyped]
 from anndata.io import read_elem
 from spatialbatch import write_collection_dataset  # type: ignore[import-untyped]
+from zarr.errors import ZarrUserWarning
 
 from sddb.concat import _harmonize_var
 from sddb.contract import (
@@ -61,6 +64,7 @@ def materialize(
     executor: Literal["local", "slurm"] = "local",
     workers: int = 1,
     allow_mixed_grids: bool = False,
+    slurm: Mapping[str, Any] | None = None,
 ) -> Path:
     """Write every member of `cohort` as one dataset of a loader collection at `dest`, and validate it.
 
@@ -81,10 +85,20 @@ def materialize(
        ``<dest>.sddb/scratch`` and reread from there, so that the later steps and the final write do not draw the
        cells again. They are deleted once the member is validated and marked done;
     4. the dataset is written with :func:`spatialbatch.write_collection_dataset` with ``uns["sddb_contract"]`` and
-       ``uns["spatial"][uid]``, and checked with :func:`~sddb.contract.validate_dataset`. Then
-       ``<dest>.sddb/done/<uid>`` is written, and a rerun skips the members that have it.
+       ``uns["spatial"][uid]`` into a store of its own in ``<dest>.sddb/scratch``, checked with
+       :func:`~sddb.contract.validate_dataset` and moved into `dest`. Then ``<dest>.sddb/done/<uid>`` is written, and
+       a rerun skips the members that have it.
 
-    Last, the whole collection is checked with :func:`~sddb.contract.validate`.
+    Last, the root of `dest` is marked as an annbatch collection, the metadata of all datasets is consolidated into
+    it, and the whole collection is checked with :func:`~sddb.contract.validate`. Only this last step writes the root
+    metadata, so members written in parallel never race on it.
+
+    With ``runner="snakemake"`` the same steps run as a workflow, generated into ``<dest>.sddb/Snakefile`` and
+    ``<dest>.sddb/config.yaml``: rule ``fit_stain`` (only if the chain fits a stain reference) writes
+    ``<dest>.sddb/stain.json``, rule ``dataset_<uid>`` writes one member (its output is the done marker), and rule
+    ``validate`` runs the last step and writes ``<dest>.sddb/valid.json``. The shared var and the dataset keys are
+    fixed in ``config.yaml`` before any job runs, and each job rebuilds the chain from the adapters' records
+    (:func:`~sddb.loader.adapter_from_record`), so every adapter must be a loader adapter.
 
     Memory: the tables of all members not yet written are held in memory until each is written, since the shared var
     and a pooled fit need all of them. Images and labels stay lazy (dask) and are written block by block.
@@ -108,13 +122,18 @@ def materialize(
     obs_columns
         Catalog columns copied into every dataset's ``obs``, as categoricals.
     runner
-        ``"local"`` runs in this process; ``"snakemake"`` is not implemented yet.
+        ``"local"`` runs in this process; ``"snakemake"`` runs the generated workflow with snakemake.
     executor
-        Only ``"local"`` with the local runner.
+        ``"local"``, or ``"slurm"`` with the snakemake runner (``snakemake --executor slurm``).
     workers
-        Threads of the dask scheduler.
+        Threads of the dask scheduler with the local runner; jobs at once with the snakemake runner (``--cores``
+        locally, ``--jobs`` on Slurm), each running one dask thread.
     allow_mixed_grids
         Allow a collection where some members are on the target grid and others (unknown mpp) on their native grid.
+    slurm
+        Default resources of the Slurm jobs, passed as ``--default-resources``: ``mem_mb`` and ``runtime`` (minutes,
+        or a span such as ``"2h"``) are required, ``slurm_partition``, ``slurm_account`` and the other resources of
+        the snakemake Slurm executor are optional. Only with ``executor="slurm"``.
 
     Returns
     -------
@@ -127,20 +146,67 @@ def materialize(
         datasets of another cohort, or members that share no gene.
     ContractError
         If a written dataset or the collection does not conform to the contract.
+    RuntimeError
+        If the snakemake workflow fails; the message names its log.
     """
-    if runner == "snakemake":
-        raise NotImplementedError("runner='snakemake' is not implemented yet; use runner='local'")
-    if runner != "local":
+    if runner not in ("local", "snakemake"):
         raise ValueError(f"runner must be 'local' or 'snakemake', not {runner!r}")
-    if executor != "local":
+    if executor not in ("local", "slurm"):
+        raise ValueError(f"executor must be 'local' or 'slurm', not {executor!r}")
+    if runner == "local" and executor != "local":
         raise ValueError(f"executor={executor!r} needs runner='snakemake'; the local runner runs in this process")
+    if slurm is not None and executor != "slurm":
+        raise ValueError("slurm resources are for executor='slurm'")
+    if workers < 1:
+        raise ValueError(f"workers must be at least 1, not {workers}")
+    adapters = [copy.deepcopy(a) for a in adapters]  # a fit sets a reference: never on the caller's objects
+    if runner == "snakemake":
+        from sddb.loader import _snakemake
+
+        _snakemake.records(adapters)  # checked before anything is opened: the jobs rebuild the chain from these
+        if executor == "slurm":
+            _snakemake.command(_state(Path(dest)), executor=executor, workers=workers, slurm=slurm)  # checks slurm
+    plan, items = _prepare(
+        cohort,
+        dest,
+        adapters=adapters,
+        role=role,
+        roles=roles,
+        mpp_native=mpp_native,
+        obs_columns=obs_columns,
+        allow_mixed_grids=allow_mixed_grids,
+    )
+    if runner == "snakemake":
+        del items  # each job opens its member again
+        _snakemake.run(plan, adapters, executor=executor, workers=workers, slurm=slurm)
+        return Path(dest)
+    with dask.config.set(num_workers=workers):
+        _run_local(plan, adapters, items)
+    return Path(dest)
+
+
+def _prepare(
+    cohort: Iterable[Any],
+    dest: str | Path,
+    *,
+    adapters: Sequence[Any],
+    role: Literal["he", "if"],
+    roles: Mapping[str, str] | None,
+    mpp_native: Mapping[str, float] | None,
+    obs_columns: Sequence[str],
+    allow_mixed_grids: bool,
+) -> tuple[dict[str, Any], dict[str, LoaderItem]]:
+    """Check the cohort against `dest`, open the members not done and fix what every member must agree on.
+
+    Both runners start here. The plan (plain JSON) holds the dataset key, the catalog values and the source of every
+    member, the shared var, the members to write and whether the chain fits; the snakemake runner hands it to its
+    jobs in ``config.yaml``, so that jobs running in parallel agree. The items are the members not done, opened and
+    re-keyed to the shared var.
+    """
     if role not in ("he", "if"):
         raise ValueError(f"role must be 'he' or 'if', not {role!r}")
     if roles is None:
         raise ValueError("pass roles (the image and the table of each member): the catalog has no image-role field yet")
-    if workers < 1:
-        raise ValueError(f"workers must be at least 1, not {workers}")
-    adapters = [copy.deepcopy(a) for a in adapters]  # a fit sets a reference: never on the caller's objects
     rasterize = _rasterize_step(adapters)
     mpps = dict(mpp_native or {})
 
@@ -151,7 +217,7 @@ def materialize(
     if missing := sorted({c for m in members for c in obs_columns if not hasattr(m, c)}):
         raise ValueError(f"obs_columns {missing} are not catalog columns")
     keys = {uid: f"dataset_{i}" for i, uid in enumerate(uids)}
-    dest = Path(dest)
+    dest = Path(dest).absolute()
     root: Any = zarr.open_group(dest, mode="a", zarr_format=3, use_consolidated=False)
     if stale := sorted(k for k in root.group_keys() if _DATASET.match(k) and k not in keys.values()):
         raise ValueError(
@@ -179,80 +245,144 @@ def materialize(
             logger.warning(f"{uid}: no mpp_native, so it keeps its native grid")
 
     todo = [m for m in members if str(m.uid) not in done]
-    if todo:
-        release = _release(cohort)
-        with dask.config.set(num_workers=workers):
-            _run(
-                todo,
-                dest,
-                root,
-                keys=keys,
-                adapters=adapters,
-                role=role,
-                roles=roles,
-                mpps=mpps,
-                obs_columns=obs_columns,
-                release=release,
-                allow_mixed_grids=allow_mixed_grids,
-                written=written,
-            )
-        shutil.rmtree(_state(dest) / "scratch", ignore_errors=True)
-    assert_valid(dest)
-    return dest
+    items: dict[str, LoaderItem] = {}
+    paths: dict[str, str | None] = {}
+    for m in todo:
+        uid = str(m.uid)
+        sdata = m.to_sdata()
+        paths[uid] = None if sdata.path is None else str(Path(sdata.path).absolute())
+        items[uid] = LoaderItem.from_sdata(
+            sdata, uid=uid, study_id=str(m.study_id), role=role, roles=roles, mpp_native=mpps.get(uid)
+        )
+    shared = _shared_genes(items, root, written) if items else []
+    items = {uid: _rekey(item, shared) for uid, item in items.items()}
+
+    plan = {
+        "dest": str(dest),
+        "role": role,
+        "roles": dict(roles),
+        "release": _release(cohort) if todo else None,
+        "allow_mixed_grids": allow_mixed_grids,
+        "obs_columns": list(obs_columns),
+        "genes": shared,
+        "written": written,
+        "todo": [str(m.uid) for m in todo],
+        "fit": any(_needs_fit(a) for a in adapters),
+        "members": {
+            str(m.uid): {
+                "key": keys[str(m.uid)],
+                "study_id": str(m.study_id),
+                "mpp_native": mpps.get(str(m.uid)),
+                "obs": {c: _plain_value(getattr(m, c), c) for c in obs_columns},
+                "path": paths.get(str(m.uid)),
+            }
+            for m in members
+        },
+    }
+    return json.loads(json.dumps(plan)), items
 
 
-def _run(
-    members: list[Any],
-    dest: Path,
-    root: Any,
-    *,
-    keys: Mapping[str, str],
-    adapters: list[Any],
-    role: Literal["he", "if"],
-    roles: Mapping[str, str],
-    mpps: Mapping[str, float],
-    obs_columns: Sequence[str],
-    release: str,
-    allow_mixed_grids: bool,
-    written: list[str],
-) -> None:
-    """Open, adapt and write the members that are not done.
+def _plain_value(value: Any, column: str) -> Any:
+    """A catalog value as plain JSON, so that both runners write the same ``obs``; missing values become ``None``."""
+    if isinstance(value, np.generic):
+        value = value.item()
+    if value is None or (isinstance(value, float) and np.isnan(value)) or value is pd.NA or value is pd.NaT:
+        return None
+    if isinstance(value, str | bool | int | float):
+        return value
+    raise ValueError(f"obs_columns: {column} holds a {type(value).__name__}, not a str, number or bool")
+
+
+def _run_local(plan: Mapping[str, Any], adapters: list[Any], items: dict[str, LoaderItem]) -> None:
+    """The in-process runner: fit, then write the members one by one, then finalize the collection.
 
     The steps up to the last one that needs a fit run on all members together, since a fit needs all of them; then
     each member runs the rest of the chain and is written before the next one, so that a rerun loses little.
     """
-    items: dict[str, LoaderItem] = {}
-    for m in members:
-        uid = str(m.uid)
-        items[uid] = LoaderItem.from_sdata(
-            m.to_sdata(), uid=uid, study_id=str(m.study_id), role=role, roles=roles, mpp_native=mpps.get(uid)
-        )
-    items = _rekey_genes(items, root, written)
+    dest = Path(plan["dest"])
+    scratch = _state(dest) / "scratch"
+    if plan["todo"]:
+        root: Any = zarr.open_group(dest, mode="r", use_consolidated=False)
+        split, items = _fit_stage(adapters, items, root, plan["written"], scratch)
+        for uid in plan["todo"]:
+            _write_member(plan, uid, items.pop(uid), adapters[split:], scratch)
+    _finalize(dest)
 
+
+def _fit_stage(
+    adapters: list[Any], items: dict[str, LoaderItem], root: Any, written: list[str], scratch: Path
+) -> tuple[int, dict[str, LoaderItem]]:
+    """Run the steps up to the last one that needs a fit on all `items`, fitting each such step on all of them.
+
+    A fitted step is rebuilt from its record (:func:`_settle`), as the snakemake jobs rebuild it, so that both runners
+    apply the same reference. Returns the index of the first step left to run per member, and the items there.
+    """
     fits = [i for i, step in enumerate(adapters) if _needs_fit(step)]
     split = fits[-1] if fits else 0
-    scratch = _state(dest) / "scratch"
     for i, step in enumerate(adapters[:split]):
         if i in fits:
             _fit_or_reuse(step, list(items.values()), root, written)
+            _settle(step)
         items = {uid: _build(step, item, scratch) for uid, item in items.items()}
     if fits:
         _fit_or_reuse(adapters[split], list(items.values()), root, written)
+        _settle(adapters[split])
+    return split, items
 
-    by_uid = {str(m.uid): m for m in members}
-    for uid in list(items):
-        item = items.pop(uid)
-        for step in adapters[split:]:
-            item = _build(step, item, scratch)
-        key = keys[uid]
-        _write(root, dest, key, item, by_uid[uid], obs_columns, release, allow_mixed_grids)
-        if issues := validate_dataset(root[key]):
-            # a dataset that does not conform is not left in the collection
-            shutil.rmtree(dest / key)
-            zarr.consolidate_metadata(root.store)
-            raise ContractError([f"{key} ({uid}): {issue}" for issue in issues])
-        _mark_done(_state(dest) / "done" / uid, {"uid": uid, "key": key, "contract": CONTRACT_VERSION})
-        shutil.rmtree(scratch / uid, ignore_errors=True)
+
+def _settle(step: Any) -> None:
+    """Give a fitted :class:`StainNormalize` the reference rebuilt from its record (float64 lists)."""
+    if isinstance(step, StainNormalize):
+        step.reference = StainNormalize.from_record(step.to_record()).reference
+
+
+def _write_member(plan: Mapping[str, Any], uid: str, item: LoaderItem, steps: Sequence[Any], scratch: Path) -> None:
+    """Run `steps` on one member and write it as its ``dataset_<i>``, validated, then mark it done.
+
+    The dataset is written into its own store under `scratch` and moved into the collection once it validates, so
+    that this never writes the collection's root metadata: members written in parallel do not race on it, and a
+    dataset that does not conform never enters the collection. :func:`_finalize` writes the root metadata.
+    """
+    for step in steps:
+        item = _build(step, item, scratch)
+    dest = Path(plan["dest"])
+    key = plan["members"][uid]["key"]
+    stage = scratch / uid / "stage.zarr"
+    if stage.exists():
+        shutil.rmtree(stage)
+    staged: Any = zarr.open_group(stage, mode="w", zarr_format=3)
+    _write(staged, key, item, plan)
+    if issues := validate_dataset(staged[key]):
+        shutil.rmtree(stage)
+        raise ContractError([f"{key} ({uid}): {issue}" for issue in issues])
+    if (dest / key).exists():  # left by an interrupted run: it has no done marker
+        shutil.rmtree(dest / key)
+    shutil.move(stage / key, dest / key)  # a rename within one filesystem (scratch is beside dest)
+    _mark_done(_state(dest) / "done" / uid, {"uid": uid, "key": key, "contract": CONTRACT_VERSION})
+    shutil.rmtree(scratch / uid, ignore_errors=True)
+
+
+def _finalize(dest: Path) -> list[str]:
+    """Write the collection's root metadata once every member is written, and validate the collection.
+
+    This marks the root as an annbatch collection (what :func:`spatialbatch.write_collection_dataset` sets on its
+    group) and consolidates the metadata of every dataset into the root, then removes the scratch dir. Readers open
+    the root with its consolidated metadata by default (``zarr.open_group(use_consolidated=None)``), so a dataset
+    changed by other means needs :func:`zarr.consolidate_metadata` again.
+
+    Returns
+    -------
+    The dataset keys of the collection.
+    """
+    root: Any = zarr.open_group(dest, mode="a", zarr_format=3, use_consolidated=False)
+    root.update_attributes(V1_ENCODING)
+    with warnings.catch_warnings():
+        # consolidated metadata is what annbatch writes (annbatch/io.py write_sharded) and readers use
+        warnings.filterwarnings("ignore", "Consolidated metadata is currently not part", ZarrUserWarning)
+        zarr.consolidate_metadata(dest)
+    shutil.rmtree(_state(dest) / "scratch", ignore_errors=True)
+    assert_valid(dest)
+    return sorted((k for k in root.group_keys() if _DATASET.match(k)), key=lambda k: int(k.split("_")[1]))
 
 
 def _mark_done(marker: Path, content: Mapping[str, str]) -> None:
@@ -372,52 +502,60 @@ def _release(cohort: Any) -> str:
     return str(release)
 
 
-def _rekey_genes(items: dict[str, LoaderItem], root: Any, written: list[str]) -> dict[str, LoaderItem]:
-    """Re-key every table to the shared Ensembl index and prepend the ``GeneKey`` record with what was left out.
+def _gene_table(item: LoaderItem) -> tuple[AnnData, dict[str, int]]:
+    """The item's Gene Expression features keyed by Ensembl id, and the counts of what was left out."""
+    table = item.table
+    n_other = 0
+    if "feature_types" in table.var.columns:
+        ge = (table.var["feature_types"].astype(str) == _GENE_EXPRESSION).to_numpy()
+        n_other = int((~ge).sum())
+        table = table[:, ge]
+    table, n_drop, n_dup = _harmonize_var(table, "ensembl", item.uid)
+    return table, {"non_gene_expression": n_other, "no_ensembl_id": n_drop, "duplicates": n_dup}
 
-    The index is the sorted intersection over the members, or, on a rerun, the var of the datasets already written,
-    which every remaining member must then hold.
-    """
-    rekeyed: dict[str, tuple[AnnData, dict[str, int]]] = {}
-    for uid, item in items.items():
-        table = item.table
-        n_other = 0
-        if "feature_types" in table.var.columns:
-            ge = (table.var["feature_types"].astype(str) == _GENE_EXPRESSION).to_numpy()
-            n_other = int((~ge).sum())
-            if n_other:
-                logger.warning(f"{uid}: left out {n_other} features that are not {_GENE_EXPRESSION} (feature_types)")
-            table = table[:, ge]
-        table, n_drop, n_dup = _harmonize_var(table, "ensembl", uid)
-        if n_drop or n_dup:
-            logger.warning(f"{uid}: left out {n_drop} features without an Ensembl id and {n_dup} duplicate ids")
-        rekeyed[uid] = table, {"non_gene_expression": n_other, "no_ensembl_id": n_drop, "duplicates": n_dup}
 
+def _shared_genes(items: Mapping[str, LoaderItem], root: Any, written: list[str]) -> list[str]:
+    """The collection's var: the sorted intersection over the members, or the var of the datasets already written."""
     if written:
         var = root[written[0]]["var"]
-        shared = pd.Index(np.asarray(read_elem(var[var.attrs["_index"]])).astype(str))
-        for uid, (table, _) in rekeyed.items():
-            if lacking := shared.difference(table.var_names).tolist():
-                raise ValueError(
-                    f"{uid} lacks {len(lacking)} genes of the datasets already written (e.g. {lacking[:3]}), so the "
-                    "collection's var cannot stay shared; use a new dest"
-                )
+        shared = [str(g) for g in np.asarray(read_elem(var[var.attrs["_index"]]))]
     else:
-        common = set.intersection(*(set(t.var_names) for t, _ in rekeyed.values()))
-        shared = pd.Index(sorted(common))
-    if not len(shared):
+        shared = sorted(set.intersection(*(set(_gene_table(item)[0].var_names) for item in items.values())))
+    if not shared:
         raise ValueError("the members share no gene with an Ensembl id")
+    return shared
 
-    out = {}
-    for uid, (table, counts) in rekeyed.items():
-        n_out = int(table.n_vars - len(shared))
-        if n_out:
-            logger.warning(f"{uid}: left out {n_out} genes that not every member has")
-        params = {"gene_key": "ensembl", "feature_types": _GENE_EXPRESSION, **counts, "not_shared": n_out}
-        record = AdapterRecord(name=_GENE_KEY, version=_GENE_KEY_VERSION, params=params)
-        item = items[uid]
-        out[uid] = dataclasses.replace(item, table=table[:, shared].copy(), records=[record, *item.records])
-    return out
+
+def _rekey(item: LoaderItem, shared: Sequence[str]) -> LoaderItem:
+    """Re-key the item's table to the shared Ensembl index and prepend the ``GeneKey`` record with what was left out.
+
+    Raises
+    ------
+    ValueError
+        If the item lacks a gene of `shared`: on a rerun, a gene of the datasets already written.
+    """
+    uid = item.uid
+    table, counts = _gene_table(item)
+    if counts["non_gene_expression"]:
+        logger.warning(
+            f"{uid}: left out {counts['non_gene_expression']} features that are not {_GENE_EXPRESSION} (feature_types)"
+        )
+    if counts["no_ensembl_id"] or counts["duplicates"]:
+        logger.warning(
+            f"{uid}: left out {counts['no_ensembl_id']} features without an Ensembl id and {counts['duplicates']} "
+            "duplicate ids"
+        )
+    if lacking := pd.Index(shared).difference(table.var_names).tolist():
+        raise ValueError(
+            f"{uid} lacks {len(lacking)} genes of the datasets already written (e.g. {lacking[:3]}), so the "
+            "collection's var cannot stay shared; use a new dest"
+        )
+    n_out = int(table.n_vars - len(shared))
+    if n_out:
+        logger.warning(f"{uid}: left out {n_out} genes that not every member has")
+    params = {"gene_key": "ensembl", "feature_types": _GENE_EXPRESSION, **counts, "not_shared": n_out}
+    record = AdapterRecord(name=_GENE_KEY, version=_GENE_KEY_VERSION, params=params)
+    return dataclasses.replace(item, table=table[:, list(shared)].copy(), records=[record, *item.records])
 
 
 def _fit_or_reuse(step: Any, items: list[LoaderItem], root: Any, written: list[str]) -> None:
@@ -450,17 +588,8 @@ def _persist(cells: xr.DataArray, path: Path) -> xr.DataArray:
     return xr.DataArray(da.from_array(array, chunks=chunks), dims=("y", "x"))
 
 
-def _write(
-    root: Any,
-    dest: Path,
-    key: str,
-    item: LoaderItem,
-    member: Any,
-    obs_columns: Sequence[str],
-    release: str,
-    allow_mixed_grids: bool,
-) -> None:
-    """Write one item as ``root[key]``, replacing what an interrupted run left there."""
+def _write(group: Any, key: str, item: LoaderItem, plan: Mapping[str, Any]) -> None:
+    """Write one item as ``group[key]``, with its contract, ``uns["spatial"]`` and catalog values from `plan`."""
     missing = [
         what
         for what, ok in (
@@ -477,14 +606,14 @@ def _write(
         version=CONTRACT_VERSION,
         uid=item.uid,
         study_id=item.study_id,
-        catalog_release=release,
+        catalog_release=plan["release"],
         role=item.role,
         grid=item.grid,
         mpp_target=item.mpp_target,
         mpp_native=item.mpp_native,
         upsampled=item.flags["upsampled"],
         allow_upsample=item.flags["allow_upsample"],
-        allow_mixed_grids=allow_mixed_grids,
+        allow_mixed_grids=plan["allow_mixed_grids"],
         dtype_rule=item.dtype_rule,
         channels=item.channels,
         adapters=item.records,
@@ -512,14 +641,11 @@ def _write(
     table = item.table.copy()
     table.obs["uid"] = item.uid
     table.obs["study_id"] = item.study_id
-    for col in obs_columns:
-        table.obs[col] = pd.Categorical([getattr(member, col)] * table.n_obs)
+    for col, value in plan["members"][item.uid]["obs"].items():
+        table.obs[col] = pd.Categorical([value] * table.n_obs)
     table.uns = {"sddb_contract": contract.to_uns(), "spatial": {item.uid: entry.model_dump()}}
-
-    if (dest / key).exists():  # left by an interrupted run: it has no done marker
-        shutil.rmtree(dest / key)
     write_collection_dataset(
-        root,
+        group,
         key=key,
         table=table,
         images={item.role: _dask(item.image)},

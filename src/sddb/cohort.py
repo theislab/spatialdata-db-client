@@ -410,6 +410,7 @@ class SpatialDataCohort(Sequence[Dataset]):
         executor: Literal["local", "slurm"] = "local",
         workers: int = 1,
         allow_mixed_grids: bool = False,
+        slurm: Mapping[str, Any] | None = None,
     ) -> Path:
         """Write the cohort as a loader collection for :mod:`spatialbatch` at ``dest`` and validate it.
 
@@ -430,6 +431,7 @@ class SpatialDataCohort(Sequence[Dataset]):
             executor=executor,
             workers=workers,
             allow_mixed_grids=allow_mixed_grids,
+            slurm=slurm,
         )
 
     def to_df(self) -> pd.DataFrame:
