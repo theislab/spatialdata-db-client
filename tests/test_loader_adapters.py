@@ -577,6 +577,48 @@ def test_stain_normalisation_changes_pixels_only_when_the_staining_differs():
     assert np.abs(moved - before)[:, tissue].mean() > 5
 
 
+def _never_computed(data: da.Array) -> da.Array:
+    def boom(block):
+        raise AssertionError("a full-resolution block was computed")
+
+    return data.map_blocks(boom, dtype=data.dtype)
+
+
+def test_stain_fit_reads_a_coarse_source_level_only():
+    """fit() reads the coarsest source level with >= fit_pixels pixels, never scale 0 or the written image."""
+    import squidpy.experimental.im as sqim
+
+    img = he_image(256, 256, seed=0, disk=(128, 128, 90))
+    sdata = make_sdata(img, shapes=squares([(128, 128), (10, 10)], 5), scale_factors=[2, 2], image_chunks=64)
+    item = Rasterize(None, tile=64).build(item_of(sdata))
+    item = TissueMask(method="otsu", auto_max_pixels=1024).build(Centroids().build(item))
+    # the old path: a pyramid of the written image down to <= fit_pixels
+    old = StainNormalize(fit_pixels=1024)
+    image, tissue = old._elements(item)
+    before = sqim.fit_stain_reference(
+        sd.SpatialData(images={"i": image}, labels={"t": tissue}), image_key=["i"], scale="auto", tissue_mask_key=["t"]
+    )
+
+    src = item.image_source
+    assert [lv.shape[-1] for lv in src.levels] == [256, 128, 64]
+    levels = [xr.DataArray(_never_computed(lv.data), dims=lv.dims, coords=lv.coords) for lv in src.levels[:2]]
+    guarded = dataclasses.replace(
+        item,
+        image=xr.DataArray(_never_computed(item.image.data), dims=item.image.dims, coords=item.image.coords),
+        image_source=dataclasses.replace(src, levels=[*levels, src.levels[2]]),
+    )
+    step = StainNormalize(fit_pixels=1024)
+    reference = step.fit([guarded])
+    # 256 x 256 written pixels, g = 8: a 32 x 32 grid, read from the 64 x 64 level (the coarsest with >= 1024 pixels)
+    assert step.fit_inputs == {
+        item.uid: {"factor": 8, "pixels": 1024, "level": 2, "level_shape": [64, 64], "averaged": 2}
+    }
+    assert step.to_record().params["fit_inputs"] == step.fit_inputs
+    assert StainNormalize.from_record(step.to_record()).to_record() == step.to_record()
+    np.testing.assert_allclose(reference.stain_matrix, before.stain_matrix, atol=0.05)
+    np.testing.assert_allclose(reference.max_concentrations, before.max_concentrations, rtol=0.1)
+
+
 def test_stain_refuses_if():
     img = np.random.default_rng(5).integers(0, 2**16, (2, 32, 32), dtype=np.uint16)
     sdata = make_sdata(img, shapes=squares([(16, 16)], 5))

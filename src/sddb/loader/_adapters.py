@@ -257,6 +257,7 @@ class Rasterize(_Adapter):
             native_cells_to_index=native_to_index,
             # the image's scale-0 extent through the affine the image is resampled with (index_map is its inverse)
             image_footprint=_map_points(np.array([[0, 0], [w0, 0], [w0, h0], [0, h0]], float), grid.to_index(a)),
+            image_source=_ImageSource(levels=list(src.levels), to_cs=a, grid=grid, value_range=self.value_range),
             source=None,
         )
 
@@ -287,6 +288,21 @@ class _Grid:
         (ox, oy), k = self.origin, 1 / self.step
         to_grid = np.array([[k, 0, -ox * k - 0.5], [0, k, -oy * k - 0.5], [0, 0, 1]])
         return to_grid @ to_cs
+
+
+@dataclasses.dataclass(frozen=True)
+class _ImageSource:
+    """The source image's levels (finest first) and how :class:`Rasterize` put them on the written `grid`."""
+
+    levels: list[xr.DataArray]
+    to_cs: np.ndarray  # the scale-0 affine onto the shared coordinate system
+    grid: _Grid
+    value_range: Sequence[float] | None
+
+
+def _fit_level(shapes: Sequence[tuple[int, int]], max_pixels: int) -> int:
+    """The coarsest level with at least `max_pixels` pixels, or level 0 (the largest) if none has that many."""
+    return max((i for i, (h, w) in enumerate(shapes) if h * w >= max_pixels), default=0)
 
 
 def _pick_level(shapes: Sequence[tuple[int, int]], mpp_native: float | None, mpp_target: float | None) -> int:
@@ -761,7 +777,12 @@ class TissueMask(_Adapter):
         if "outside_image" in item.table.obs:  # off the image, so not on its tissue
             in_tissue &= ~item.table.obs["outside_image"].to_numpy(dtype=bool)
         table = _with_obs(item.table, in_tissue=np.asarray(in_tissue, dtype=bool))
-        return self._done(item, table=table, labels={**item.labels, "tissue": xr.DataArray(tissue, dims=("y", "x"))})
+        return self._done(
+            item,
+            table=table,
+            labels={**item.labels, "tissue": xr.DataArray(tissue, dims=("y", "x"))},
+            tissue_overview=(mask, f),
+        )
 
 
 def _glass_corners(image: np.ndarray, corner_size_pct: float) -> tuple[bool, bool, bool, bool]:
@@ -793,9 +814,18 @@ class StainNormalize(_Adapter):
     per block (:meth:`~squidpy.experimental.im.StainFit.transform`, uint8 out, background kept) and records it in
     ``item.stain_reference`` for ``DatasetContract.stain_reference``.
 
-    Both run on a temporary in-memory SpatialData holding the item's image and ``labels["tissue"]`` with a pyramid
-    whose coarsest level has at most `fit_pixels` pixels; squidpy fits on that level. Images under `fit_pixels`
-    are fit at full resolution, so each item weighs in proportion to its tissue area up to that cap.
+    :meth:`fit` reads each item at a coarse grid of at most `fit_pixels` pixels: the written grid with ``g x g``
+    pixels merged, ``g = ceil(sqrt(h * w / fit_pixels))``. The image there is resampled (order 1, the affine
+    :class:`Rasterize` used, scaled by ``g``) from the coarsest level of the source's own pyramid with at least
+    `fit_pixels` pixels (level 0 if none has that many), so that the fit never reads the full resolution. Where a
+    coarse pixel spans ``k x k`` or more level pixels, ``k x k`` blocks of the level are averaged first. The tissue
+    mask there is :class:`TissueMask`'s overview mask, resampled with order 0. The level, its shape, ``k``, ``g`` and
+    the pixel count per item are recorded as ``fit_inputs``. An item that did not go through :class:`Rasterize` and
+    :class:`TissueMask` in this chain is averaged down from its written image and mask instead. Each item weighs in
+    proportion to its tissue area at that grid.
+
+    :meth:`build` runs on a temporary in-memory SpatialData holding the item's image and ``labels["tissue"]`` with a
+    pyramid whose coarsest level has at most `fit_pixels` pixels.
 
     Parameters
     ----------
@@ -814,6 +844,10 @@ class StainNormalize(_Adapter):
     """
 
     name = "StainNormalize"
+    # 0.2.0: fit() reads a coarse level of the source pyramid (fit_inputs) instead of a pyramid of the written image
+    version: ClassVar[str] = "0.2.0"
+    #: The params a fit adds to the record.
+    FITTED: ClassVar[tuple[str, ...]] = ("reference", "fit_inputs")
 
     def __init__(
         self, method: Literal["macenko"] = "macenko", *, reference: StainFit | None = None, fit_pixels: int = 4_000_000
@@ -823,13 +857,16 @@ class StainNormalize(_Adapter):
         self.method = method
         self.reference = reference
         self.fit_pixels = fit_pixels
+        self.fit_inputs: dict[str, dict[str, Any]] | None = None
 
     @property
     def config(self) -> dict[str, Any]:  # type: ignore[override]
-        """The constructor kwargs, with the reference as plain lists."""
+        """The constructor kwargs, with the reference as plain lists and, after :meth:`fit`, what it read per item."""
         out: dict[str, Any] = {"method": self.method, "fit_pixels": self.fit_pixels}
         if self.reference is not None:
             out["reference"] = _reference_dict(self.reference)
+        if self.fit_inputs is not None:
+            out["fit_inputs"] = self.fit_inputs
         return out
 
     @classmethod
@@ -837,7 +874,9 @@ class StainNormalize(_Adapter):
         """Rebuild the step, and its reference if the record has one."""
         params = dict(rec.params)
         ref = params.pop("reference", None)
+        fit_inputs = params.pop("fit_inputs", None)
         step = super().from_record(AdapterRecord(name=rec.name, version=rec.version, params=params))
+        step.fit_inputs = fit_inputs
         if ref is not None:
             from squidpy.experimental.im import StainFit
 
@@ -860,17 +899,22 @@ class StainNormalize(_Adapter):
     def fit(self, items: Sequence[LoaderItem]) -> StainFit:
         """Fit one reference on the pooled tissue pixels of `items`, keep it as `reference` and return it."""
         import spatialdata as sd
+        from spatialdata.models import Image2DModel, Labels2DModel
         from squidpy.experimental import im as sqim
 
         for item in items:
             self._check(item)
-        images, labels = {}, {}
+        images, labels, inputs = {}, {}, {}
         for i, item in enumerate(items):
-            images[f"image_{i}"], labels[f"tissue_{i}"] = self._elements(item)
+            image, tissue, inputs[item.uid] = _coarse_inputs(item, self.fit_pixels)
+            images[f"image_{i}"] = Image2DModel.parse(image, dims=("c", "y", "x"))
+            labels[f"tissue_{i}"] = Labels2DModel.parse(tissue, dims=("y", "x"))
+            logger.info(f"{item.uid}: {self.name} fits on {inputs[item.uid]}")
         tmp = sd.SpatialData(images=images, labels=labels)
         self.reference = sqim.fit_stain_reference(
             tmp, image_key=list(images), method=self.method, scale="auto", tissue_mask_key=list(labels)
         )
+        self.fit_inputs = inputs
         return self.reference
 
     def build(self, sdata: LoaderItem) -> LoaderItem:
@@ -902,6 +946,64 @@ class StainNormalize(_Adapter):
         image = Image2DModel.parse(img, dims=("c", "y", "x"), scale_factors=factors, chunks=img.chunksize)
         tissue = Labels2DModel.parse(mask, dims=("y", "x"), scale_factors=factors, chunks=mask.chunksize)
         return image, tissue
+
+
+def _coarse_inputs(item: LoaderItem, max_pixels: int) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """The item's H&E image (uint8) and tissue mask on the written grid with ``g x g`` pixels merged, in memory.
+
+    See :class:`StainNormalize`; the third value is what is recorded in ``fit_inputs``.
+    """
+    from dask_image.ndinterp import affine_transform
+    from scipy import ndimage
+
+    h, w = item.image.shape[-2:]
+    g = max(1, math.ceil(math.sqrt(h * w / max_pixels)))
+    shape = (math.ceil(h / g), math.ceil(w / g))
+    info: dict[str, Any] = {"factor": g, "pixels": shape[0] * shape[1]}
+    src = item.image_source
+    if src is not None:
+        level = _fit_level([(lv.shape[-2], lv.shape[-1]) for lv in src.levels], max_pixels)
+        lv = src.levels[level]
+        h0, w0 = src.levels[0].shape[-2:]
+        data, _ = _to_role_dtype(
+            _dask(lv), "he", _dask(src.levels[-1]), src.value_range, item.uid, single=len(src.levels) == 1
+        )
+        data = data[:3]  # RGBA: alpha dropped, as Rasterize does
+        coarse = _Grid(origin=src.grid.origin, step=src.grid.step * g, shape=shape)
+        scale = np.array([w0 / lv.shape[-1], h0 / lv.shape[-2]])
+        m, _ = coarse.index_map(src.to_cs, scale)
+        # a coarse pixel spans k x k or more level pixels: average k x k blocks first, so that order 1 does not
+        # point-sample the level (the stain statistics are percentiles and change with the noise left in)
+        k = max(1, math.floor(math.sqrt(abs(np.linalg.det(m))) + 1e-6))
+        if k > 1:
+            data = xr.DataArray(data, dims=("c", "y", "x")).astype(np.float32).coarsen(y=k, x=k, boundary="pad")
+            data = data.mean().data
+        m, off = coarse.index_map(src.to_cs, scale * k)
+        image = affine_transform(
+            data,
+            matrix=np.block([[np.eye(1), np.zeros((1, 2))], [np.zeros((2, 1)), m]]),
+            offset=np.concatenate([[0.0], off]),
+            output_shape=(3, *shape),
+            output_chunks=(3, 1024, 1024),
+            order=1,
+            mode="grid-constant",
+            cval=255,
+        )
+        image_np = np.clip(np.round(np.asarray(image.compute())), 0, 255).astype(np.uint8)
+        info |= {"level": level, "level_shape": [int(lv.shape[-2]), int(lv.shape[-1])], "averaged": k}
+    else:  # not rasterised in this chain: average the written image down
+        image_np = np.round(np.asarray(_overview(item.image, g).data)).astype(np.uint8)
+        info |= {"level": None, "level_shape": None}
+    if item.tissue_overview is not None:
+        mask, f = item.tissue_overview
+        # coarse pixel j covers written pixels [j g, (j + 1) g), centre (j + 0.5) g - 0.5, in overview pixel
+        # (j + 0.5) g / f - 0.5 (see TissueMask.build)
+        tissue = ndimage.affine_transform(
+            np.asarray(mask), np.full(2, g / f), offset=0.5 * g / f - 0.5, output_shape=shape, order=0, mode="nearest"
+        )
+    else:
+        tissue = np.asarray(_overview(item.labels["tissue"].astype(np.float32), g).data) >= 0.5
+    return image_np, np.asarray(tissue > 0, dtype=np.uint8), info
 
 
 def _reference_dict(ref: StainFit) -> dict[str, Any]:

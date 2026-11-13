@@ -107,7 +107,7 @@ def _capture():
 def _stain_record():
     return AdapterRecord(
         name="StainNormalize",
-        version="0.1.0",
+        version="0.2.0",
         params={"method": "macenko", "fit_pixels": 10_000, "reference": REFERENCE},
     )
 

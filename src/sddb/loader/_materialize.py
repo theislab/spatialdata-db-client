@@ -428,16 +428,20 @@ def _mark_done(marker: Path, content: Mapping[str, str]) -> None:
 
 
 def _record(step: Any) -> dict[str, Any]:
-    """A step's record as a dataset stores it (params through JSON); a given stain reference is kept apart."""
+    """A step's record as a dataset stores it (params through JSON); a given stain reference is kept apart.
+
+    What a stain fit read (``fit_inputs``) is left out: it is an output of the fit, as the reference is.
+    """
     params = json.loads(json.dumps(dict(step.config)))
+    params.pop("fit_inputs", None)
     return {"name": step.name, "version": step.version, "params": params, "reference": params.pop("reference", None)}
 
 
 def _check_chain(adapters: Sequence[Any], root: Any, written: list[str]) -> None:
     """Refuse a rerun whose chain differs from the one the written datasets ran, before anything is written.
 
-    Records are compared by name, version and params. The fitted stain reference is left out, since a rerun reuses
-    it, unless this chain was given one.
+    Records are compared by name, version and params. The fitted stain reference and ``fit_inputs`` are left out,
+    since a rerun reuses them, unless this chain was given a reference.
     """
     now = [_record(a) for a in adapters]
     for key in written:
@@ -447,6 +451,7 @@ def _check_chain(adapters: Sequence[Any], root: Any, written: list[str]) -> None
                 continue
             params = dict(rec.params)
             ref = params.pop("reference", None)
+            params.pop("fit_inputs", None)
             before.append({"name": rec.name, "version": rec.version, "params": params, "reference": ref})
         if [r["name"] for r in before] != [r["name"] for r in now]:
             raise ValueError(
@@ -744,7 +749,7 @@ def _fit_or_reuse(step: Any, items: list[LoaderItem], root: Any, written: list[s
     rec = records[0]
     if isinstance(step, StainNormalize):
         rebuilt = StainNormalize.from_record(rec)
-        if {k: v for k, v in rec.params.items() if k != "reference"} != step.config:
+        if {k: v for k, v in rec.params.items() if k not in StainNormalize.FITTED} != step.config:
             raise ValueError(f"{step.name} {step.config} differs from the one the written datasets ran: {rec.params}")
         step.reference = rebuilt.reference
         logger.info(f"{step.name}: using the reference of the datasets already written")
