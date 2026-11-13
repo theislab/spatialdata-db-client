@@ -83,14 +83,22 @@ table has 1.48e9 nonzeros and its job peaked at 40.0 GiB. The run state lives be
 The collection is 13.2 GB on disk (13,231,857,664 bytes by `du -s --block-size=1 atera-he.zarr` on the cluster),
 with 1,423,292 cells (see below) and 18,049 genes keyed by Ensembl id.
 
-Some cells are smaller than a pixel at 0.5 µm per pixel, so they have no pixel in the cell labels. `Centroids`
-keeps them and takes the centroid of their polygon as their position, and the contract records how many cells did
-so per dataset as `n_centroid_fallback`. On these slides that is 21 cells: 3 colorectal, 5 breast, 3 brain and 10
-kidney. The counts come from the member job logs of this run (`atera-he.zarr.sddb/logs/dataset_<uid>.log`, e.g.
-"sddb_a722jfj3pq: dropped 5 of 485985 rows whose cell has no pixel in labels['cells'] (smaller than a pixel of the
-written grid, or outside the image)"). The run used an earlier version of `Centroids` that dropped these rows, so
-the collection measured on this page has the 21 cells fewer (1,423,292 instead of 1,423,313) and no
-`n_centroid_fallback`. A new run keeps them.
+Some cells are smaller than a pixel at 0.5 µm per pixel, so they have no pixel in the cell labels. On these slides
+that is 21 cells: 3 colorectal, 5 breast, 3 brain and 10 kidney. The counts come from the member job logs of this
+run (`atera-he.zarr.sddb/logs/dataset_<uid>.log`, e.g. "sddb_a722jfj3pq: dropped 5 of 485985 rows whose cell has no
+pixel in labels['cells'] (smaller than a pixel of the written grid, or outside the image)"). The run used an earlier
+version of `Centroids` that dropped these rows, so the collection measured on this page has the 21 cells fewer
+(1,423,292 instead of 1,423,313) and no `n_centroid_fallback`.
+
+`Centroids` now keeps a cell without a pixel and takes the centroid of its polygon as its position, and the contract
+records how many cells did so per dataset as `n_centroid_fallback`. A cell whose polygon centroid lies outside the
+written grid is not kept: the member job raises with "<uid>: <n> rows with no pixel in labels['cells'] have their
+fallback centroid outside the written grid [0, w) x [0, h), e.g. [x, y]". The old log line above does not say which
+of the 21 cells were outside the image, so whether a new run on these slides keeps all 21 or raises has not been
+checked.
+
+The run also kept only the 18,049 Gene Expression features of the 24,677 per slide. `materialize` now writes the
+union of the members' features, so a new run keeps all 24,677, with `var["feature_types"]` from the source.
 
 ## Checks
 
