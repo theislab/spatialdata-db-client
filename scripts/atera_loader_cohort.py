@@ -1,24 +1,26 @@
-"""Materialize whole Atera H&E slides into a loader collection on Slurm, and check the result.
+"""Materialize the published Atera H&E slides into a loader collection on Slurm, and check the result.
 
-Three steps, each run on a compute node (see ``docs/use_cases/loader_atera.md``)::
+Two steps, each run on a compute node (see ``docs/use_cases/loader_atera.md``)::
 
-    python scripts/atera_loader_cohort.py store <atera bundle dir> <uid> <stores dir>
-    python scripts/atera_loader_cohort.py materialize <stores dir> <dest> [--workers 4] [--slurm-json '{...}']
-    python scripts/atera_loader_cohort.py check <stores dir> <dest> <out dir>
+    python scripts/atera_loader_cohort.py materialize <dest> [--version 2026-11-12] [--workers 1] --slurm-json '{...}'
+    python scripts/atera_loader_cohort.py check <dest> <out dir> [--version 2026-11-12]
 
-``store`` reads one bundle with ``spatialdata_io.atera`` and writes the H&E, the cell boundaries and the table as a
-SpatialData store, plus ``<uid>.json`` with the slide's numbers. ``materialize`` builds the cohort from the stores (one
-member per slide) and runs ``sddb.loader.materialize`` with the snakemake runner on Slurm. ``check`` validates the
-collection, counts the cells in tissue, measures what StainNormalize changed and plots the tissue masks.
+``materialize`` takes the 10x Atera records of a catalog release (``technology == "10x_atera"``) as a cohort and runs
+``SpatialDataCohort.materialize`` with ``default_chain(0.5)``, the snakemake runner and the Slurm executor. Each
+member's store is copied from the release into the sddb cache (``SDDB_CACHE_DIR``) once and opened from there
+(``Dataset._local_store``, ``sddb/cohort.py`` ``_cached_store``). ``check`` validates the collection and compares
+every dataset with its catalog record: the cells, the features, the filled features, the centroid fallbacks, the
+tissue share, and the change made by stain normalisation; it also draws the tissue masks.
 
-Sources of the numbers (checked 2026-11-12):
+Sources (read 2026-11-13):
 
-- microns per morphology pixel: the bundle's ``experiment.spatial`` ``"pixel_size"``; the vendor spec registry
-  (theislab/spatialdata-db-schemas specs/10x_atera.yaml at 0562c6c5f) says to prefer the per-dataset value. The
-  ``global`` coordinate system of the reader is in morphology pixels (spatialdata-io atera.py
-  ``_get_aligned_images``: "in the global (morphology px) coordinate system").
-- mpp of the H&E: (global units per H&E pixel) x pixel_size, the global units per pixel being ``sqrt(|det A|)`` of the
-  H&E's 2x2 affine onto ``global``, the same scale ``Rasterize`` uses (as in ``make_contract_fixture.py``).
+- microns per H&E pixel: the catalog's ``mpp`` column. For the four Atera v1 records it equals the value derived in
+  v1 from the bundle (``experiment.spatial`` ``pixel_size`` times ``sqrt(|det A|)`` of the H&E affine onto
+  ``global``, see the git history of this script) to 1e-15.
+- roles: the six stores have ``images/he_image``, ``labels/cell_labels`` and ``tables/table`` (catalog
+  ``sdata_repr``). The Atera v1 tables annotate ``cell_labels`` (instance key ``label_id``); the two WTA Preview
+  tables, read with spatialdata-io's xenium reader, annotate ``cell_circles`` by ``cell_id`` and hold the label
+  value in ``obs["cell_labels"]`` (``tables/table/zarr.json`` of each store), which ``LoaderItem.from_sdata`` reads.
 """
 
 from __future__ import annotations
@@ -32,148 +34,45 @@ from pathlib import Path
 
 import numpy as np
 
-ROLES = {"image": "^images/he_image$", "table": "^tables/table$"}
+ROLES = {"image": "^images/he_image$", "table": "^tables/table$", "labels": "^labels/cell_labels$"}
 MPP_TARGET = 0.5
+TECHNOLOGY = "10x_atera"
+VERSION = "2026-11-12"
 
 
-def chain(stain_json: Path | None = None):
-    """default_chain(0.5) with squidpy's "weka" tissue detection instead of "otsu".
+def cohort(version: str):
+    """The Atera records of catalog release `version`, and each one's microns per H&E pixel (catalog ``mpp``)."""
+    import sddb
 
-    On these slides otsu (squidpy detect_tissue's default) gives an empty mask for the brain (sddb_fmjq2bpd2q): its
-    pale tissue is close to the glass, otsu keeps only nuclei (5.4% of the overview), and the area filter
-    (min_specimen_area_frac 0.01) drops them all, so StainNormalize's fit fails ("[image_2] no tissue pixels for
-    stain fitting"). weka gives a non-empty mask for the brain (86% of the overview, which includes bands of glass,
-    so it is too high) and follows the tissue outline on the other three.
-
-    `stain_json` is a ``stain.json`` that an earlier run's ``fit_stain`` job wrote: StainNormalize then applies that
-    pooled reference and the run skips the fit. Since eb2c96b a rerun with the same chain and members keeps
-    ``stain.json`` itself, so this is only needed when the chain or the members change.
-    """
-    from sddb.contract import AdapterRecord
-    from sddb.loader import Centroids, Rasterize, StainNormalize, TissueMask, adapter_from_record
-
-    stain = StainNormalize()
-    if stain_json is not None:
-        (record,) = json.loads(stain_json.read_text()).values()
-        stain = adapter_from_record(AdapterRecord(**record))
-    return [Rasterize(MPP_TARGET), Centroids(), TissueMask(method="weka"), stain]
+    catalog = sddb.Catalog(version=version)
+    members = catalog.query(technology=TECHNOLOGY)
+    df = members.to_df()
+    mpp = {str(u): float(m) for u, m in zip(df["uid"], df["mpp"], strict=True)}
+    return catalog, members, mpp
 
 
-class Member:
-    """The part of :class:`sddb.Dataset` that ``materialize`` reads, as in tests/test_loader_materialize.py."""
+def run_materialize(dest: Path, version: str, workers: int, slurm: dict) -> None:
+    """Materialize the Atera records of the release with the default H&E chain, on Slurm through snakemake."""
+    from sddb.loader import default_chain
 
-    def __init__(self, uid: str, study_id: str, path: Path):
-        self.uid, self.study_id, self._path = uid, study_id, path
-
-    def to_sdata(self):
-        """Open the store, with the table's X as a dask array.
-
-        ``sd.read_zarr`` reads a table whole (anndata's ``read_zarr``), and ``materialize`` opens every member in
-        the controller before it starts the jobs, so X is read lazily here (``anndata.experimental.read_elem_lazy``,
-        CSR in chunks of 1000 rows): the controller then holds only obs and var. The jobs open the store themselves.
-        """
-        import anndata as ad
-        import spatialdata as sd
-        import zarr
-        from anndata.experimental import read_elem_lazy
-        from anndata.io import read_elem
-
-        sdata = sd.read_zarr(self._path, selection=("images", "shapes"))
-        g = zarr.open_group(self._path / "tables" / "table", mode="r")
-        sdata.tables["table"] = ad.AnnData(
-            X=read_elem_lazy(g["X"]),
-            obs=read_elem(g["obs"]),
-            var=read_elem(g["var"]),
-            uns=read_elem(g["uns"]),
-            obsm={"spatial": read_elem(g["obsm"]["spatial"])},
-        )
-        return sdata
-
-
-def store(bundle: Path, uid: str, stores: Path) -> None:
-    """Read one Atera bundle and write its H&E, cell boundaries and table as ``<stores>/<uid>.zarr``."""
-    import anndata as ad
-    import spatialdata_io
-    from scipy import sparse
-    from spatialdata.transformations import get_transformation
-
-    t0 = time.time()
-    stores.mkdir(parents=True, exist_ok=True)
-    spec = json.loads((bundle / "experiment.spatial").read_text())
-    ps = float(spec["pixel_size"])
-    sdata = spatialdata_io.atera(
-        bundle,
-        aligned_images=True,
-        morphology_images=False,
-        cells_labels=False,  # the table then annotates cell_boundaries (by cell_id): the cells come from the shapes
-        nucleus_labels=False,
-        nucleus_boundaries=False,
+    catalog, members, mpp = cohort(version)
+    df = members.to_df()
+    print(
+        json.dumps(
+            {
+                "catalog": catalog.url,
+                "release": catalog.release,
+                "members": df[["uid", "title", "n_obs", "n_features", "mpp", "size_bytes"]].to_dict("records"),
+                "slurm": slurm,
+            },
+            default=str,
+        ),
+        flush=True,
     )
-    assert float(sdata.attrs["pixel_size"]) == ps, (sdata.attrs["pixel_size"], ps)
-    table = sdata.tables["table"]
-    # io atera: obs index name duplicates the barcode column; fixed upstream in the fork, remove this once the env pins
-    # that commit (see make_contract_fixture.py).
-    if table.obs.index.name in table.obs.columns:
-        table.obs.index.name = None
-    # The bundle's X has int64 indices: 12 bytes per nonzero with the int32 counts (1.48e9 nonzeros for the breast),
-    # and anndata writes a dask sparse X with int64 indices whatever the blocks hold (anndata _io/specs/methods.py,
-    # write_dask_sparse, as_int64_indices). So X is computed here, each block rebuilt with int32 indices (scipy's
-    # constructor picks int32 when the values fit: _compressed.py, get_index_dtype with check_contents), and written
-    # with anndata's write_csr_csc_indices_with_min_possible_dtype (uint16 for 24,677 genes). A job that reads it back
-    # holds 8 bytes per nonzero (scipy keeps no uint16 indices).
-    x = table.X.map_blocks(
-        lambda b: sparse.csr_matrix((b.data, b.indices, b.indptr), shape=b.shape),
-        dtype=table.X.dtype,
-        meta=table.X._meta,
-    ).compute()
-    table.X = sparse.csr_matrix(x)
-    del x
-    he = sdata.images["he_image"]
-    a = np.asarray(get_transformation(he, "global").to_affine_matrix(input_axes=("x", "y"), output_axes=("x", "y")))
-    he_scale = math.sqrt(abs(np.linalg.det(a[:2, :2])))  # global (morphology px) per H&E px
-    info = {
-        "uid": uid,
-        "bundle": str(bundle),
-        "experiment.spatial": {k: spec.get(k) for k in ("pixel_size", "region_name", "sample_type", "num_cells")},
-        "table": list(table.shape),
-        "x_type": type(table.X).__name__,
-        "x_dtype": str(table.X.dtype),
-        "x_indices_dtype": str(table.X.indices.dtype),
-        "nnz": int(table.X.nnz),
-        "he_scales": {k: list(v["image"].shape) for k, v in he.items()},
-        "he_affine": a.tolist(),
-        "he_global_per_px": he_scale,
-        "mpp_native": he_scale * ps,
-        "read_s": round(time.time() - t0, 1),
-    }
-    print(json.dumps(info, indent=1), flush=True)
-    path = stores / f"{uid}.zarr"
-    with ad.settings.override(write_csr_csc_indices_with_min_possible_dtype=True):
-        sdata.subset(["he_image", "cell_boundaries", "table"]).write(path, overwrite=True)
-    info["write_s"] = round(time.time() - t0 - info["read_s"], 1)
-    info["store"] = str(path)
-    info["store_bytes"] = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
-    (stores / f"{uid}.json").write_text(json.dumps(info, indent=1))
-    print(json.dumps({k: info[k] for k in ("write_s", "store", "store_bytes")}), flush=True)
-
-
-def _members(stores: Path) -> tuple[list[Member], dict[str, float]]:
-    infos = [json.loads(p.read_text()) for p in sorted(stores.glob("*.json"))]
-    members = [Member(i["uid"], f"candidate:{i['uid']}", Path(i["store"])) for i in infos]
-    return members, {i["uid"]: i["mpp_native"] for i in infos}
-
-
-def run_materialize(stores: Path, dest: Path, workers: int, slurm: dict, stain_json: Path | None = None) -> None:
-    """Materialize the stores as one collection with the H&E chain, on Slurm through snakemake."""
-    from sddb.loader import materialize
-
-    members, mpp = _members(stores)
-    print(json.dumps({"members": [m.uid for m in members], "mpp_native": mpp, "slurm": slurm}), flush=True)
     t0 = time.time()
-    materialize(
-        members,
+    members.materialize(
         dest,
-        adapters=chain(stain_json),
+        adapters=default_chain(MPP_TARGET),
         role="he",
         roles=ROLES,
         mpp_native=mpp,
@@ -185,55 +84,78 @@ def run_materialize(stores: Path, dest: Path, workers: int, slurm: dict, stain_j
     print(json.dumps({"materialize_s": round(time.time() - t0, 1)}), flush=True)
 
 
-def check(stores: Path, dest: Path, out: Path) -> None:
-    """Validate the collection, the cells in tissue per slide, StainNormalize's change and the tissue-mask figure."""
+def check(dest: Path, out: Path, version: str) -> None:
+    """Validate the collection and compare each dataset with its catalog record; draw the tissue masks."""
     import dask.array as da
     import zarr
     from anndata.io import read_elem
 
     from sddb.contract import validate
     from sddb.loader import LoaderItem, Rasterize
+    from sddb.loader._materialize import _read_store
 
     out.mkdir(parents=True, exist_ok=True)
-    members, mpp = _members(stores)
+    _, members, mpp = cohort(version)
+    records = {str(m.uid): m for m in members}
     summary: dict = {"validate": validate(dest)}
     print(json.dumps(summary), flush=True)
     root = zarr.open_group(dest, mode="r")
+    keys = sorted((k for k in root.group_keys() if k.startswith("dataset_")), key=lambda k: int(k.split("_")[1]))
     slides = {}
-    for key in sorted(k for k in root.group_keys() if k.startswith("dataset_")):
+    for key in keys:
         g = root[key]
         contract = read_elem(g["uns"]["sddb_contract"])
         uid = contract["uid"]
+        record = records[uid]
+        var = read_elem(g["var"])
+        present = var["present"].to_numpy(dtype=bool)
         in_tissue = np.asarray(read_elem(g["obs"]["in_tissue"]))
         he = da.from_zarr(g["images"]["he"])
         tissue = da.from_zarr(g["labels"]["tissue"])
-        slides[uid] = {
+        s = {
             "key": key,
-            "cells": int(g["obsm"]["spatial"].shape[0]),
+            "title": record.title,
+            "cells_written": int(g["obsm"]["spatial"].shape[0]),
+            "cells_catalog": int(record.n_obs),
+            "features_written": int(len(var)),
+            "features_catalog": int(record.n_features),
+            "present": int(present.sum()),
+            "filled": int((~present).sum()),
+            "n_features_present": contract.get("n_features_present"),
+            "n_features_filled": contract.get("n_features_filled"),
+            "n_centroid_fallback": contract.get("n_centroid_fallback"),
             "in_tissue_share": float(in_tissue.mean()),
             "he": list(he.shape),
             "tissue_px_share": float(tissue.mean().compute()),
+            "stain_reference": contract.get("stain_reference"),
         }
-        # StainNormalize's change: the written image against Rasterize's output from the same source
-        member = next(m for m in members if m.uid == uid)
+        s["cells_equal"] = s["cells_written"] == s["cells_catalog"]
+        s["present_equal_catalog_features"] = s["present"] == s["features_catalog"]
+        s["filled_equal_contract"] = s["filled"] == s["n_features_filled"]
+        # StainNormalize's change: the written image against Rasterize's output from the same source store
         item = LoaderItem.from_sdata(
-            member.to_sdata(), uid=uid, study_id=member.study_id, role="he", roles=ROLES, mpp_native=mpp[uid]
+            _read_store(record._local_store()),
+            uid=uid,
+            study_id=str(record.study_id),
+            role="he",
+            roles=ROLES,
+            mpp_native=mpp[uid],
         )
         raw = Rasterize(MPP_TARGET).build(item).image.data
         assert raw.shape == he.shape, (raw.shape, he.shape)
         diff = da.abs(raw.astype(np.int16) - he.rechunk(raw.chunks).astype(np.int16))
         on = (tissue > 0).rechunk(raw.chunks[1:])[None]
-        all_mean, tissue_sum, tissue_n = da.compute(diff.mean(), (diff * on).sum(), on.sum() * he.shape[0])
-        slides[uid]["stain_mean_abs_change_all"] = float(all_mean)
-        slides[uid]["stain_mean_abs_change_tissue"] = float(tissue_sum / max(int(tissue_n), 1))
-        slides[uid]["stain_reference"] = contract.get("stain_reference")
-        print(json.dumps({uid: slides[uid]}, default=str), flush=True)
+        tissue_sum, tissue_n = da.compute((diff * on).sum(), on.sum() * he.shape[0])
+        s["stain_mean_abs_change_tissue"] = float(tissue_sum / max(int(tissue_n), 1))
+        slides[uid] = s
+        print(json.dumps({uid: s}, default=str), flush=True)
+    summary["union"] = len(read_elem(root[keys[0]]["var"]))
     summary["slides"] = slides
     (out / "check.json").write_text(json.dumps(summary, indent=1, default=str))
     _tissue_figure(dest, slides, out / "tissue_masks.png")
 
 
-def _tissue_figure(dest: Path, slides: dict, path: Path, side: int = 1200) -> None:
+def _tissue_figure(dest: Path, slides: dict, path: Path, side: int = 900) -> None:
     """Each slide's H&E with its tissue mask outlined, downsampled to about `side` px, with spatialdata_plot."""
     import dask.array as da
     import matplotlib
@@ -246,8 +168,12 @@ def _tissue_figure(dest: Path, slides: dict, path: Path, side: int = 1200) -> No
     from spatialdata.models import Image2DModel, Labels2DModel
 
     root = zarr.open_group(dest, mode="r")
-    fig, axs = plt.subplots(1, len(slides), figsize=(4 * len(slides), 4.5))
-    for ax, (uid, s) in zip(np.atleast_1d(axs), slides.items(), strict=True):
+    cols = 3
+    rows = math.ceil(len(slides) / cols)
+    fig, axs = plt.subplots(rows, cols, figsize=(4 * cols, 4.6 * rows))
+    for ax in np.ravel(axs)[len(slides) :]:
+        ax.set_axis_off()
+    for ax, s in zip(np.ravel(axs), slides.values(), strict=False):
         g = root[s["key"]]
         he = da.from_zarr(g["images"]["he"])
         f = max(1, math.ceil(max(he.shape[1:]) / side))
@@ -262,7 +188,8 @@ def _tissue_figure(dest: Path, slides: dict, path: Path, side: int = 1200) -> No
             .pl.render_labels("tissue", outline=True, outline_color="lime", fill_alpha=0.0, contour_px=2)
             .pl.show(ax=ax, title="", colorbar=False)
         )
-        ax.set_title(f"{uid}\nin tissue {s['in_tissue_share']:.1%} of {s['cells']:,} cells", fontsize=9)
+        title = s["title"].replace("Atera In Situ Gene Expression, ", "").replace("Preview Data: ", "Preview: ")
+        ax.set_title(f"{title}\ntissue {s['tissue_px_share']:.0%} of the image", fontsize=9)
         ax.set_axis_off()
     fig.savefig(path, dpi=80, bbox_inches="tight")
     plt.close(fig)
@@ -272,28 +199,21 @@ def main() -> None:
     """Parse the command line and run one step."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="step", required=True)
-    s = sub.add_parser("store")
-    s.add_argument("bundle", type=Path)
-    s.add_argument("uid")
-    s.add_argument("stores", type=Path)
     m = sub.add_parser("materialize")
-    m.add_argument("stores", type=Path)
     m.add_argument("dest", type=Path)
-    m.add_argument("--workers", type=int, default=4)
+    m.add_argument("--version", default=VERSION, help="the catalog release")
+    m.add_argument("--workers", type=int, default=1)
     m.add_argument("--slurm-json", required=True, help="the slurm resources of materialize, as JSON")
-    m.add_argument("--stain-json", type=Path, help="apply the reference in this stain.json instead of fitting one")
     c = sub.add_parser("check")
-    c.add_argument("stores", type=Path)
     c.add_argument("dest", type=Path)
     c.add_argument("out", type=Path)
+    c.add_argument("--version", default=VERSION, help="the catalog release")
     args = p.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    if args.step == "store":
-        store(args.bundle, args.uid, args.stores)
-    elif args.step == "materialize":
-        run_materialize(args.stores, args.dest, args.workers, json.loads(args.slurm_json), args.stain_json)
+    if args.step == "materialize":
+        run_materialize(args.dest, args.version, args.workers, json.loads(args.slurm_json))
     else:
-        check(args.stores, args.dest, args.out)
+        check(args.dest, args.out, args.version)
 
 
 if __name__ == "__main__":

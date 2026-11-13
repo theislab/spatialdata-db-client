@@ -1,14 +1,21 @@
 """Throughput of the spatialbatch Loader over a materialized Atera collection, and a figure of one batch.
 
-Usage, on one CPU compute node::
+Usage, on one CPU compute node, and on one GPU node for the torch sweep::
 
     python scripts/bench_loader_atera.py <collection> <out dir> [--epochs 2] [--max-batches N]
+    python scripts/bench_loader_atera.py <collection> <out dir> --torch-workers 0,2,4,8 --max-batches 400 [--device cuda]
 
 The loader is ``Loader(images=["he"], labels=["cells"], crop_px=224, batch_size=256, shuffle=True)`` over
 ``SpatialDatasetCollection(<collection>)``. Each pass is timed on its own: the first reads the collection from
 lustre into the node's page cache (cold), the later ones may find it there (warm). Cells/s counts the rows yielded;
 MB/s counts the bytes of the arrays yielded (the H&E and label crops, plus X's data, indices and indptr), so it
 is the decoded rate, not the disk rate. Writes ``bench.json`` and ``batch.png`` into <out dir>.
+
+With ``--torch-workers``, the same loader with ``to="torch"`` is wrapped in a ``torch.utils.data.DataLoader``
+(``batch_size=None``: the Loader makes the batches; ``pin_memory`` when the device is CUDA) once per worker count,
+and every batch is moved to ``--device`` (``non_blocking``, synchronised before the clock stops). Each setting reads
+``--max-batches`` batches with a fresh Loader; the settings run one after another in the order given, so the later
+ones may find more of the collection in the page cache. Writes ``bench_torch.json``.
 """
 
 from __future__ import annotations
@@ -106,6 +113,92 @@ def bench(collection: Path, epochs: int, max_batches: int | None) -> tuple[dict,
     return stats, kept
 
 
+def _identity(batch):
+    return batch
+
+
+def _tensor_bytes(value) -> int:
+    import torch
+
+    if isinstance(value, torch.Tensor):
+        if value.layout == torch.sparse_csr:
+            return sum(
+                t.element_size() * t.numel() for t in (value.values(), value.crow_indices(), value.col_indices())
+            )
+        return value.element_size() * value.numel()
+    return _nbytes(value)
+
+
+def _to_device(batch, device):
+    import torch
+
+    def move(v):
+        return v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
+
+    return {
+        "images": {k: move(v) for k, v in batch["images"].items()},
+        "labels": {k: move(v) for k, v in batch["labels"].items()},
+        "X": move(batch["X"]),
+    }
+
+
+def bench_torch(collection: Path, workers: list[int], max_batches: int, device: str) -> dict:
+    """One torch DataLoader per worker count over the spatialbatch Loader; batches moved to `device`."""
+    import torch
+    from spatialbatch import Loader, SpatialDatasetCollection
+
+    stats: dict = {
+        "torch": torch.__version__,
+        "torch_cuda": torch.version.cuda,
+        "device": device,
+        "gpu": torch.cuda.get_device_name(0) if device.startswith("cuda") else None,
+        "settings": [],
+    }
+    for w in workers:
+        t0 = time.perf_counter()
+        loader = Loader(
+            images=["he"], labels=["cells"], crop_px=CROP_PX, batch_size=BATCH_SIZE, shuffle=True, to="torch"
+        ).use_collection(SpatialDatasetCollection(collection))
+        setup = time.perf_counter() - t0
+        dl = torch.utils.data.DataLoader(
+            loader, batch_size=None, num_workers=w, collate_fn=_identity, pin_memory=device.startswith("cuda")
+        )
+        cells = nbytes = batches = 0
+        first = None
+        t = time.perf_counter()
+        for batch in dl:
+            moved = _to_device(batch, device)
+            cells += moved["images"]["he"].shape[0]
+            nbytes += sum(_tensor_bytes(v) for k in ("images", "labels") for v in batch[k].values())
+            nbytes += _tensor_bytes(batch["X"])
+            batches += 1
+            if first is None:
+                if device.startswith("cuda"):
+                    torch.cuda.synchronize()
+                first = time.perf_counter() - t
+            if batches >= max_batches:
+                break
+        if device.startswith("cuda"):
+            torch.cuda.synchronize()
+        dt = time.perf_counter() - t
+        row = {
+            "num_workers": w,
+            "setup_s": round(setup, 2),
+            "batches": batches,
+            "cells": cells,
+            "seconds": round(dt, 2),
+            "first_batch_s": round(first or 0.0, 3),
+            "cells_per_s": round(cells / dt, 1),
+            "mb_per_s": round(nbytes / dt / 1e6, 1),
+            "x_type": type(batch["X"]).__name__
+            + ("/" + str(batch["X"].layout) if hasattr(batch["X"], "layout") else ""),
+        }
+        stats["settings"].append(row)
+        print(json.dumps(row), flush=True)
+        del dl, loader
+    return stats
+
+
 def batch_figure(batch, path: Path, n: int = 16) -> None:
     """The first `n` crops of a batch: H&E with the cell outlines, each drawn with spatialdata_plot."""
     import matplotlib
@@ -149,8 +242,17 @@ def main() -> None:
     p.add_argument("out", type=Path)
     p.add_argument("--epochs", type=int, default=2)
     p.add_argument("--max-batches", type=int, default=None, help="stop each pass after this many batches")
+    p.add_argument("--torch-workers", help="comma-separated DataLoader num_workers to sweep, e.g. 0,2,4,8")
+    p.add_argument("--device", default="cuda", help="where the torch sweep moves each batch")
     args = p.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
+    if args.torch_workers:
+        result = {"hardware": hardware(), "collection": str(args.collection), "max_batches": args.max_batches}
+        workers = [int(w) for w in args.torch_workers.split(",")]
+        result.update(bench_torch(args.collection, workers, args.max_batches or 400, args.device))
+        (args.out / "bench_torch.json").write_text(json.dumps(result, indent=1))
+        print(json.dumps(result, indent=1))
+        return
     result = {"hardware": hardware(), "collection": str(args.collection), "epochs": args.epochs}
     result["max_batches"] = args.max_batches
     print(json.dumps(result), flush=True)
