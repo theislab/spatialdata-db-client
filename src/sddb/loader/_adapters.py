@@ -651,11 +651,27 @@ class TissueMask(_Adapter):
     ``labels["tissue"]`` (uint8, 1 = tissue), and ``obs["in_tissue"]`` is the mask at each cell's centroid, so the
     step runs after :class:`Centroids`.
 
+    The default is squidpy's ``"weka"`` method (a random forest trained on corner pixels as glass and the pixels
+    least like them as tissue, squidpy ``_detect_tissue.py`` ``_segment_weka``) with ``method_params={"rng": 0}``,
+    so that a rerun gives the same mask (squidpy's own default draws the forest from OS entropy),
+    ``corner_size_pct=0.05`` (corner boxes of 5% of the height and width; squidpy's 1% left a fringe of glass on
+    the Atera brain slide) and ``corners_are_background="auto"``: a corner counts as glass when the mean grey value
+    of its box is closer to that of the brightest corner box than to the median grey value of the overview. A
+    corner that the tissue covers is then not taken as glass (on the Atera cervical slide, squidpy's default of all
+    four corners gave 67% tissue and left out the stroma in the top-right corner; this rule gives 81%). If no corner
+    passes, all four are used. squidpy's default ``"otsu"`` splits pale tissue from glass poorly: on the Atera brain
+    slide it kept only the nuclei, and its area filter then removed them all (``docs/use_cases/loader_atera.md``).
+
+    weka needs an overview large enough for its corner boxes to hold glass: with squidpy's 1% boxes it marked a
+    256 x 256 synthetic overview (boxes of 2 x 2 pixels) as all tissue and found the tissue at 512 x 512. The unit
+    tests run otsu on 32 x 32 overviews for that reason.
+
     Parameters
     ----------
     **detect_tissue_kwargs
         Passed to :func:`~squidpy.experimental.im.detect_tissue`, except ``image_key``, ``scale``, ``inplace`` and
-        ``new_labels_key``, which this step sets.
+        ``new_labels_key``, which this step sets. ``corners_are_background`` may also be ``"auto"`` (the default,
+        see above). ``method_params`` defaults to ``{"rng": 0}`` only with ``method="weka"``.
     """
 
     name = "TissueMask"
@@ -665,7 +681,15 @@ class TissueMask(_Adapter):
         reserved = self._RESERVED & set(detect_tissue_kwargs)
         if reserved:
             raise ValueError(f"TissueMask sets {sorted(reserved)} itself")
-        self.config = dict(detect_tissue_kwargs)
+        config: dict[str, Any] = {
+            "method": "weka",
+            "corner_size_pct": 0.05,
+            "corners_are_background": "auto",
+            **detect_tissue_kwargs,
+        }
+        if config["method"] == "weka" and "method_params" not in config:
+            config["method_params"] = {"rng": 0}
+        self.config = config
 
     def requirements(self) -> dict[str, Any]:
         """``obsm["spatial"]`` from :class:`Centroids`."""
@@ -692,7 +716,11 @@ class TissueMask(_Adapter):
         small_np = np.round(np.asarray(small.data.compute() if isinstance(small.data, da.Array) else small.data))
         small_np = small_np.astype(item.image.dtype)
         tmp = sd.SpatialData(images={"image": Image2DModel.parse(small_np, dims=("c", "y", "x"))})
-        mask = (np.asarray(detect_tissue(tmp, image_key="image", inplace=False, **self.config)) > 0).astype(np.uint8)
+        kwargs = dict(self.config)
+        if kwargs.get("corners_are_background") == "auto":
+            kwargs["corners_are_background"] = _glass_corners(small_np, kwargs.get("corner_size_pct", 0.01))
+            logger.info(f"{item.uid}: TissueMask corners taken as glass {kwargs['corners_are_background']}")
+        mask = (np.asarray(detect_tissue(tmp, image_key="image", inplace=False, **kwargs)) > 0).astype(np.uint8)
 
         # written pixel j samples overview pixel (j + 0.5) / f - 0.5, the one whose f x f block holds it
         tissue = affine_transform(
@@ -710,6 +738,24 @@ class TissueMask(_Adapter):
         in_tissue = tissue.vindex[py, px].compute() > 0 if len(xy) else np.zeros(0, bool)
         table = _with_obs(item.table, in_tissue=np.asarray(in_tissue, dtype=bool))
         return self._done(item, table=table, labels={**item.labels, "tissue": xr.DataArray(tissue, dims=("y", "x"))})
+
+
+def _glass_corners(image: np.ndarray, corner_size_pct: float) -> tuple[bool, bool, bool, bool]:
+    """Which corners of a ``(c, y, x)`` overview look like glass, as ``corners_are_background`` takes them.
+
+    A corner's box is squidpy's (``_corner_mask``: ``max(1, int(corner_size_pct * H))`` by the same of ``W``); the
+    corners are in squidpy's order ``(top-left, top-right, bottom-left, bottom-right)``. A corner is glass when the
+    mean grey value of its box is at least as close to the brightest box's mean as to the median grey value of the
+    image. When the image is mostly glass, its median is close to the glass and a glass corner may fail the test;
+    weka then has fewer glass seeds, which is safer than seeding the tissue as glass. No corner passing gives all four.
+    """
+    grey = np.asarray(image, dtype=np.float64).mean(axis=0)
+    h, w = grey.shape
+    ch, cw = max(1, int(corner_size_pct * h)), max(1, int(corner_size_pct * w))
+    means = [float(b.mean()) for b in (grey[:ch, :cw], grey[:ch, -cw:], grey[-ch:, :cw], grey[-ch:, -cw:])]
+    median, top = float(np.median(grey)), max(means)
+    corners = tuple(m - median >= top - m for m in means)
+    return corners if any(corners) else (True, True, True, True)  # type: ignore[return-value]
 
 
 # -- StainNormalize ----------------------------------------------------------------------------------------------------
@@ -872,5 +918,9 @@ def adapter_from_record(rec: AdapterRecord) -> _Adapter:
 
 
 def default_chain(mpp: float | None, *, allow_upsample: bool = False) -> list[_Adapter]:
-    """``[Rasterize(mpp), Centroids(), TissueMask(), StainNormalize()]``, the H&E chain."""
+    """``[Rasterize(mpp), Centroids(), TissueMask(), StainNormalize()]``, the H&E chain.
+
+    :class:`TissueMask` runs with its defaults: squidpy's ``"weka"`` with a fixed seed, corner boxes of 5% and only
+    the corners that look like glass (see :class:`TissueMask`).
+    """
     return [Rasterize(mpp, allow_upsample=allow_upsample), Centroids(), TissueMask(), StainNormalize()]

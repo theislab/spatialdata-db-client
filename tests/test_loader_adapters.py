@@ -446,7 +446,8 @@ def test_tissue_mask_flags_cells_outside():
     outside = [(10, 10), (118, 10), (10, 118), (118, 118)]
     sdata = make_sdata(img, shapes=squares(inside + outside, 5), image_chunks=32)
     item = Rasterize(None, tile=32).build(item_of(sdata))
-    item = TissueMask(auto_max_pixels=1024).build(Centroids().build(item))
+    # otsu: a 32 x 32 overview is too small for weka's 1% corner boxes (see test_tissue_mask_default_finds_pale_tissue)
+    item = TissueMask(method="otsu", auto_max_pixels=1024).build(Centroids().build(item))
     tissue = item.labels["tissue"]
     assert isinstance(tissue.data, da.Array)
     assert tissue.shape == (128, 128)
@@ -454,7 +455,41 @@ def test_tissue_mask_flags_cells_outside():
     assert item.table.obs["in_tissue"].dtype == bool
     assert item.table.obs["in_tissue"].tolist() == [True] * 3 + [False] * 4
     assert item.records[-1].name == "TissueMask"
-    assert item.records[-1].params == {"auto_max_pixels": 1024}
+    params = {"method": "otsu", "corner_size_pct": 0.05, "corners_are_background": "auto", "auto_max_pixels": 1024}
+    assert item.records[-1].params == params
+
+
+def _pale_tissue(size=512, seed=0):
+    """Pale H&E-like tissue (grey ~224 on glass ~240, 3% dark nuclei): a disk plus a band over the top-right corner."""
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[:size, :size] / size
+    tissue = (np.hypot(yy - 0.59, xx - 0.55) <= 0.35) | ((yy < 0.27) & (xx > 0.7))
+    nuclei = tissue & (rng.random((size, size)) < 0.03)
+    c_h = rng.uniform(0.02, 0.10, (size, size)) * tissue + 1.2 * nuclei
+    c_e = rng.uniform(0.04, 0.14, (size, size)) * tissue
+    h, e = (np.asarray(s, float) / np.linalg.norm(s) for s in (RUIFROK_H, RUIFROK_E))
+    rgb = 240.0 * np.exp(-(c_h[..., None] * h + c_e[..., None] * e)) + rng.normal(0, 3, (size, size, 3))
+    return np.clip(np.round(rgb), 0, 255).astype(np.uint8).transpose(2, 0, 1), tissue
+
+
+def test_tissue_mask_default_finds_pale_tissue():
+    """The default (weka, seed 0, glass corners chosen per image) masks pale tissue that squidpy's otsu misses."""
+    from sddb.loader._adapters import _glass_corners
+
+    img, truth = _pale_tissue()
+    assert _glass_corners(img, 0.05) == (True, False, True, True)  # the tissue band covers the top-right corner
+    cells = [(282, 302), (20, 492), (492, 20)]  # (x, y): on the disk, on glass (bottom-left), on the band
+    sdata = make_sdata(img, shapes=squares(cells, 5), image_chunks=256)
+    item = Centroids().build(Rasterize(None, tile=256).build(item_of(sdata)))
+    out = TissueMask().build(item)
+    mask = np.asarray(out.labels["tissue"]) > 0
+    assert (mask & truth).sum() / (mask | truth).sum() > 0.9
+    assert out.table.obs["in_tissue"].tolist() == [True, False, True]
+    params = {"method": "weka", "corner_size_pct": 0.05, "corners_are_background": "auto", "method_params": {"rng": 0}}
+    assert out.records[-1].params == params
+    np.testing.assert_array_equal(np.asarray(TissueMask().build(item).labels["tissue"]), mask)  # seeded: same mask
+    # squidpy's default: otsu keeps only the nuclei, and its area filter then drops them
+    assert (np.asarray(TissueMask(method="otsu").build(item).labels["tissue"]) > 0).mean() < 0.05
 
 
 def test_tissue_mask_needs_centroids():
@@ -470,7 +505,7 @@ def _he_item(seed, *, tile=32, size=128, stains=(RUIFROK_H, RUIFROK_E)):
     img = he_image(size, size, seed=seed, disk=(size / 2, size / 2, size * 0.35), stains=stains)
     sdata = make_sdata(img, shapes=squares([(size / 2, size / 2), (10, 10)], 5), image_chunks=tile)
     item = Rasterize(None, tile=tile).build(item_of(sdata))
-    return TissueMask(auto_max_pixels=1024).build(Centroids().build(item))
+    return TissueMask(method="otsu", auto_max_pixels=1024).build(Centroids().build(item))
 
 
 def test_stain_pooled_fit_one_reference(monkeypatch):
@@ -660,8 +695,9 @@ def test_chain_never_computes_whole_image():
     sdata = _atera_shaped(tile)
     roles = {**TABLE_ROLES, "labels": "^labels/cell_labels$"}
     items = [item_of(sdata, roles=roles, mpp_native=0.25)]
-    rasterize, centroids, tissue, stain = default_chain(0.5)
-    rasterize.tile, tissue.config["auto_max_pixels"], stain.fit_pixels = tile, 1024, 1024
+    rasterize, centroids, _, stain = default_chain(0.5)
+    rasterize.tile, stain.fit_pixels = tile, 1024
+    tissue = TissueMask(method="otsu", auto_max_pixels=1024)  # a 32 x 32 overview is too small for weka's corners
     written = (240, 200)  # the global footprint 600 x 500 at 2.5 global units per written pixel
     guard = _NoWholeImage(max_px=written[0] * written[1] // 2)
     with dask.config.set(scheduler="sync"), guard:
