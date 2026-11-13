@@ -170,9 +170,11 @@ def _tissue_figure(dest: Path, slides: dict, path: Path, side: int = 900) -> Non
     from spatialdata.models import Image2DModel, Labels2DModel
 
     root = zarr.open_group(dest, mode="r")
-    cols = 3
+    cols = 2 if len(slides) == 4 else min(3, len(slides))
     rows = math.ceil(len(slides) / cols)
-    fig, axs = plt.subplots(rows, cols, figsize=(4 * cols, 4.6 * rows))
+    hw = [root[s["key"]]["images"]["he"].shape[1:] for s in slides.values()]
+    aspect = max(h / w for h, w in hw)  # height of a panel per unit of width
+    fig, axs = plt.subplots(rows, cols, figsize=(4 * cols, (4 * aspect + 0.6) * rows), squeeze=False)
     for ax in np.ravel(axs)[len(slides) :]:
         ax.set_axis_off()
     for ax, s in zip(np.ravel(axs), slides.values(), strict=False):
