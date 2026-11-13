@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 
 import anndata as ad
 import dask
@@ -13,6 +14,7 @@ import pandas as pd
 import pytest
 import shapely
 import spatialdata as sd
+import xarray as xr
 from dask.callbacks import Callback
 from scipy import ndimage
 from spatialdata.models import Image2DModel, Labels2DModel, ShapesModel, TableModel
@@ -146,7 +148,11 @@ def test_rasterize_downsample_matches_reference():
     assert not item.flags["upsampled"]
     assert item.labels["cells"].shape == (32, 32)
     assert item.records == [
-        AdapterRecord(name="Rasterize", version="0.1.0", params={"mpp": 0.5, "allow_upsample": False, "tile": 16})
+        AdapterRecord(
+            name="Rasterize",
+            version="0.1.0",
+            params={"mpp": 0.5, "allow_upsample": False, "tile": 16, "value_range": None},
+        )
     ]
 
 
@@ -251,11 +257,34 @@ def test_existing_labels_need_a_row_mapping():
     roles = {**TABLE_ROLES, "labels": "^labels/cell_labels$"}
     with pytest.raises(ValueError, match="label_column"):
         item_of(sdata, roles=roles)
-    # the Atera layout: obs["label_id"] holds each row's value in the labels raster
-    sdata = make_sdata(np.zeros((3, 40, 40), np.uint8), shapes=shapes(), labels=labels, obs={"label_id": [4, 3, 2, 1]})
+    # the Atera layout: obs["label_id"] holds each row's value in the labels raster, checked at the shapes' centroids
+    sdata = make_sdata(np.zeros((3, 40, 40), np.uint8), shapes=shapes(), labels=labels, obs={"label_id": [1, 2, 3, 4]})
     item = item_of(sdata, roles=roles)
     assert item.label_rule == "obs['label_id']"
-    assert item.table.obs["label_id"].tolist() == [4, 3, 2, 1]
+    assert item.table.obs["label_id"].tolist() == [1, 2, 3, 4]
+    # a label_id column that does not match the labels is refused
+    sdata = make_sdata(np.zeros((3, 40, 40), np.uint8), shapes=shapes(), labels=labels, obs={"label_id": [4, 3, 2, 1]})
+    with pytest.raises(ValueError, match=r"0% of 4 sampled rows.*label_column"):
+        item_of(sdata, roles=roles)
+
+
+def test_label_id_check_reads_a_window_without_shapes():
+    from sddb.loader._item import _check_label_column
+
+    labels = draw_cells(30, 90, 100)
+    source = SimpleNamespace(cells=xr.DataArray(da.from_array(labels, chunks=32), dims=("y", "x")))
+    ids = np.arange(1, 31)
+    _check_label_column(source, pd.Series(ids), ids, None, None, "cell_labels")  # every window value is an id
+    with pytest.raises(ValueError, match="central window"):
+        _check_label_column(source, pd.Series(ids), ids + 100, None, None, "cell_labels")
+
+
+def test_shapes_index_mismatch_raises():
+    shapes = squares([(8, 8), (24, 24)], 6)
+    shapes.index = [1, 2]
+    sdata = make_sdata(np.zeros((3, 32, 32), np.uint8), shapes=shapes, ids=["1", "2"])  # str ids vs int index
+    with pytest.raises(ValueError, match="no shape matches"):
+        Rasterize(None).build(item_of(sdata))
 
 
 # -- Centroids ---------------------------------------------------------------------------------------------------------
@@ -375,6 +404,7 @@ def test_adapter_record_roundtrip():
     reference = StainNormalize(fit_pixels=1024).fit([_he_item(0)])
     for step in [
         Rasterize(0.5, allow_upsample=True, tile=256),
+        Rasterize(0.5, value_range=(0, 255)),
         Rasterize(None),
         Centroids(),
         TissueMask(method="otsu", auto_max_pixels=1000),
@@ -400,13 +430,47 @@ def test_adapters_satisfy_task_adapter_protocol():
     assert [type(s).__name__ for s in default_chain(0.5)] == ["Rasterize", "Centroids", "TissueMask", "StainNormalize"]
 
 
-def test_he_dtype_rule_recorded():
-    img = (np.random.default_rng(6).integers(0, 2**16, (3, 16, 16))).astype(np.uint16)
+def _rasterized(img, role="he", **kwargs):
     sdata = make_sdata(img, shapes=squares([(8, 8)], 4))
-    item = Rasterize(None).build(item_of(sdata))
+    return Rasterize(None, **kwargs).build(item_of(sdata, role=role))
+
+
+def test_dtype_float_he_needs_value_range():
+    img = np.random.default_rng(6).uniform(0, 255, (3, 16, 16)).astype(np.float32)
+    with pytest.raises(ValueError, match=r"\[0\.\d*, 25\d.*value_range"):
+        _rasterized(img)
+    item = _rasterized(img, value_range=(0, 255))
+    np.testing.assert_array_equal(item.image.values, np.floor(img.astype(np.float64) + 0.5).astype(np.uint8))
+    assert "value_range" in item.dtype_rule
+
+
+def test_dtype_float_in_unit_range_scales():
+    img = np.random.default_rng(6).uniform(0, 1, (3, 16, 16))
+    item = _rasterized(img)
+    np.testing.assert_array_equal(item.image.values, np.floor(img * 255 + 0.5).astype(np.uint8))
+    assert "[0, 1]" in item.dtype_rule
+
+
+def test_dtype_int32_if_keeps_values():
+    img = np.random.default_rng(6).integers(0, 40001, (2, 16, 16)).astype(np.int32)
+    item = _rasterized(img, role="if")
+    assert item.image.dtype == np.uint16
+    np.testing.assert_array_equal(item.image.values, img)
+    assert "values kept" in item.dtype_rule
+
+
+def test_dtype_uint16_he_within_uint8_casts():
+    img = np.random.default_rng(6).integers(0, 256, (3, 16, 16)).astype(np.uint16)
+    item = _rasterized(img)
     assert item.image.dtype == np.uint8
-    assert item.dtype_rule is not None
-    assert "uint16" in item.dtype_rule
+    np.testing.assert_array_equal(item.image.values, img)
+
+
+def test_dtype_full_range_uint16_he_raises():
+    img = np.random.default_rng(6).integers(0, 2**16, (3, 16, 16)).astype(np.uint16)
+    with pytest.raises(ValueError, match="value_range"):
+        _rasterized(img)
+    item = _rasterized(img, value_range=(0, 65535))
     np.testing.assert_array_equal(item.image.values, np.floor(img / 257 + 0.5).astype(np.uint8))
 
 
@@ -435,7 +499,8 @@ def _atera_shaped(tile):
     img = he_image(h0, w0, disk=(200, 240, 170))
     labels = draw_cells(150, int(s * w0), int(s * h0))
     n = int(labels.max())
-    shapes = squares([(1, 1)] * n, 1)
+    com = ndimage.center_of_mass(np.ones_like(labels), labels, np.arange(1, n + 1))
+    shapes = squares([(x, y) for y, x in com], 1)  # the boundaries locate the rows for the label_id check
     shapes.index = np.arange(10**8, 10**8 + n)
     return make_sdata(
         img, image_tf=tf, shapes=shapes, labels=labels, image_chunks=tile, obs={"label_id": np.arange(1, n + 1)}
@@ -476,3 +541,107 @@ def test_chain_never_computes_whole_image():
         _NoWholeImage(guard.max_px),
     ):
         item.image.data.compute()
+
+
+# -- registration: image and cells on different affines ----------------------------------------------------------------
+
+ATERA = np.array([[0.0024, 1.289, 10.0], [-1.289, 0.0024, 268.0], [0, 0, 1]])  # the Atera H&E linear part
+
+
+def _similarity(scale, deg, t):
+    c, s_ = np.cos(np.deg2rad(deg)), np.sin(np.deg2rad(deg))
+    return np.array([[scale * c, -scale * s_, t[0]], [scale * s_, scale * c, t[1]], [0, 0, 1]])
+
+
+def _tf(m):
+    return Affine(m, input_axes=("x", "y"), output_axes=("x", "y"))
+
+
+def _paint(value_at_cs, h0=160, w0=200):
+    """An H&E image whose every pixel is f(cell under its centre) = id mod 251 + 1, through the ATERA affine."""
+    yy, xx = np.mgrid[:h0, :w0] + 0.5
+    cs = ATERA @ np.stack([xx.ravel(), yy.ravel(), np.ones(xx.size)])
+    f = (value_at_cs(cs[0], cs[1]).reshape(h0, w0) % 251 + 1).astype(np.uint8)
+    return np.repeat(f[None], 3, axis=0)
+
+
+def _interior_match(item):
+    """Share of interior written pixels (label constant within 2 px, off the border) where image = f(labels)."""
+    img = item.image.values[0].astype(np.int64)
+    lab = item.labels["cells"].values.astype(np.int64)
+    same = np.ones(lab.shape, bool)
+    for dy in range(-2, 3):
+        for dx in range(-2, 3):
+            same &= np.roll(lab, (dy, dx), axis=(0, 1)) == lab
+    same[:3], same[-3:], same[:, :3], same[:, -3:] = False, False, False, False
+    cells = same & (lab > 0)
+    return float(np.mean(img[same] == lab[same] % 251 + 1)), int(cells.sum())
+
+
+@pytest.mark.parametrize("ratio", [1.0, 1.6])
+def test_registration_labels_path(ratio):
+    labels = draw_cells(20, 150, 130)
+    to_cs = _similarity(0.9, 15, (70, 60))
+    inv = np.linalg.inv(to_cs)
+
+    def value_at(x, y):
+        lx, ly = (inv @ np.stack([x, y, np.ones_like(x)]))[:2]
+        ix, iy = np.floor(lx).astype(int), np.floor(ly).astype(int)
+        ok = (ix >= 0) & (ix < 130) & (iy >= 0) & (iy < 150)
+        return np.where(ok, labels[np.clip(iy, 0, 149), np.clip(ix, 0, 129)], 0)
+
+    sdata = make_sdata(
+        _paint(value_at),
+        image_tf=_tf(ATERA),
+        labels=labels,
+        labels_tf=_tf(to_cs),
+        annotate="cell_labels",
+        image_chunks=48,
+    )
+    roles = {**TABLE_ROLES, "labels": "^labels/cell_labels$"}
+    item = Rasterize(0.25 * ratio, tile=48).build(item_of(sdata, roles=roles, mpp_native=0.25))
+    share, n_cell_px = _interior_match(item)
+    assert n_cell_px > 150  # interior cell pixels; the rest is background
+    assert share >= 0.99
+
+
+@pytest.mark.parametrize("ratio", [1.0, 1.6])
+def test_registration_shapes_path(ratio):
+    centres = [(x, y) for y in range(10, 150, 30) for x in range(10, 125, 30)]
+    geoms = [shapely.Point(c).buffer(10, quad_segs=3) for c in centres]
+    cells = gpd.GeoDataFrame(geometry=geoms, index=[f"cell-{i}" for i in range(len(geoms))])
+    to_cs = _similarity(1.1, -20, (40, 70))
+    inv = np.linalg.inv(to_cs)
+
+    def value_at(x, y):
+        lx, ly = (inv @ np.stack([x, y, np.ones_like(x)]))[:2]
+        out = np.zeros(x.shape, np.int64)
+        for i, g in enumerate(geoms):
+            out[shapely.contains_xy(g, lx, ly)] = i + 1  # label id = row position + 1 (string ids)
+        return out
+
+    sdata = make_sdata(_paint(value_at), image_tf=_tf(ATERA), shapes=cells, shapes_tf=_tf(to_cs), image_chunks=48)
+    item = Rasterize(0.25 * ratio, tile=48).build(item_of(sdata, mpp_native=0.25))
+    assert item.label_rule == "row position + 1"
+    share, n_cell_px = _interior_match(item)
+    assert n_cell_px > 150  # interior cell pixels; the rest is background
+    assert share >= 0.99
+
+
+@pytest.mark.parametrize(("role", "glass"), [("he", 255), ("if", 0)])
+def test_outside_footprint_is_glass(role, glass):
+    img = np.full((3, 40, 40), 100, np.uint8 if role == "he" else np.uint16)
+    tf = _tf(_similarity(1.0, 45, (0, 0)))
+    item = Rasterize(None).build(item_of(make_sdata(img, image_tf=tf, shapes=squares([(0, 28)], 4)), role=role))
+    out = item.image.values
+    h, w = out.shape[1:]
+    assert (out[:, 0, 0] == glass).all()  # a corner of the bounding box, outside the rotated footprint
+    assert (out[:, h // 2, w // 2] == 100).all()
+
+
+def test_overview_is_float32_and_lazy():
+    image = xr.DataArray(da.zeros((3, 64, 64), dtype=np.uint8, chunks=(3, 16, 16)), dims=("c", "y", "x"))
+    small = _adapters._overview(image, 4)
+    assert isinstance(small.data, da.Array)
+    assert small.dtype == np.float32
+    assert small.shape == (3, 16, 16)

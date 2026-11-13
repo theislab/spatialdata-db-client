@@ -135,7 +135,9 @@ class LoaderItem:
         1. `label_column`;
         2. the instance ids, if the cells are the labels element the table annotates;
         3. ``obs["label_id"]``, the spatialdata-io convention when the labels values differ from the instance ids
-           (Atera: the table annotates ``cell_boundaries`` by ``cell_id``, ``cell_labels`` holds ``label_id``);
+           (Atera: the table annotates ``cell_boundaries`` by ``cell_id``, ``cell_labels`` holds ``label_id``).
+           With existing labels it is checked on a sample: the labels at 200 rows' shape centroids, or, without
+           shapes, the values of a central 512 x 512 window, must match for at least 95%;
         4. with existing labels nothing else applies, so a ``ValueError`` asks for `label_column`;
         5. the instance ids, if they are positive integers that fit uint32 (shapes are rasterised with them);
         6. the row position plus one (shapes are rasterised with it), e.g. for Xenium's string cell ids.
@@ -220,6 +222,10 @@ class LoaderItem:
             cells_to_cs=_affine(cells_el, cs),
             instance_key=instance_key,
         )
+        if rule == "obs['label_id']" and cells_kind == "labels":
+            region_el = sdata.shapes[region] if region in sdata.shapes else None
+            region_to_cs = _affine(region_el, cs) if region_el is not None else None
+            _check_label_column(source, instance, ids, region_el, region_to_cs, cells_name)
         return cls(
             uid=uid,
             study_id=study_id,
@@ -231,6 +237,57 @@ class LoaderItem:
             channels=channels,
             label_rule=rule,
             source=source,
+        )
+
+
+_CHECK_ROWS = 200  # rows sampled to check that obs["label_id"] holds the labels' values
+_CHECK_SHARE = 0.95  # share that must match; a concave cell's centroid can lie outside its own label
+_CHECK_WINDOW = 512  # side of the labels window read when no shapes locate the rows
+
+
+def _check_label_column(
+    source: _Source, instance: pd.Series, ids: np.ndarray, shapes: Any, shapes_to_cs: np.ndarray | None, name: str
+) -> None:
+    """Check on a sample that ``obs["label_id"]`` holds each row's value in the labels, without a full read.
+
+    With shapes, the labels are read at the centroids of a seeded sample of rows (point reads). Without, a window
+    at the centre of the labels is read and its label values must be among the ids.
+
+    Raises
+    ------
+    ValueError
+        If fewer than 95% match.
+    """
+    import dask.array as da
+
+    labels = source.cells
+    data = labels.data if isinstance(labels.data, da.Array) else da.from_array(np.asarray(labels.data))
+    h, w = data.shape
+    if shapes is not None and shapes_to_cs is not None:
+        rng = np.random.default_rng(0)
+        rows = np.sort(rng.choice(len(ids), min(_CHECK_ROWS, len(ids)), replace=False))
+        found = shapes.index.get_indexer(instance.to_numpy()[rows])
+        rows, found = rows[found >= 0], found[found >= 0]
+        if not len(rows):
+            return
+        cent = shapes.geometry.iloc[found].centroid
+        xy = np.column_stack([cent.x.to_numpy(), cent.y.to_numpy(), np.ones(len(rows))])
+        pix = (np.linalg.inv(source.cells_to_cs) @ shapes_to_cs @ xy.T)[:2].T  # labels intrinsic (x, y)
+        px = np.clip(np.floor(pix[:, 0]).astype(np.int64), 0, w - 1)
+        py = np.clip(np.floor(pix[:, 1]).astype(np.int64), 0, h - 1)
+        values = np.asarray(data.vindex[py, px].compute())
+        share, what = float(np.mean(values == ids[rows])), f"{len(rows)} sampled rows' centroids"
+    else:
+        y0, x0 = max(0, h // 2 - _CHECK_WINDOW // 2), max(0, w // 2 - _CHECK_WINDOW // 2)
+        window = np.asarray(data[y0 : y0 + _CHECK_WINDOW, x0 : x0 + _CHECK_WINDOW].compute())
+        values = np.unique(window[window != 0])
+        if not len(values):
+            return
+        share, what = float(np.isin(values, ids).mean()), f"{len(values)} label values in a central window"
+    if share < _CHECK_SHARE:
+        raise ValueError(
+            f"obs['label_id'] does not hold the values of labels {name!r}: only {share:.0%} of {what} match; "
+            "pass label_column"
         )
 
 

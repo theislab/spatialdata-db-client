@@ -92,7 +92,8 @@ class Rasterize(_Adapter):
     ``"native"`` grid, ``native_to_written = 1``).
 
     The image is resampled (order 1) from the coarsest multiscale level whose mpp is still at most `mpp`, and
-    converted to the role's dtype (H&E uint8, IF uint16) by a rule recorded in ``item.dtype_rule``. Existing labels
+    converted to the role's dtype (H&E uint8, IF uint16) by a rule recorded in ``item.dtype_rule`` (see
+    `value_range`). Outside the image's footprint the written image is glass (255) for H&E and 0 for IF. Existing labels
     are resampled with order 0; otherwise the shapes the table annotates are rasterised once, filled, with each
     row's ``obs["label_id"]``, one tile of ``tile x tile`` pixels at a time.
 
@@ -104,19 +105,40 @@ class Rasterize(_Adapter):
         Allow a target finer than the native grid (``mpp_native / mpp > 1``). Without it any such factor raises.
     tile
         Chunk side of the written image and labels, and of the rasterisation tiles.
+    value_range
+        ``(lo, hi)`` of the source pixels, mapped linearly onto the role's dtype (``lo`` to 0, ``hi`` to its max).
+        Without it, a source already in the role's dtype passes through, and any other source must fit its dtype's
+        natural range, judged from the min and max of the coarsest pyramid level: a float in ``[0, 1]`` is scaled to
+        the role's max, an integer whose values fit the role's dtype keeps them. Anything else raises and asks for
+        `value_range`.
     """
 
     name = "Rasterize"
 
-    def __init__(self, mpp: float | None, *, allow_upsample: bool = False, tile: int = 4096) -> None:
+    def __init__(
+        self,
+        mpp: float | None,
+        *,
+        allow_upsample: bool = False,
+        tile: int = 4096,
+        value_range: Sequence[float] | None = None,
+    ) -> None:
+        if value_range is not None and (len(value_range) != 2 or not value_range[0] < value_range[1]):
+            raise ValueError(f"value_range must be (lo, hi) with lo < hi; got {value_range!r}")
         self.mpp = mpp
         self.allow_upsample = allow_upsample
         self.tile = tile
+        self.value_range = None if value_range is None else [float(v) for v in value_range]
 
     @property
     def config(self) -> dict[str, Any]:  # type: ignore[override]
         """The constructor kwargs."""
-        return {"mpp": self.mpp, "allow_upsample": self.allow_upsample, "tile": self.tile}
+        return {
+            "mpp": self.mpp,
+            "allow_upsample": self.allow_upsample,
+            "tile": self.tile,
+            "value_range": self.value_range,
+        }
 
     def requirements(self) -> dict[str, Any]:
         """An item fresh from :meth:`LoaderItem.from_sdata`."""
@@ -164,7 +186,7 @@ class Rasterize(_Adapter):
         level = _pick_level([(lv.shape[-2], lv.shape[-1]) for lv in src.levels], item.mpp_native, self.mpp)
         lv = src.levels[level]
         level_scale = np.array([w0 / lv.shape[-1], h0 / lv.shape[-2]])
-        data, dtype_rule = _to_role_dtype(_dask(lv), item.role)
+        data, dtype_rule = _to_role_dtype(_dask(lv), item.role, _dask(src.levels[-1]), self.value_range, item.uid)
         if item.role == "he":
             if data.shape[0] == 4:
                 data = data[:3]
@@ -180,7 +202,8 @@ class Rasterize(_Adapter):
             output_shape=(c, *shape),
             output_chunks=(c, self.tile, self.tile),
             order=1,
-            mode="nearest",
+            mode="grid-constant",
+            cval=255 if item.role == "he" else 0,  # glass for H&E, in the role's dtype (converted above)
         )
         coords = {"c": lv.coords["c"].values[:c]} if "c" in lv.coords else {}
         image_da = xr.DataArray(image, dims=("c", "y", "x"), coords=coords)
@@ -265,22 +288,33 @@ def _dask(arr: xr.DataArray) -> da.Array:
     return arr.data if isinstance(arr.data, da.Array) else da.from_array(arr.data)
 
 
-def _to_role_dtype(data: da.Array, role: str) -> tuple[da.Array, str | None]:
-    """Convert pixels to the role's dtype, elementwise, and say how."""
+def _to_role_dtype(
+    data: da.Array, role: str, coarse: da.Array, value_range: Sequence[float] | None, uid: str
+) -> tuple[da.Array, str | None]:
+    """Convert pixels to the role's dtype, elementwise, and say how; never guess a range (see Rasterize)."""
     out = _DTYPES[role]
     src = np.dtype(data.dtype)
+    top = int(np.iinfo(out).max)
+    if value_range is not None:
+        lo, hi = value_range
+        k = top / (hi - lo)
+        conv = data.map_blocks(lambda b: np.floor(np.clip((b - lo) * k, 0, top) + 0.5).astype(out), dtype=out)
+        return conv, f"{src} -> {out}: round(clip((x - {lo:g}) * {top} / ({hi:g} - {lo:g}), 0, {top})), value_range"
     if src == out:
         return data, None
-    top = np.iinfo(out).max
+    vmin, vmax = (float(v) for v in dask.compute(coarse.min(), coarse.max()))
     if src == np.bool_:
         return data.astype(out) * out.type(top), f"bool -> {out}: True = {top}"
-    if np.issubdtype(src, np.integer):
-        smax = np.iinfo(src).max
-        k = top / smax
-        conv = data.map_blocks(lambda b: np.floor(np.clip(b, 0, None) * k + 0.5).astype(out), dtype=out)
-        return conv, f"{src} -> {out}: round(x * {top} / {smax}), negatives to 0"
-    conv = data.map_blocks(lambda b: np.floor(np.clip(b, 0, 1) * top + 0.5).astype(out), dtype=out)
-    return conv, f"{src} -> {out}: round(clip(x, 0, 1) * {top}), assumes values in [0, 1]"
+    if np.issubdtype(src, np.floating) and vmin >= 0 and vmax <= 1:
+        conv = data.map_blocks(lambda b: np.floor(np.clip(b, 0, 1) * top + 0.5).astype(out), dtype=out)
+        return conv, f"{src} -> {out}: round(x * {top}), values in [0, 1] (coarsest level: [{vmin:g}, {vmax:g}])"
+    if np.issubdtype(src, np.integer) and vmin >= 0 and vmax <= top:
+        conv = data.map_blocks(lambda b: np.clip(b, 0, top).astype(out), dtype=out)
+        return conv, f"{src} -> {out}: values kept, they fit {out} (coarsest level: [{vmin:g}, {vmax:g}])"
+    raise ValueError(
+        f"cannot convert the {src} image of {uid} to {out} without guessing: its coarsest level spans "
+        f"[{vmin:g}, {vmax:g}]; pass value_range=(lo, hi) to Rasterize to map it linearly"
+    )
 
 
 def _rasterize_shapes(
@@ -291,6 +325,11 @@ def _rasterize_shapes(
 
     value_of = dict(zip(instance.to_numpy(), np.asarray(label_ids), strict=True))
     keep = shapes.index.isin(list(value_of))
+    if len(value_of) and not keep.any():
+        raise ValueError(
+            f"no shape matches an instance id of the table (shapes index {shapes.index.dtype}, e.g. "
+            f"{list(shapes.index[:3])}; instance ids {instance.dtype}, e.g. {list(instance.iloc[:3])})"
+        )
     shapes = shapes[keep]
     geoms = shapes.geometry.to_numpy()
     if "radius" in shapes.columns:  # circles: points with a radius in the shapes' own units
@@ -423,14 +462,20 @@ def _with_obs(table: Any, **columns: Any) -> Any:
     return ad.AnnData(X=table.X, obs=obs, var=table.var, obsm=dict(table.obsm))
 
 
+def _overview(image: xr.DataArray, f: int) -> xr.DataArray:
+    """The image averaged over ``f x f`` blocks, lazily and in float32 (no float64 copy of the full image)."""
+    return image.astype(np.float32).coarsen(y=f, x=f, boundary="pad").mean() if f > 1 else image
+
+
 # -- TissueMask --------------------------------------------------------------------------------------------------------
 
 
 class TissueMask(_Adapter):
     """Detect tissue with :func:`squidpy.experimental.im.detect_tissue` and flag the cells on it.
 
-    The image is averaged down to at most ``auto_max_pixels`` (squidpy's default 5e6) and wrapped in a temporary
-    in-memory SpatialData for the detection. The mask is resampled (order 0) back onto the grid as
+    The image is averaged down (in float32) to at most ``auto_max_pixels`` (squidpy's default 5e6) and wrapped in a
+    temporary in-memory SpatialData for the detection. An image already under that size is computed whole, which is
+    bounded by ``auto_max_pixels``. The mask is resampled (order 0) back onto the grid as
     ``labels["tissue"]`` (uint8, 1 = tissue), and ``obs["in_tissue"]`` is the mask at each cell's centroid, so the
     step runs after :class:`Centroids`.
 
@@ -471,9 +516,9 @@ class TissueMask(_Adapter):
         self._check(item)
         h, w = item.image.shape[-2:]
         f = max(1, math.ceil(math.sqrt(h * w / self.config.get("auto_max_pixels", 5_000_000))))
-        small = item.image.coarsen(y=f, x=f, boundary="pad").mean() if f > 1 else item.image
-        small_np = np.asarray(small.data.compute() if isinstance(small.data, da.Array) else small.data)
-        small_np = np.round(small_np).astype(item.image.dtype)
+        small = _overview(item.image, f)
+        small_np = np.round(np.asarray(small.data.compute() if isinstance(small.data, da.Array) else small.data))
+        small_np = small_np.astype(item.image.dtype)
         tmp = sd.SpatialData(images={"image": Image2DModel.parse(small_np, dims=("c", "y", "x"))})
         mask = (np.asarray(detect_tissue(tmp, image_key="image", inplace=False, **self.config)) > 0).astype(np.uint8)
 
