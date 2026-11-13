@@ -252,7 +252,7 @@ def test_uns_roundtrip():
 def test_import_sddb_does_not_import_pydantic_stack():
     code = (
         "import sys, sddb; "
-        "print(sorted(m for m in ('pydantic', 'squidpy', 'spatialbatch', 'annbatch', 'sddb.contract') if m in sys.modules))"
+        "print(sorted(m for m in ('pydantic', 'squidpy', 'spatialbatch', 'annbatch', 'dask_image', 'sddb.contract', 'sddb.loader') if m in sys.modules))"
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
     assert out.strip() == "[]"
