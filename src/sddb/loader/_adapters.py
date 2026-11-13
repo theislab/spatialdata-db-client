@@ -766,8 +766,17 @@ class StainNormalize(_Adapter):
 
     :meth:`fit` pools the tissue pixels of a cohort's items into one reference
     (:func:`~squidpy.experimental.im.fit_stain_reference`); `reference` overrides it. :meth:`build` applies it lazily
-    per block (:meth:`~squidpy.experimental.im.StainFit.transform`, uint8 out, background kept) and records it in
+    per block (:meth:`~squidpy.experimental.im.StainFit.transform`, uint8 out) and records it in
     ``item.stain_reference`` for ``DatasetContract.stain_reference``.
+
+    Which pixels change: squidpy's transform maps every pixel through one linear operator in optical-density space and
+    then puts the source pixels back outside ``labels["tissue"]`` (``preserve_background=True``, squidpy 1.8.4
+    ``_stain/_normalize.py:375-380``, default in ``_reference.py:132``). Inside the tissue mask, glass and lumen pixels
+    with almost no stain are mapped too, and on the Atera Preview breast they came out pale green. So :meth:`build` also
+    keeps the source pixel wherever every channel's optical density ``-log10(I / I0)`` (``I0`` the reference's white
+    point) is below `keep_below_od`. The default 0.15 is Macenko et al. 2009's threshold for "pixels with nearly no
+    stain (low OD)" (ISBI 2009, p. 1108, Algorithm 1 step 2). In the paper the threshold only removes those pixels from
+    the stain vector fit; keeping them unchanged in the output is this step's choice.
 
     Both run on a temporary in-memory SpatialData holding the item's image and ``labels["tissue"]`` with a pyramid
     whose coarsest level has at most `fit_pixels` pixels; squidpy fits on that level. Images under `fit_pixels`
@@ -781,6 +790,9 @@ class StainNormalize(_Adapter):
         A fitted reference to apply instead of fitting one.
     fit_pixels
         Pixel budget of the level the stain statistics are taken on.
+    keep_below_od
+        Pixels whose optical density is below this in every channel keep their source value; ``None`` transforms
+        every pixel inside the tissue mask (squidpy's behaviour).
 
     Raises
     ------
@@ -792,18 +804,30 @@ class StainNormalize(_Adapter):
     name = "StainNormalize"
 
     def __init__(
-        self, method: Literal["macenko"] = "macenko", *, reference: StainFit | None = None, fit_pixels: int = 4_000_000
+        self,
+        method: Literal["macenko"] = "macenko",
+        *,
+        reference: StainFit | None = None,
+        fit_pixels: int = 4_000_000,
+        keep_below_od: float | None = 0.15,
     ) -> None:
         if method != "macenko":
             raise ValueError(f"method must be 'macenko'; got {method!r}")
+        if keep_below_od is not None and not keep_below_od >= 0:
+            raise ValueError(f"keep_below_od must be >= 0 or None; got {keep_below_od!r}")
         self.method = method
         self.reference = reference
         self.fit_pixels = fit_pixels
+        self.keep_below_od = keep_below_od
 
     @property
     def config(self) -> dict[str, Any]:  # type: ignore[override]
         """The constructor kwargs, with the reference as plain lists."""
-        out: dict[str, Any] = {"method": self.method, "fit_pixels": self.fit_pixels}
+        out: dict[str, Any] = {
+            "method": self.method,
+            "fit_pixels": self.fit_pixels,
+            "keep_below_od": self.keep_below_od,
+        }
         if self.reference is not None:
             out["reference"] = _reference_dict(self.reference)
         return out
@@ -863,6 +887,12 @@ class StainNormalize(_Adapter):
             tmp, image_key="image", output_dtype=np.uint8, tissue_mask_key="tissue", inplace=False
         )
         data = out.data.rechunk(_dask(item.image).chunks)
+        if self.keep_below_od is not None:
+            source = _dask(item.image)
+            white = np.asarray(self.reference.white_point, dtype=np.float32)[:, None, None]
+            od = -da.log10(da.maximum(source.astype(np.float32), 1.0) / white)  # Macenko 2009 eq. (1)
+            blank = (od < self.keep_below_od).all(axis=0)
+            data = da.where(blank[None], source, data.astype(source.dtype))
         normalised = xr.DataArray(data, dims=("c", "y", "x"), coords={"c": item.image.coords["c"].values})
         return self._done(item, image=normalised, stain_reference=_reference_dict(self.reference))
 
