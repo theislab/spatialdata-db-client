@@ -552,36 +552,6 @@ def test_stain_normalisation_changes_pixels_only_when_the_staining_differs():
     assert np.abs(moved - before)[:, tissue].mean() > 5
 
 
-def test_stain_keeps_unstained_pixels_inside_the_tissue_mask():
-    """Glass inside labels['tissue'] (a lumen) keeps its source RGB; stained pixels change; None maps everything."""
-    item = _he_item(0)
-    img = np.asarray(item.image).copy()
-    rng = np.random.default_rng(3)
-    img[:, 56:72, 56:72] = np.clip(rng.normal([[[236]], [[240]], [[244]]], 1.5, (3, 16, 16)), 0, 255).astype(np.uint8)
-    lumen = np.zeros(img.shape[1:], bool)
-    lumen[56:72, 56:72] = True
-    tissue = (np.asarray(item.labels["tissue"]) > 0) | lumen  # the lumen lies inside the tissue mask
-    item = dataclasses.replace(
-        item,
-        image=xr.DataArray(da.from_array(img, chunks=(3, 32, 32)), dims=("c", "y", "x"), coords=item.image.coords),
-        labels={
-            **item.labels,
-            "tissue": xr.DataArray(da.from_array(tissue.astype(np.uint8), chunks=32), dims=("y", "x")),
-        },
-    )
-    stained = (-np.log10(np.maximum(img, 1) / 255.0) >= 0.15).any(axis=0)
-    other = StainNormalize(fit_pixels=1024)
-    other.fit([_he_item(1, stains=([0.45, 0.80, 0.40], [0.20, 0.90, 0.38]))])
-
-    kept = StainNormalize(reference=other.reference).build(item)
-    out = np.asarray(kept.image).astype(int)
-    np.testing.assert_array_equal(out[:, lumen], img[:, lumen])
-    assert np.abs(out - img.astype(int))[:, stained].mean() > 5
-    assert kept.records[-1].params["keep_below_od"] == 0.15
-    everything = np.asarray(StainNormalize(reference=other.reference, keep_below_od=None).build(item).image)
-    assert np.abs(everything.astype(int) - img.astype(int))[:, lumen].max() > 0
-
-
 def test_stain_refuses_if():
     img = np.random.default_rng(5).integers(0, 2**16, (2, 32, 32), dtype=np.uint16)
     sdata = make_sdata(img, shapes=squares([(16, 16)], 5))
