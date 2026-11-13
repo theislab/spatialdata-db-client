@@ -107,14 +107,15 @@ def squares(centres, side) -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(geometry=geoms, index=[f"cell-{i}" for i in range(len(geoms))])
 
 
-def he_image(height, width, *, seed=0, disk=None) -> np.ndarray:
+def he_image(height, width, *, seed=0, disk=None, stains=(RUIFROK_H, RUIFROK_E)) -> np.ndarray:
     """An H&E-like uint8 image (Beer-Lambert with Ruifrok vectors): tissue in `disk` ``(cy, cx, r)``, glass outside."""
     rng = np.random.default_rng(seed)
     yy, xx = np.mgrid[:height, :width]
     inside = np.ones((height, width), bool) if disk is None else np.hypot(yy - disk[0], xx - disk[1]) <= disk[2]
     c_h = rng.uniform(0.2, 1.5, (height, width)) * inside
     c_e = rng.uniform(0.1, 1.0, (height, width)) * inside
-    od = c_h[..., None] * RUIFROK_H / np.linalg.norm(RUIFROK_H) + c_e[..., None] * RUIFROK_E / np.linalg.norm(RUIFROK_E)
+    h, e = (np.asarray(s, float) / np.linalg.norm(s) for s in stains)
+    od = c_h[..., None] * h + c_e[..., None] * e
     rgb = 250.0 * np.exp(-od) + rng.normal(0, 1.5, (height, width, 3))
     return np.clip(np.round(rgb), 0, 255).astype(np.uint8).transpose(2, 0, 1)
 
@@ -358,8 +359,8 @@ def test_tissue_mask_needs_centroids():
 # -- StainNormalize ----------------------------------------------------------------------------------------------------
 
 
-def _he_item(seed, *, tile=32, size=128):
-    img = he_image(size, size, seed=seed, disk=(size / 2, size / 2, size * 0.35))
+def _he_item(seed, *, tile=32, size=128, stains=(RUIFROK_H, RUIFROK_E)):
+    img = he_image(size, size, seed=seed, disk=(size / 2, size / 2, size * 0.35), stains=stains)
     sdata = make_sdata(img, shapes=squares([(size / 2, size / 2), (10, 10)], 5), image_chunks=tile)
     item = Rasterize(None, tile=tile).build(item_of(sdata))
     return TissueMask(auto_max_pixels=1024).build(Centroids().build(item))
@@ -389,6 +390,24 @@ def test_stain_pooled_fit_one_reference(monkeypatch):
     assert out[0].stain_reference == out[1].stain_reference
     assert out[0].records[-1] == out[1].records[-1]
     np.testing.assert_allclose(out[0].stain_reference["stain_matrix"], reference.stain_matrix)
+
+
+def test_stain_normalisation_changes_pixels_only_when_the_staining_differs():
+    # guards against a silent no-op: a reference fitted on the image itself leaves it unchanged, a reference fitted on
+    # a differently stained image moves it
+    item = _he_item(0)
+    tissue = np.asarray(item.labels["tissue"]) > 0
+    before = np.asarray(item.image).astype(int)
+
+    own = StainNormalize(fit_pixels=1024)
+    own.fit([item])
+    same = np.asarray(own.build(item).image).astype(int)
+    assert np.abs(same - before)[:, tissue].mean() < 1
+
+    other = StainNormalize(fit_pixels=1024)
+    other.fit([_he_item(1, stains=([0.45, 0.80, 0.40], [0.20, 0.90, 0.38]))])
+    moved = np.asarray(StainNormalize(reference=other.reference).build(item).image).astype(int)
+    assert np.abs(moved - before)[:, tissue].mean() > 5
 
 
 def test_stain_refuses_if():
