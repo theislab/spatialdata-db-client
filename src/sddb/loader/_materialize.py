@@ -131,9 +131,13 @@ def materialize(
     allow_mixed_grids
         Allow a collection where some members are on the target grid and others (unknown mpp) on their native grid.
     slurm
-        Default resources of the Slurm jobs, passed as ``--default-resources``: ``mem_mb`` and ``runtime`` (minutes,
-        or a span such as ``"2h"``) are required, ``slurm_partition``, ``slurm_account`` and the other resources of
-        the snakemake Slurm executor are optional. Only with ``executor="slurm"``.
+        Default resources of the Slurm jobs, passed as ``--default-resources``: ``runtime`` (minutes, or a span such
+        as ``"2h"``) and exactly one of ``mem_mb`` and ``mem_mb_per_cpu`` (an ``int`` of MB) are required;
+        ``slurm_partition``, ``slurm_account`` and the other resources of the snakemake Slurm executor are optional.
+        ``slurm["fit_stain"]`` overrides them for the stain fit, which holds the tables of all members, e.g.
+        ``{"mem_mb": 16000, "runtime": "2h", "fit_stain": {"mem_mb": 64000}}``. Only with ``executor="slurm"``. The
+        jobs run on the compute nodes, so `dest`, its run state and every member's store (an absolute path) must be
+        on a filesystem that the nodes share with this machine.
 
     Returns
     -------

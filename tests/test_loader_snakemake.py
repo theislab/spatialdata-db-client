@@ -122,10 +122,107 @@ def test_commands(tmp_path):
         "runtime='2h'",
         "slurm_partition='cpu_p'",
     ]
-    with pytest.raises(ValueError, match="mem_mb.*runtime"):
-        _snakemake.command(state, executor="slurm", workers=8, slurm={"slurm_partition": "cpu_p"})
+    # the fit_stain overrides go to that rule, not to the defaults; mem_mb_per_cpu instead of mem_mb
+    per_cpu = {"mem_mb_per_cpu": 4000, "runtime": 60, "fit_stain": {"mem_mb_per_cpu": 16000}}
+    assert _snakemake.command(state, executor="slurm", workers=2, slurm=per_cpu)[-3:] == [
+        "--default-resources",
+        "mem_mb_per_cpu=4000",
+        "runtime=60",
+    ]
+    for bad, match in [
+        ({"slurm_partition": "cpu_p"}, "runtime and exactly one of mem_mb and mem_mb_per_cpu"),
+        ({"mem_mb": 1000, "mem_mb_per_cpu": 1000, "runtime": 60}, "exactly one of mem_mb and mem_mb_per_cpu"),
+        ({"mem_mb": "16G", "runtime": 60}, "mem_mb must be a positive int of MB, not '16G'"),
+        ({"mem_mb": True, "runtime": 60}, "mem_mb must be a positive int of MB, not True"),
+        ({"mem_mb": 1000, "runtime": 60, "fit_stain": {"mem_mb": 6.4e4}}, r"fit_stain.*mem_mb must be a positive int"),
+        ({"mem_mb": 1000, "runtime": 60, "fit_stain": 64000}, "fit_stain.*must be a mapping"),
+    ]:
+        with pytest.raises(ValueError, match=match):
+            _snakemake.command(state, executor="slurm", workers=8, slurm=bad)
     with pytest.raises(ValueError, match="slurm"):
         _snakemake.command(state, executor="local", workers=1, slurm=slurm)
+
+
+def test_snakefile_checks(cohort, tmp_path):
+    dest = tmp_path / "c.zarr"
+    chain = default_chain(0.5)
+    plan, _ = _materialize._prepare(
+        cohort, dest, adapters=chain, role="he", roles=ROLES, mpp_native=MPP, obs_columns=(), allow_mixed_grids=False
+    )
+    slurm = {"mem_mb": 16000, "runtime": "2h", "fit_stain": {"mem_mb": 64000, "runtime": "4h"}}
+    state = _snakemake.write_workflow(plan, chain, executor="slurm", slurm=slurm)
+    snakefile = (state / "Snakefile").read_text()
+    fit_rule = snakefile[snakefile.index("rule fit_stain:") : snakefile.index("rule dataset_uidA:")]
+    assert "    resources:\n        mem_mb=64000,\n        runtime='4h',\n" in fit_rule
+    assert snakefile.count("resources:") == 1
+    for rule in ("validate", "fit_stain", "dataset_uidA", "dataset_uidB"):
+        assert repr(str(state / "logs" / f"{rule}.log")) in snakefile
+    assert snakefile.count("> {log:q} 2>&1") == 4
+    # snakemake parses the rule resources (a local dry run of the same Snakefile)
+    out = subprocess.run(_snakemake.command(state, executor="local", workers=1, dry_run=True), **_capture())
+    assert _job_stats(out.stdout + out.stderr)["total"] == 4
+
+    def with_member(uid, path):
+        members = {**plan["members"], uid: {**plan["members"]["uidA"], "path": path}}
+        return {**plan, "members": members, "todo": [*plan["todo"], uid]}
+
+    source = plan["members"]["uidA"]["path"]
+    for uid in ("uid{A}", "a/b", " uidA", "uid\nA"):
+        with pytest.raises(ValueError, match="snakemake reads specially"):
+            _snakemake.write_workflow(with_member(uid, source), chain)
+    with pytest.raises(ValueError, match="store .*nope.zarr does not exist"):
+        _snakemake.write_workflow(with_member("uidX", str(tmp_path / "nope.zarr")), chain)
+    relative = with_member("uidX", "uidA.zarr")
+    with pytest.raises(ValueError, match="executor='slurm' the store must be an absolute path"):
+        _snakemake.write_workflow(relative, chain, executor="slurm", slurm=slurm)
+
+
+def test_failed_member_names_its_log(cohort, tmp_path, monkeypatch):
+    # the jobs are other processes: a sitecustomize makes validate_dataset fail for uidB's staged dataset there
+    hook = tmp_path / "hook"
+    hook.mkdir()
+    (hook / "sitecustomize.py").write_text(
+        "import os\n"
+        "if os.environ.get('SDDB_TEST_FAIL_UID'):\n"
+        "    import sddb.loader._materialize as m\n"
+        "    real, uid = m.validate_dataset, os.environ['SDDB_TEST_FAIL_UID']\n"
+        "    def fail(group, **kw):\n"
+        "        if f'/{uid}/stage.zarr' in str(group.store):\n"
+        "            return ['synthetic issue']\n"
+        "        return real(group, **kw)\n"
+        "    m.validate_dataset = fail\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", str(hook))
+    monkeypatch.setenv("SDDB_TEST_FAIL_UID", "uidB")
+    dest, state = tmp_path / "c.zarr", tmp_path / "c.zarr.sddb"
+    chain = [Rasterize(0.5), Centroids()]
+    with pytest.raises(RuntimeError) as raised:
+        materialize(cohort, dest, adapters=chain, role="he", roles=ROLES, mpp_native=MPP, runner="snakemake")
+    log = state / "logs" / "dataset_uidB.log"
+    message = str(raised.value)
+    assert f"rule dataset_uidB failed, its log is {log}" in message
+    assert "dataset_1 (uidB): synthetic issue" in message
+    assert "dataset_1 (uidB): synthetic issue" in log.read_text()
+    assert not (dest / "dataset_1").exists()
+    assert not (state / "done" / "uidB").exists()
+
+
+def test_rerun_writes_only_the_new_member(tmp_path):
+    paths = {uid: write_member(tmp_path, uid, seed=i)[0] for i, uid in enumerate(("uidA", "uidB", "uidC"))}
+    dest, state = tmp_path / "c.zarr", tmp_path / "c.zarr.sddb"
+    kwargs = {"adapters": [Rasterize(0.5), Centroids()], "role": "he", "roles": ROLES, "mpp_native": MPP}
+    materialize(FakeCohort(FakeMember(u, paths[u]) for u in ("uidA", "uidB")), dest, runner="snakemake", **kwargs)
+    before = {u: (state / "done" / u).stat().st_mtime_ns for u in ("uidA", "uidB")}
+
+    materialize(FakeCohort(FakeMember(u, p) for u, p in paths.items()), dest, runner="snakemake", **kwargs)
+    log = (state / "snakemake.log").read_text()
+    assert log.count("rule dataset_") == 1
+    assert "rule dataset_uidC:" in log
+    assert {u: (state / "done" / u).stat().st_mtime_ns for u in ("uidA", "uidB")} == before
+    assert validate(dest) == []
+    listed = json.loads((dest / "zarr.json").read_text())["consolidated_metadata"]["metadata"]
+    assert {"dataset_0", "dataset_1", "dataset_2", "dataset_2/images/he"} <= set(listed)
+    assert _contract(dest, "dataset_2").uid == "uidC"
 
 
 def test_adapter_record_roundtrip():
