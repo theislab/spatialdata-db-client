@@ -62,6 +62,14 @@ rule $name:$input
 """
 
 
+def fit_key(config: Mapping[str, Any]) -> dict[str, Any]:
+    """What a stain fit depends on: the chain's records and the members' uids.
+
+    Not their stores: a written member's store is ``None`` in the plan of the next run.
+    """
+    return {"adapters": config["adapters"], "members": sorted(config["members"])}
+
+
 def records(adapters: Sequence[Any]) -> list[dict[str, Any]]:
     """The chain as plain :class:`~sddb.contract.AdapterRecord` dicts, which the jobs rebuild it from.
 
@@ -102,8 +110,9 @@ def write_workflow(
 
     The config is the plan of :func:`~sddb.loader._materialize._prepare` plus the adapters' records, with every
     member's store as an absolute path. Outputs of an earlier run that the jobs would take as done are removed:
-    ``stain.json``, ``valid.json`` and the done marker of every member left to write (an unreadable one, see
-    ``_is_done``). The ``fit_stain`` resources of `slurm` become that rule's ``resources``.
+    ``valid.json``, the done marker of every member left to write (an unreadable one, see ``_is_done``), and
+    ``stain.json`` unless it was fitted on the same chain and members (:func:`fit_key`), so a rerun after a failed
+    member does not fit the stain reference again. The ``fit_stain`` resources of `slurm` become that rule's ``resources``.
 
     Raises
     ------
@@ -137,8 +146,10 @@ def write_workflow(
     config = {**plan, "members": members, "adapters": records(adapters)}
     (state / "config.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
     (state / "Snakefile").write_text(_snakefile(plan, state, fit_resources))
-    for stale in ("stain.json", "valid.json"):
-        (state / stale).unlink(missing_ok=True)
+    (state / "valid.json").unlink(missing_ok=True)
+    stain = state / "stain.json"
+    if stain.exists() and json.loads(stain.read_text()).get("inputs") != fit_key(config):
+        stain.unlink()
     for uid in plan["todo"]:
         (state / "done" / uid).unlink(missing_ok=True)
     return state

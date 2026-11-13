@@ -244,6 +244,40 @@ def test_adapter_record_roundtrip():
         _snakemake.records([Rasterize(0.5), Custom()])
 
 
+def test_rerun_after_a_failed_member_keeps_the_stain_fit(cohort, tmp_path, monkeypatch):
+    # the fit is the slow step (48 min on four Atera slides): a rerun with the same chain and members reuses it
+    hook = tmp_path / "hook"
+    hook.mkdir()
+    (hook / "sitecustomize.py").write_text(
+        "import os\n"
+        "if os.environ.get('SDDB_TEST_FAIL_UID'):\n"
+        "    import sddb.loader._materialize as m\n"
+        "    real, uid = m.validate_dataset, os.environ['SDDB_TEST_FAIL_UID']\n"
+        "    def fail(group, **kw):\n"
+        "        if f'/{uid}/stage.zarr' in str(group.store):\n"
+        "            return ['synthetic issue']\n"
+        "        return real(group, **kw)\n"
+        "    m.validate_dataset = fail\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", str(hook))
+    monkeypatch.setenv("SDDB_TEST_FAIL_UID", "uidB")
+    dest, state = tmp_path / "c.zarr", tmp_path / "c.zarr.sddb"
+    kwargs = {"role": "he", "roles": ROLES, "mpp_native": MPP, "runner": "snakemake"}
+    with pytest.raises(RuntimeError):
+        materialize(cohort, dest, adapters=default_chain(0.5), **kwargs)
+    fitted = (state / "stain.json").stat().st_mtime_ns
+
+    monkeypatch.delenv("SDDB_TEST_FAIL_UID")
+    materialize(cohort, dest, adapters=default_chain(0.5), **kwargs)
+    assert (state / "stain.json").stat().st_mtime_ns == fitted
+    assert "rule fit_stain:" not in (state / "snakemake.log").read_text()
+    assert validate(dest) == []
+
+    # another chain is another fit
+    _snakemake.write_workflow(yaml.safe_load((state / "config.yaml").read_text()), default_chain(0.25))
+    assert not (state / "stain.json").exists()
+
+
 def test_snakemake_local_equals_inprocess(cohort, tmp_path):
     kwargs = {"adapters": default_chain(0.5), "role": "he", "roles": ROLES, "mpp_native": MPP}
     local = materialize(cohort, tmp_path / "local.zarr", obs_columns=["tissue"], **kwargs)

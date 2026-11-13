@@ -24,6 +24,7 @@ from sddb.contract import CONTRACT_VERSION, AdapterRecord
 from sddb.loader._adapters import adapter_from_record
 from sddb.loader._item import LoaderItem
 from sddb.loader._materialize import _finalize, _fit_stage, _needs_fit, _rekey, _write_member
+from sddb.loader._snakemake import fit_key
 
 
 def fit(config: Mapping[str, Any], state: Path) -> None:
@@ -34,7 +35,8 @@ def fit(config: Mapping[str, Any], state: Path) -> None:
     root: Any = zarr.open_group(config["dest"], mode="r", use_consolidated=False)
     scratch = state / "fit"
     _fit_stage(adapters, items, root, config["written"], scratch)
-    _write_json(state / "stain.json", {str(i): adapters[i].to_record().model_dump() for i in fits})
+    fitted = {str(i): adapters[i].to_record().model_dump() for i in fits}
+    _write_json(state / "stain.json", {"inputs": fit_key(config), "records": fitted})
     shutil.rmtree(scratch, ignore_errors=True)
 
 
@@ -42,7 +44,7 @@ def member(config: Mapping[str, Any], state: Path, uid: str) -> None:
     """Run the whole chain on one member, with the fitted steps of ``stain.json``, and write it."""
     adapters = _chain(config)
     if config["fit"]:
-        for i, record in json.loads((state / "stain.json").read_text()).items():
+        for i, record in json.loads((state / "stain.json").read_text())["records"].items():
             adapters[int(i)] = adapter_from_record(AdapterRecord(**record))
     _write_member(config, uid, _open(config, uid), adapters, state / "scratch")
 
