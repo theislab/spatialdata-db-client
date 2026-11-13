@@ -1,0 +1,20 @@
+# Atera primer: page story
+
+Numbers from the notebook's run on catalog release 2026-11-12 (outputs in atera_out_release, not in git). One paragraph per figure, caveats first. The story list for primer.json is these 5 paragraphs in order (export_hero.py reads them).
+
+1. This is a first look at six Atera sections, not an analysis. The same rules apply to every section, and three settings were chosen on a 100,000-cell test: a quality floor, scaling before the principal components, and a threshold for cell types. Each tissue has one section, and breast has two (one fresh-frozen, FF, and one formalin-fixed, FFPE), so differences between tissues also contain differences between sections and preservation. The cell types are automated and cursory.
+
+2. The six sections hold 2.31 million cells. 275,586 of them (11.9%) are marked low quality and left out of the analysis: cells with very few counts, or with less than a quarter of their section's median counts, a floor that is our own judgement. The kept FF cells have a median of 5,648 to 6,277 counts per cell and the FFPE cells 1,014 to 2,377, with the cervical cancer section lowest.
+
+3. The sections are integrated with Harmony, and Leiden finds 34 clusters among the 2.04 million kept cells. When the UMAP is coloured by section, immune and stromal cells from different sections share regions, while epithelial cells stay apart by section, as expected for tumour and organ epithelium. One cluster of 41,589 cells, mostly from the cervix, still has low depth (median 449 counts) and is mostly left unassigned.
+
+4. Each cell takes the broad class whose marker genes score clearly highest, or stays unassigned. The brain section is mostly oligodendrocytes (31%), neurons (31%) and astrocytes (20%). In the other five sections, epithelial cells are the largest class (20% to 65%), the cervical cancer section has the most T and NK cells (16%), and the kidney and cervix sections have the most unassigned cells (19% and 17%), partly because the marker list has no kidney tubule markers.
+
+5. On the 4 sections that come with 10x's own broad labels, 52% to 85% of cells get the cursory type that matches their 10x label, with unassigned cells counted as disagreements. This is a consistency check, not a benchmark. The executed notebook has every step and the full figures, including each section drawn on the tissue.
+
+## Sources for each statement
+- Paragraph 1: the quality, scaling and label rules, and their choice on the 100,000-cell tests, are in primer.py (quality control, embedding and cell type sections) and in qc_sample_check.py and core_qc.py. One section per tissue and two for breast: atera_out_release/cohort.csv. FF and FFPE from preservation_method ("Fresh Frozen" is shown as FF) and the canonical keys.
+- Paragraph 2: atera_out_release/qc_per_dataset.csv. cells sum to 2,310,946, low_quality to 275,586 and cells_kept to 2,035,360. Kept median counts: FF 6,277 (breast), 5,648 (brain), 6,186 (colon); FFPE 2,377 (breast), 1,014 (cervix), 1,845 (kidney). Rule: primer.py qc_mark.
+- Paragraph 3: the notebook's cluster table (after the Leiden UMAPs): 34 clusters; the shallowest has 41,589 cells, median 449 counts, mostly from the cervix, and its most common label is "unassigned". The section statement comes from looking at fig_umap_dataset.png (after Harmony).
+- Paragraph 4: the notebook's crosstab of cell_type by section. Brain: oligodendrocytes 24,494 of 77,867 (31.46%), neurons 31.1%, astrocytes 20.2%. Epithelial 20.0% (cervix) to 64.9% (colon), the largest class in each non-brain section. T and NK cells: cervix 15.9%, the highest. Unassigned: kidney 18.7%, cervix 17.2%.
+- Paragraph 5: atera_out_release/cell_types_vs_10x.csv, 0.519 (kidney) to 0.848 (colon) on 4 sections. Each 10x label is matched to the type most of its assigned cells get, so an unassigned cell never counts as agreeing (primer.py, "Our cursory types next to 10x's labels"). The page shows no tissue view, so the page text has no tissue sentences; the notebook keeps its tissue figure (fig_cell_types_space.png).

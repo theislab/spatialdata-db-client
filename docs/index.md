@@ -145,6 +145,14 @@ use_cases/visium_atlas/visium-atlas
 ```{toctree}
 :hidden:
 :maxdepth: 2
+:caption: Primers
+
+primers/index
+```
+
+```{toctree}
+:hidden:
+:maxdepth: 2
 :caption: How-to
 
 guides/cli-and-agents

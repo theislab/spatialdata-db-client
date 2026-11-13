@@ -37,6 +37,7 @@ exclude_patterns = [
     "**/.pixi",
     "reference/_catalog_columns.md",
     "reference/_cli.md",
+    "primers/*/STORY_DRAFT.md",  # the page text and its sources, read by export_hero.py, not a docs page
 ]
 smartquotes = False  # keep straight quotes, and `--flag` in the CLI reference instead of an en dash
 
