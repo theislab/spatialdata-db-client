@@ -309,7 +309,9 @@ def test_label_id_check_refuses_duplicate_shape_index():
 def test_shapes_index_mismatch_raises():
     shapes = squares([(8, 8), (24, 24)], 6)
     shapes.index = [1, 2]
-    sdata = make_sdata(np.zeros((3, 32, 32), np.uint8), shapes=shapes, ids=["1", "2"])  # str ids vs int index
+    # ids of the same dtype that match no shape: spatialdata 0.9.0 refuses a str/int mismatch when the SpatialData
+    # is built (_core/spatialdata.py:173 -> validate_table_in_spatialdata, TypeError at :222)
+    sdata = make_sdata(np.zeros((3, 32, 32), np.uint8), shapes=shapes, ids=[3, 4])
     with pytest.raises(ValueError, match="no shape matches"):
         Rasterize(None).build(item_of(sdata))
 
