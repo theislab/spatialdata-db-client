@@ -91,8 +91,13 @@ class LoaderItem:
         :class:`~sddb.loader.Rasterize`, as intrinsic coordinates of the element the table annotates; ``None``
         without one. `table_centroids_element` names that element, for :class:`~sddb.loader.Centroids`' check that
         the mapping agrees with the cells that have pixels.
+    native_cells, native_cells_to_index
+        When the cells are a labels element: its scale 0 ``(y, x)``, and the 3x3 ``(x, y)`` affine from its intrinsic
+        coordinates to written pixel-index coordinates (its own transformation), set by :class:`~sddb.loader.Rasterize`.
+        :class:`~sddb.loader.Centroids` takes a cell's centre of mass there when the cell has no pixel on the written
+        grid. ``None`` for shape cells.
     n_centroid_fallback
-        How many rows took their centroid from `shape_centroids` or `table_centroids`, set by
+        How many rows took their centroid from `native_cells`, `shape_centroids` or `table_centroids`, set by
         :class:`~sddb.loader.Centroids`.
     label_rule
         Where ``obs["label_id"]`` came from (see :meth:`from_sdata`).
@@ -117,6 +122,8 @@ class LoaderItem:
     shape_centroids: np.ndarray | None = field(default=None, repr=False)
     table_centroids: np.ndarray | None = field(default=None, repr=False)
     table_centroids_element: str | None = None
+    native_cells: xr.DataArray | None = field(default=None, repr=False)
+    native_cells_to_index: np.ndarray | None = field(default=None, repr=False)
     n_centroid_fallback: int = 0
     label_rule: str = ""
     source: _Source | None = field(default=None, repr=False)

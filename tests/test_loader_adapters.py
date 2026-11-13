@@ -13,6 +13,11 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
+
+# the loader extra
+pytest.importorskip("pydantic")
+pytest.importorskip("squidpy")
+pytest.importorskip("dask_image")
 import shapely
 import spatialdata as sd
 import xarray as xr
@@ -348,26 +353,80 @@ def _label_item(obsm=None):
     return dataclasses.replace(item, labels={**item.labels, "cells": erased}), com
 
 
-def test_centroids_label_cell_takes_its_table_centroid():
-    # obsm in the labels' intrinsic coordinates (pixel j has its centre at j + 0.5): mapped through their transformation
-    item, com = _label_item(lambda com: com + 0.5)
-    out = Centroids().build(item)
+def test_centroids_label_cell_takes_its_native_centre_of_mass(caplog):
+    # obsm in microns, as spatialdata-io's Xenium table: never used for a labels cell
+    item, com = _label_item(lambda com: (com + 0.5) * 0.2125)
+    assert item.table_centroids is None
+    with caplog.at_level(logging.WARNING, logger="sddb.loader"):
+        out = Centroids().build(item)
     assert out.table.n_obs == 4
     assert out.n_centroid_fallback == 1
     np.testing.assert_allclose(out.table.obsm["spatial"][3], com[3], atol=1e-9)
+    assert "centre of mass in the native labels for 1" in caplog.text
 
 
-def test_centroids_label_cell_table_centroid_in_another_frame_raises():
-    # obsm in microns (0.2125 um/px) against a labels element in pixels: no fit from the data, the check raises
-    item, _ = _label_item(lambda com: (com + 0.5) * 0.2125)
-    with pytest.raises(ValueError, match=r"'cell_labels'.*median \d+\.\d+ px.*not in the frame of 'cell_labels'"):
+def test_centroids_xenium_like_sub_pixel_cell_kept():
+    # labels in pixels at 0.2125 um/px (identity), obsm in microns, written at 0.5 um/px: order-0 resampling reads
+    # source index round((j + 0.5) * 0.5 / 0.2125 - 0.5) = 1, 3, 5, 8, ... so the one-pixel cell at (2, 2) vanishes
+    labels = np.zeros((80, 80), np.uint32)
+    labels[30:50, 30:50] = 1
+    labels[2, 2] = 2
+    sdata = make_sdata(np.zeros((3, 80, 80), np.uint8), labels=labels, annotate="cell_labels", ids=[1, 2])
+    com = np.asarray(ndimage.center_of_mass(np.ones_like(labels), labels, [1, 2]))[:, ::-1]
+    sdata.tables["table"].obsm["spatial"] = (com + 0.5) * 0.2125
+    roles = {**TABLE_ROLES, "labels": "^labels/cell_labels$"}
+    item = Rasterize(0.5, tile=16).build(item_of(sdata, mpp_native=0.2125, roles=roles))
+    assert not (np.asarray(item.labels["cells"]) == 2).any()
+    out = Centroids().build(item)
+    assert out.table.n_obs == 2
+    assert out.n_centroid_fallback == 1
+    step = 0.5 / 0.2125  # source pixels per written pixel
+    np.testing.assert_allclose(out.table.obsm["spatial"][1], (com[1] + 0.5) / step - 0.5, atol=1e-9)
+
+
+def test_centroids_raise_without_a_native_pixel():
+    item, _ = _label_item()
+    native = item.native_cells.where(item.native_cells != 4, 0)
+    item = dataclasses.replace(item, native_cells=native)
+    with pytest.raises(ValueError, match=r"none in the source labels at native resolution.*label_id \[4\]"):
+        Centroids().build(item)
+
+
+def _shape_item(obsm=None):
+    """Two squares and a tiny cell that covers no pixel centre, with its polygon centroid taken away; ``obsm`` given."""
+    centres = [(8, 8), (24, 8), (24.7, 24.7)]
+    tiny = gpd.GeoDataFrame(geometry=[shapely.box(24.6, 24.6, 24.8, 24.8)], index=["tiny"])
+    sdata = make_sdata(np.zeros((3, 32, 32), np.uint8), shapes=pd.concat([squares(centres[:2], 6), tiny]))
+    if obsm is not None:
+        sdata.tables["table"].obsm["spatial"] = obsm(np.array(centres))
+    item = Rasterize(None, tile=16).build(item_of(sdata))
+    assert item.native_cells is None
+    return dataclasses.replace(item, shape_centroids=None)
+
+
+def test_centroids_shape_cell_takes_its_table_centroid():
+    out = Centroids().build(_shape_item(lambda xy: xy))  # obsm in the shapes' intrinsic coordinates
+    assert out.n_centroid_fallback == 1
+    np.testing.assert_allclose(out.table.obsm["spatial"][2], [24.2, 24.2], atol=1e-9)
+
+
+def test_centroids_shape_cell_table_centroid_in_another_frame_raises():
+    with pytest.raises(ValueError, match=r"'cells'.*median \d+\.\d+ px.*not in the frame of 'cells'"):
+        Centroids().build(_shape_item(lambda xy: xy * 0.2125))
+
+
+def test_centroids_fallback_outside_the_grid_raises():
+    # a tiny cell beyond the image: the written grid covers the image's footprint, so its polygon centroid is outside
+    tiny = gpd.GeoDataFrame(geometry=[shapely.box(40.6, 40.6, 40.8, 40.8)], index=["tiny"])
+    sdata = make_sdata(np.zeros((3, 32, 32), np.uint8), shapes=pd.concat([squares([(8, 8)], 6), tiny]))
+    item = Rasterize(None, tile=16).build(item_of(sdata))
+    with pytest.raises(ValueError, match=r"1 rows with no pixel.*fallback centroid outside the written grid \[0, 32\)"):
         Centroids().build(item)
 
 
 def test_centroids_raise_without_pixels_polygon_or_table_centroid():
-    item, _ = _label_item()
     with pytest.raises(ValueError, match="no pixel in labels.*no polygon centroid.*no usable table centroid"):
-        Centroids().build(item)
+        Centroids().build(_shape_item())
 
 
 # -- TissueMask --------------------------------------------------------------------------------------------------------

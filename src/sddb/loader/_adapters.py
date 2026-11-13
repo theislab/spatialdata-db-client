@@ -225,6 +225,7 @@ class Rasterize(_Adapter):
                 cval=0,
             )
             shape_centroids = None
+            native_cells, native_to_index = src.cells, grid.to_index(src.cells_to_cs)
         else:
             labels = _rasterize_shapes(
                 src.cells,
@@ -235,6 +236,7 @@ class Rasterize(_Adapter):
                 self.tile,
             )
             shape_centroids = _shape_centroids(src.cells, item.table.obs[src.instance_key], grid, src.cells_to_cs)
+            native_cells = native_to_index = None
 
         upsampled = factor is not None and factor > 1
         return self._done(
@@ -246,10 +248,13 @@ class Rasterize(_Adapter):
             flags={**item.flags, "allow_upsample": self.allow_upsample, "upsampled": upsampled},
             dtype_rule=dtype_rule,
             shape_centroids=shape_centroids,
+            # the table centroids place shape cells only: labels cells fall back to the labels at native resolution
             table_centroids=_map_points(src.table_centroids, grid.to_index(src.region_to_cs))
-            if src.table_centroids is not None and src.region_to_cs is not None
+            if src.cells_kind == "shapes" and src.table_centroids is not None and src.region_to_cs is not None
             else None,
             table_centroids_element=src.region,
+            native_cells=native_cells,
+            native_cells_to_index=native_to_index,
             source=None,
         )
 
@@ -422,24 +427,28 @@ class Centroids(_Adapter):
     """Each cell's centre of mass in ``labels["cells"]`` as ``obsm["spatial"]`` ``(x, y)``, in table row order.
 
     The pixel sums per label run block by block and are reduced over the blocks. No row is dropped. A row whose
-    label has no pixel (a cell smaller than a pixel of the written grid) takes, in this order:
+    label has no pixel (a cell smaller than a pixel of the written grid) takes:
 
-    1. the centroid of its polygon (``item.shape_centroids``, set by :class:`Rasterize` for shape cells);
-    2. the source table's centroid (``obsm["spatial"]``, ``item.table_centroids``). Readers put it in different
-       frames (microns for Atera, pixels for CODEX, DNB units for Stereo-seq in spatialdata-io), and spatialdata
-       gives a table no transformation, so :class:`Rasterize` maps it as intrinsic coordinates of the element the
-       table annotates (that element's transformation), and this step checks the mapping on up to
-       :data:`_TABLE_CHECK_ROWS` cells that have pixels: the median distance to their pixel centroid must be at most
-       :data:`_TABLE_CENTROID_PX`, else it raises, as ``obsm["spatial"]`` is then not in that element's frame.
+    - labels cells: its centre of mass in the source labels at native resolution (``item.native_cells``), mapped to
+      the written grid by that element's own transformation. This costs one more block pass over the source labels,
+      only when a cell has no pixel. The table's centroid is not used, since its frame is the reader's (microns for
+      Xenium and Atera in spatialdata-io, against labels in pixels).
+    - shape cells, in this order: the centroid of its polygon (``item.shape_centroids``, set by :class:`Rasterize`);
+      then the source table's centroid (``obsm["spatial"]``, ``item.table_centroids``). Readers put it in different
+      frames (microns for Atera, pixels for CODEX, DNB units for Stereo-seq in spatialdata-io), and spatialdata
+      gives a table no transformation, so :class:`Rasterize` maps it as intrinsic coordinates of the element the
+      table annotates (that element's transformation), and this step checks the mapping on up to
+      :data:`_TABLE_CHECK_ROWS` cells that have pixels: the median distance to their pixel centroid must be at most
+      :data:`_TABLE_CENTROID_PX`, else it raises, as ``obsm["spatial"]`` is then not in that element's frame.
 
     The count goes to ``item.n_centroid_fallback`` and into the contract as ``n_centroid_fallback``, and is logged.
 
     Raises
     ------
     ValueError
-        If a row has no pixel, no polygon centroid and no usable table centroid, if the table centroids are not in the
-        frame of the element the table annotates (the check above), or a fallback centroid is outside
-        the written grid.
+        If a row has no pixel and no fallback (labels cells: no pixel in the native labels either; shape cells: no
+        polygon centroid and no usable table centroid), if the table centroids are not in the frame of the element
+        the table annotates (the check above), or a fallback centroid is outside the written grid.
     """
 
     name = "Centroids"
@@ -469,8 +478,7 @@ class Centroids(_Adapter):
         fallback = int((~present).sum())
         if fallback:
             xy = _fallback_centroids(item, xy, present, cells.shape)
-        table = item.table.copy()
-        table.obs["label_id"] = label_id
+        table = _with_obs(item.table, label_id=label_id)  # X is shared, not copied
         table.obsm["spatial"] = xy.astype(np.float64)
         return self._done(item, table=table, n_centroid_fallback=fallback)
 
@@ -483,7 +491,13 @@ def _fallback_centroids(item: LoaderItem, xy: np.ndarray, present: np.ndarray, s
     """Fill the rows without pixels from the polygon centroid, else the checked table centroid; see :class:`Centroids`."""
     xy = xy.copy()
     missing = ~present
-    used = {"polygon": 0, "table": 0}
+    used = {"native labels": 0, "polygon": 0, "table": 0}
+    if item.native_cells is not None and item.native_cells_to_index is not None:
+        native = _native_centroids(item, item.native_cells, item.native_cells_to_index)
+        take = missing & np.isfinite(native).all(axis=1)
+        xy[take] = native[take]
+        used["native labels"] = int(take.sum())
+        missing &= ~take
     if item.shape_centroids is not None:
         take = missing & np.isfinite(item.shape_centroids).all(axis=1)
         xy[take] = item.shape_centroids[take]
@@ -497,6 +511,12 @@ def _fallback_centroids(item: LoaderItem, xy: np.ndarray, present: np.ndarray, s
             xy[take] = mapped[take]
             used["table"] = int(take.sum())
             missing &= ~take
+    if missing.any() and item.native_cells is not None:
+        raise ValueError(
+            f"{item.uid}: {int(missing.sum())} of {len(xy)} rows have no pixel in labels['cells'] and none in the "
+            "source labels at native resolution either, e.g. label_id "
+            f"{np.asarray(item.table.obs['label_id'])[missing][:3].tolist()}; rows are never dropped"
+        )
     if missing.any():
         raise ValueError(
             f"{item.uid}: {int(missing.sum())} of {len(xy)} rows have no pixel in labels['cells'], no polygon centroid "
@@ -512,10 +532,29 @@ def _fallback_centroids(item: LoaderItem, xy: np.ndarray, present: np.ndarray, s
         )
     logger.warning(
         f"{item.uid}: {int((~present).sum())} of {len(xy)} rows have no pixel in labels['cells'] (smaller than a pixel "
-        f"of the written grid); obsm['spatial'] is their polygon centroid for {used['polygon']} and their table "
-        f"centroid for {used['table']}{' (' + how + ')' if used['table'] else ''}"
+        f"of the written grid); obsm['spatial'] is their centre of mass in the native labels for "
+        f"{used['native labels']}, their polygon centroid for {used['polygon']} and their table centroid for "
+        f"{used['table']}{' (' + how + ')' if used['table'] else ''}"
     )
     return xy
+
+
+def _native_centroids(item: LoaderItem, cells: xr.DataArray, to_index: np.ndarray) -> np.ndarray:
+    """Each row's centre of mass in the source labels, in written pixel-index coordinates; NaN without a pixel there.
+
+    :func:`_label_sums` gives the mean pixel index, and pixel ``j`` has its centre at intrinsic coordinate
+    ``j + 0.5``, so ``0.5`` is added before the labels element's own affine `to_index` (:meth:`_Grid.to_index`).
+    """
+    ids, n, sx, sy = _label_sums(_dask(cells))
+    label_id = np.asarray(item.table.obs["label_id"], dtype=np.int64)
+    out = np.full((len(label_id), 2), np.nan)
+    if not len(ids):
+        return out
+    pos = np.clip(np.searchsorted(ids, label_id), 0, len(ids) - 1)
+    hit = ids[pos] == label_id
+    intrinsic = np.column_stack([sx[pos[hit]] / n[pos[hit]], sy[pos[hit]] / n[pos[hit]]]) + 0.5
+    out[hit] = _map_points(intrinsic, to_index)
+    return out
 
 
 def _checked_table_centroids(item: LoaderItem, xy: np.ndarray, present: np.ndarray) -> tuple[np.ndarray | None, str]:
