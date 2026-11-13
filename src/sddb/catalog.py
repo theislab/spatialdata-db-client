@@ -233,7 +233,7 @@ class Catalog:
         if ver is not None and ver > schema.SUPPORTED_CATALOG_SCHEMA:
             raise ValueError(
                 f"catalog at {url} declares schema version {ver}, but this sddb client supports up to "
-                f"{schema.SUPPORTED_CATALOG_SCHEMA}. Upgrade with `pip install -U spatialdata-db-client`."
+                f"{schema.SUPPORTED_CATALOG_SCHEMA}. Upgrade with `pip install -U --pre spatialdata-db`."
             )
         self._sha256 = _file_sha256(self._path)  # recorded in every cohort's Source, checked by verify()
         # The dated release behind this file: catalog-latest is an alias of the newest one, whose date is the
@@ -291,7 +291,7 @@ class Catalog:
             if major > schema.SUPPORTED_CATALOG_SCHEMA:
                 raise ValueError(
                     f"technology.json at {url} has schema version {vocab['schema_version']}, but this sddb client "
-                    f"supports up to {schema.SUPPORTED_CATALOG_SCHEMA}. Upgrade with `pip install -U spatialdata-db-client`."
+                    f"supports up to {schema.SUPPORTED_CATALOG_SCHEMA}. Upgrade with `pip install -U --pre spatialdata-db`."
                 )
             self._technologies = vocab
         return self._technologies
