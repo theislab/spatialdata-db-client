@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from dataclasses import dataclass, field
@@ -54,7 +55,7 @@ def validate_dataset(group: zarr.Group, *, sample: int = 2000, seed: int = 0) ->
 
     Returns
     -------
-    The issues found; an empty list means the dataset conforms.
+    The issues found; an empty list means the dataset conforms. Malformed input is reported as an issue, not raised.
     """
     return _validate_dataset(group, sample=sample, seed=seed).issues
 
@@ -62,15 +63,18 @@ def validate_dataset(group: zarr.Group, *, sample: int = 2000, seed: int = 0) ->
 def validate(path: str | Path, *, sample: int = 2000, seed: int = 0) -> list[str]:
     """Check a collection: every dataset (see :func:`validate_dataset`) plus the checks across datasets.
 
-    Across datasets, the collection has one image role, the same var index in every dataset, and grids of one kind
-    (``target`` or ``native``) unless every dataset sets ``allow_mixed_grids``.
+    Across datasets, the collection has one image role, the same var index in every dataset, one ``mpp_target`` on
+    the target grid, and grids of one kind (``target`` or ``native``) unless every dataset sets ``allow_mixed_grids``.
 
     Returns
     -------
     The issues found, each prefixed by its dataset (``dataset_<i>:``) or by ``collection:``; an empty list means the
     collection conforms.
     """
-    root = zarr.open_group(Path(path), mode="r")
+    try:
+        root = zarr.open_group(Path(path), mode="r")
+    except (FileNotFoundError, KeyError, TypeError, ValueError) as e:
+        return [f"collection: cannot open {path} as a zarr group: {e!r}"]
     keys = sorted((k for k in root.group_keys() if _DATASET.match(k)), key=lambda k: int(k.split("_")[1]))
     if not keys:
         return [f"collection: {path} has no dataset_<i> group"]
@@ -83,6 +87,14 @@ def validate(path: str | Path, *, sample: int = 2000, seed: int = 0) -> list[str
     contracts = {k: r.contract for k, r in results.items() if r.contract is not None}
     if len(roles := {c.role for c in contracts.values()}) > 1:
         issues.append(f"collection: one image role per collection, got {sorted(roles)}")
+    targets = {k: c.mpp_target for k, c in contracts.items() if c.grid == "target"}
+    if len(targets) > 1:
+        first_key, first_mpp = next(iter(targets.items()))
+        if differ := [k for k, mpp in targets.items() if not _same(mpp, first_mpp)]:
+            issues.append(
+                f"collection: every target-grid dataset has one mpp_target, {first_key} has {first_mpp} but "
+                f"{', '.join(f'{k} has {targets[k]}' for k in differ)}"
+            )
     if len({c.grid for c in contracts.values()}) > 1:
         unflagged = [k for k, c in contracts.items() if not c.allow_mixed_grids]
         if unflagged:
@@ -107,14 +119,23 @@ def assert_valid(path: str | Path, *, sample: int = 2000, seed: int = 0) -> None
 
 def _validate_dataset(group: Any, *, sample: int, seed: int) -> _Result:
     out = _Result()
+    # Malformed input is an issue, never an exception; the checks of this dataset stop at the first such error.
+    try:
+        _check_dataset(group, out, sample=sample, seed=seed)
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError, IndexError, AttributeError, OverflowError) as e:
+        out.issues.append(f"not an annbatch table or contract unreadable: {e!r}")
+    return out
+
+
+def _check_dataset(group: Any, out: _Result, *, sample: int, seed: int) -> None:
     try:
         contract = DatasetContract.from_uns(_read(group["uns"]["sddb_contract"]))
     except KeyError:
         out.issues.append("the table has no uns['sddb_contract']")
-        return out
+        return
     except ValidationError as e:
         out.issues += [_pydantic_issue("uns['sddb_contract']", err) for err in e.errors()]
-        return out
+        return
     out.contract = contract
     out.issues += _check_contract(contract)
     try:
@@ -132,6 +153,9 @@ def _validate_dataset(group: Any, *, sample: int, seed: int) -> _Result:
     n_obs = len(_read(group["obs"][group["obs"].attrs["_index"]]))
     issues, label_id = _check_obs(group, contract)
     out.issues += issues
+    if label_id is not None and cells is not None:
+        issues, label_id = _check_label_dtype(label_id, cells.dtype)
+        out.issues += issues
     issues, centres = _check_centres(group, n_obs, None if image is None else image.shape[-2:])
     out.issues += issues
 
@@ -142,7 +166,6 @@ def _validate_dataset(group: Any, *, sample: int, seed: int) -> _Result:
     out.issues += _check_counts(group, rows)
     issues, out.var = _check_var(group)
     out.issues += issues
-    return out
 
 
 def _read(node: Any) -> Any:
@@ -165,6 +188,7 @@ def _check_contract(contract: DatasetContract) -> list[str]:
     if contract.grid == "native" and contract.upsampled:
         issues.append("upsampled is set on a native grid, which is not resampled")
     if contract.grid == "target" and contract.mpp_native is not None and contract.mpp_target is not None:
+        # Both are set on a target grid (the model requires them); the test only narrows the types.
         factor = contract.mpp_native / contract.mpp_target
         if factor > 1 and not contract.upsampled:
             issues.append(
@@ -198,7 +222,7 @@ def _check_spatial(contract: DatasetContract, entry: SpatialEntry) -> list[str]:
         expected: float | None = 1.0
     elif contract.mpp_native is not None and contract.mpp_target is not None:
         expected = contract.mpp_native / contract.mpp_target
-    else:
+    else:  # pragma: no cover - the model requires both mpps on a target grid
         expected = None
     if expected is not None and not _same(scale.native_to_written, expected):
         issues.append(f"{where}: scalefactors.native_to_written is {scale.native_to_written}, expected {expected:g}")
@@ -266,7 +290,8 @@ def _check_elements(group: Any, contract: DatasetContract) -> tuple[list[str], A
             cells = array
 
     # The arrays are the written grid: any transform or multiscales attr would place them elsewhere.
-    for path in ("images", "labels", *(f"images/{n}" for n in names), *(f"labels/{n}" for n in present)):
+    paths = [kind for kind, node in (("images", images), ("labels", labels)) if isinstance(node, zarr.Group)]
+    for path in (*paths, *(f"images/{n}" for n in names), *(f"labels/{n}" for n in present)):
         if found := sorted(_TRANSFORM_ATTRS & set(group[path].attrs.keys())):
             issues.append(f"{path} has {found} attrs; elements must be the identity onto the written grid")
     return issues, image, cells
@@ -286,7 +311,25 @@ def _check_obs(group: Any, contract: DatasetContract) -> tuple[list[str], np.nda
     if not np.issubdtype(label_id.dtype, np.integer):
         issues.append(f"obs['label_id'] has dtype {label_id.dtype}, needs an integer dtype")
         return issues, None
+    # 0 is the background of labels/cells: a row with label_id 0 on background would pass R2.
+    if (label_id <= 0).any():
+        issues.append(
+            f"obs['label_id'] has {int((label_id <= 0).sum())} values <= 0, needs labels > 0 (0 is background)"
+        )
+        return issues, None
+    values, counts = np.unique(label_id, return_counts=True)
+    if (counts > 1).any():
+        issues.append(f"obs['label_id'] is not unique, e.g. {values[counts > 1][:5].tolist()} repeat")
+        return issues, None
     return issues, label_id
+
+
+def _check_label_dtype(label_id: np.ndarray, dtype: np.dtype[Any]) -> tuple[list[str], np.ndarray | None]:
+    """Every ``label_id`` is a value that ``labels/cells`` can hold; returns the ids if so."""
+    high = 1 if dtype == np.bool_ else np.iinfo(dtype).max
+    if (label_id > high).any():
+        return [f"obs['label_id'] has values up to {int(label_id.max())}, above the {dtype} max of labels/cells"], None
+    return [], label_id
 
 
 def _check_centres(group: Any, n_obs: int, grid: tuple[int, ...] | None) -> tuple[list[str], np.ndarray | None]:
@@ -355,13 +398,11 @@ def _absent(cells: zarr.Array[Any], ids: np.ndarray, ys: np.ndarray, xs: np.ndar
 
 
 def _check_counts(group: Any, rows: np.ndarray) -> list[str]:
-    """X holds integer counts: an integer dtype, or a float dtype whose sampled values are finite and integral."""
+    """X holds counts: an integer or float dtype whose sampled values are non-negative and, if float, integral."""
     X = group["X"]
     sparse = isinstance(X, zarr.Group)
     dtype = X["data"].dtype if sparse else X.dtype
-    if np.issubdtype(dtype, np.integer):
-        return []
-    if not np.issubdtype(dtype, np.floating):
+    if not (np.issubdtype(dtype, np.integer) or np.issubdtype(dtype, np.floating)):
         return [f"X has dtype {dtype}, needs integer counts"]
     if not len(rows):
         return []
@@ -370,9 +411,12 @@ def _check_counts(group: Any, rows: np.ndarray) -> list[str]:
         values = csr.data
     else:
         values = np.asarray(X.get_orthogonal_selection((rows, slice(None))))
-    if not (np.isfinite(values).all() and (values == np.round(values)).all()):
-        return [f"X has dtype {dtype} with non-integral values in the sampled rows, needs integer counts"]
-    return []
+    issues = []
+    if np.issubdtype(dtype, np.floating) and not (np.isfinite(values).all() and (values == np.round(values)).all()):
+        issues.append(f"X has dtype {dtype} with non-integral values in the sampled rows, needs integer counts")
+    if (values < 0).any():
+        issues.append(f"X has {int((values < 0).sum())} negative values in the sampled rows, needs counts >= 0")
+    return issues
 
 
 def _check_var(group: Any) -> tuple[list[str], pd.Index | None]:

@@ -41,17 +41,101 @@ def test_wrong_dtype_for_role(tmp_path):
 
 def test_labels_shape_mismatch(tmp_path):
     issues = _issues(tmp_path, overrides={1: {"labels_shape": (100, 140)}})
-    assert any(i.startswith("dataset_1:") and "labels/cells" in i and "(100, 140)" in i for i in issues)
+    assert len(issues) == 1
+    assert issues[0].startswith("dataset_1:")
+    assert "labels/cells" in issues[0]
+    assert "(100, 140)" in issues[0]
 
 
 def test_centroid_outside_image(tmp_path):
     issues = _issues(tmp_path, overrides={0: {"move_centroid": (140.0, 10.0)}})
-    assert any("obsm['spatial']" in i and "outside" in i for i in issues)
+    assert len(issues) == 1
+    assert "obsm['spatial']" in issues[0]
+    assert "outside" in issues[0]
 
 
 def test_missing_label_instance(tmp_path):
-    issues = _issues(tmp_path, overrides={0: {"erase_cells": 1}})
-    assert any("no pixel" in i and "label_id" in i for i in issues)
+    # 1 erased cell in 200 is within the 99% centroid tolerance, so only the hard check fails.
+    issues = _issues(tmp_path, height=200, width=280, n_cells=200, overrides={0: {"erase_cells": 1}})
+    assert len(issues) == 1
+    assert "no pixel" in issues[0]
+    assert "label_id [200]" in issues[0]
+
+
+@pytest.mark.parametrize(
+    ("label_ids", "match"),
+    [
+        ([0] * 60, "<= 0"),
+        ([1, *range(1, 60)], "not unique"),
+        ([-1, *range(2, 61)], "<= 0"),
+        ([2**40, *range(2, 61)], "max of labels/cells"),
+    ],
+    ids=["all-zero", "duplicate", "negative", "overflow"],
+)
+def test_bad_label_ids(tmp_path, label_ids, match):
+    issues = _issues(tmp_path, n_datasets=1, label_ids=label_ids)
+    assert len(issues) == 1
+    assert "label_id" in issues[0]
+    assert match in issues[0]
+
+
+def test_missing_images_group_is_an_issue(tmp_path):
+    path = write_collection(tmp_path / "c.zarr", n_datasets=1)
+    del zarr.open_group(path)["dataset_0"]["images"]
+    issues = validate(path)
+    assert any("images must be exactly ['he']" in i for i in issues)
+    del zarr.open_group(path)["dataset_0"]["labels"]
+    assert any("no labels/cells" in i for i in validate(path))
+
+
+def test_plain_group_is_an_issue(tmp_path):
+    root = zarr.open_group(tmp_path / "c.zarr", mode="w", zarr_format=3)
+    root.create_group("dataset_0")
+    assert validate(tmp_path / "c.zarr") == ["dataset_0: the table has no uns['sddb_contract']"]
+    assert validate(tmp_path / "missing.zarr")[0].startswith("collection: cannot open")
+
+
+def test_table_without_obs_is_an_issue(tmp_path):
+    path = write_collection(tmp_path / "c.zarr", n_datasets=1)
+    del zarr.open_group(path)["dataset_0"]["obs"]
+    issues = validate(path)
+    assert len(issues) == 1
+    assert issues[0].startswith("dataset_0: not an annbatch table or contract unreadable: KeyError")
+
+
+def test_malformed_adapter_json_is_an_issue(tmp_path):
+    path = write_collection(tmp_path / "c.zarr", n_datasets=1, contract={"adapters": ["{not json"]})
+    issues = validate(path)
+    assert len(issues) == 1
+    assert "not an annbatch table or contract unreadable: JSONDecodeError" in issues[0]
+
+
+def test_negative_counts(tmp_path):
+    issues = _issues(tmp_path, overrides={0: {"negative_counts": True}}, n_cells=60)
+    assert len(issues) == 1
+    assert "negative" in issues[0]
+
+
+def test_target_mpp_differs_across_datasets(tmp_path):
+    finer = {"contract": {"mpp_target": 0.25, "mpp_native": 0.2}}
+    issues = _issues(tmp_path, overrides={1: finer})
+    assert len(issues) == 1
+    assert issues[0].startswith("collection:")
+    assert "mpp_target" in issues[0]
+
+
+def test_stain_reference_roundtrips_through_zarr(tmp_path):
+    from anndata.io import read_elem
+
+    reference = {
+        "stain_matrix": [[0.65, 0.70, 0.29], [0.07, 0.99, 0.11], [0.27, 0.57, 0.78]],
+        "white_point": [240.0, 238.0, 241.0],
+        "max_concentrations": [1.9, 1.0, 0.5],
+    }
+    path = write_collection(tmp_path / "c.zarr", n_datasets=1, stain_reference=reference)
+    assert validate(path) == []
+    uns = read_elem(zarr.open_group(path, mode="r")["dataset_0/uns/sddb_contract"])
+    assert DatasetContract.from_uns(uns).stain_reference == reference
 
 
 def test_concave_centroid_lies_outside_its_mask():
@@ -148,6 +232,7 @@ def test_missing_label_id_column(tmp_path):
     ("change", "match"),
     [
         ({"grid": "target", "mpp_target": None}, "mpp_target"),
+        ({"grid": "target", "mpp_native": None}, "mpp_native"),
         ({"upsampled": True}, "allow_upsample"),
         ({"role": "if", "channels": None}, "channels"),
     ],

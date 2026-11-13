@@ -36,7 +36,8 @@ class DatasetContract(BaseModel):
     grid
         ``"target"`` if the image was resampled to `mpp_target`, ``"native"`` if it keeps its own grid (mpp unknown).
     mpp_target, mpp_native
-        Microns per pixel of the target grid and of the source image, ``None`` if unknown.
+        Microns per pixel of the target grid and of the source image, ``None`` if unknown. The target grid needs
+        both, so that upsampling can be checked.
     upsampled, allow_upsample
         Whether the target grid is finer than the native one, and whether the user allowed that.
     allow_mixed_grids
@@ -73,6 +74,8 @@ class DatasetContract(BaseModel):
     def _consistent(self) -> Self:
         if self.grid == "target" and self.mpp_target is None:
             raise ValueError("grid 'target' requires mpp_target")
+        if self.grid == "target" and self.mpp_native is None:
+            raise ValueError("grid 'target' requires mpp_native; a dataset whose mpp is unknown keeps its native grid")
         if self.upsampled and not self.allow_upsample:
             raise ValueError("upsampled requires allow_upsample")
         if self.role == "if" and not self.channels:

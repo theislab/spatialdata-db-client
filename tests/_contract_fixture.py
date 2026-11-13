@@ -90,6 +90,9 @@ def write_dataset(
     erase_cells: int = 0,
     move_centroid: tuple[float, float] | None = None,
     fractional_counts: bool = False,
+    negative_counts: bool = False,
+    label_ids: Sequence[int] | None = None,
+    stain_reference: Mapping[str, Any] | None = None,
     var_names: Sequence[str] | None = None,
     contract: Mapping[str, Any] = MappingProxyType({}),
     spatial: Mapping[str, Any] | None = None,
@@ -115,6 +118,12 @@ def write_dataset(
         Set the first row's ``obsm["spatial"]`` to this ``(x, y)``.
     fractional_counts
         Write float counts with a fractional part.
+    negative_counts
+        Make the first count negative.
+    label_ids
+        ``obs["label_id"]`` as is, instead of the cells' values ``1..n_cells``.
+    stain_reference
+        ``DatasetContract.stain_reference``, through the model (so it must be valid).
     var_names
         The var index, ``VAR_NAMES`` by default.
     contract
@@ -141,17 +150,25 @@ def write_dataset(
 
     names = list(VAR_NAMES if var_names is None else var_names)
     counts = rng.poisson(2.0, (n_cells, len(names))).astype(np.int32)
+    if negative_counts:
+        counts[0, 0] = -1
     X = sparse.csr_matrix(counts.astype(np.float32) + 0.5 if fractional_counts else counts)
     table = ad.AnnData(
         X=X,
         obs=pd.DataFrame(
-            {"uid": uid, "study_id": study_id, "label_id": ids.astype(np.int64)},
+            {
+                "uid": uid,
+                "study_id": study_id,
+                "label_id": np.asarray(ids if label_ids is None else label_ids, np.int64),
+            },
             index=[f"cell_{i}" for i in ids],
         ),
         var=pd.DataFrame(index=names),
     )
     table.obsm["spatial"] = centres
     fields = base_contract(role, uid=uid, study_id=study_id)
+    if stain_reference is not None:
+        fields["stain_reference"] = dict(stain_reference)
     uns = DatasetContract.model_validate(fields).to_uns()
     uns.update(contract)
     table.uns["sddb_contract"] = uns
@@ -173,9 +190,7 @@ def write_dataset(
         label_arrays["tissue"] = (labels > 0).astype(np.uint8)
     from spatialbatch.io import write_collection_dataset
 
-    write_collection_dataset(
-        group, key=key, table=table, images={role: image}, labels=label_arrays, image_chunk=32, image_shard=64
-    )
+    write_collection_dataset(group, key=key, table=table, images={role: image}, labels=label_arrays)
     if labels_shape is not None:
         group[key]["labels"].create_array("cells", shape=labels_shape, dtype=np.uint32, fill_value=0, overwrite=True)
 
