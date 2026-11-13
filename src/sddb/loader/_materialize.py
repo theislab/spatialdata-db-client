@@ -24,7 +24,7 @@ import zarr
 from anndata.io import read_elem
 from zarr.errors import ZarrUserWarning
 
-from sddb.concat import _harmonize_var
+from sddb.concat import _ENSEMBL, _ENSEMBL_COLUMNS, _looks_ensembl
 from sddb.contract import (
     CONTRACT_VERSION,
     AdapterRecord,
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 _DATASET = re.compile(r"^dataset_\d+$")
 _GENE_EXPRESSION = "Gene Expression"
-_GENE_KEY_VERSION = "0.2.0"
+_GENE_KEY_VERSION = "0.3.0"
 _LOADER_EXTRA = "pip install 'spatialdata-db[loader]'"
 
 
@@ -89,12 +89,14 @@ def materialize(
     1. its table is put on the collection's var, the union of the members' features, sorted: the outer join of
        :meth:`~sddb.SpatialDataCohort.to_anndata` (``ad.concat(join="outer")`` in ``sddb/concat.py``). The
        ``"Gene Expression"`` features (``var["feature_types"]``; all of them without that column) are re-keyed to
-       Ensembl ids (``gene_key="ensembl"``), and the other features, e.g. control probes, keep their names; repeated
-       names are made unique. ``var["feature_types"]`` is carried from the first member that has the feature. A
+       their Ensembl id (``gene_key="ensembl"``), kept in ``var["gene_ids"]``. A Gene Expression feature without an
+       id keeps its name (``gene_ids`` null), as do the other features, e.g. control probes; repeated names, such as
+       two rows with one id, are made unique (``A``, ``A-1``). Features join by that name. ``var["feature_types"]``
+       and ``var["gene_ids"]`` are carried from the first member that has the feature. A
        feature a member did not measure is 0 in its ``X``, and ``var["present"]`` of its dataset is False there; the
        contract counts both (``n_features_present``, ``n_features_filled``). On a rerun the var of the datasets
-       already written is binding, and a member with a feature outside it raises. Only Gene Expression features
-       without an Ensembl id, and repeats of one id, are left out. All counts go into the ``GeneKey`` record, the
+       already written is binding, and a member with a feature outside it raises. No feature is left out. The
+       counts (features without an id, repeated ids, renamed, filled) go into the ``GeneKey`` record, the
        first of ``uns["sddb_contract"]["adapters"]`` (a step of this function, not an adapter: see
        :data:`~sddb.loader.MATERIALIZE_RECORDS`), and are logged;
     2. the adapters run in order. An adapter with a ``fit`` method and no ``reference`` (:class:`StainNormalize`) is
@@ -279,8 +281,8 @@ def _prepare(
         items[uid] = LoaderItem.from_sdata(
             sdata, uid=uid, study_id=str(m.study_id), role=role, roles=roles, mpp_native=mpps.get(uid)
         )
-    shared, types = _shared_features(items, root, written) if items else ([], [])
-    items = {uid: _rekey(item, shared, types) for uid, item in items.items()}
+    shared, types, gene_ids = _shared_features(items, root, written) if items else ([], [], [])
+    items = {uid: _rekey(item, shared, types, gene_ids) for uid, item in items.items()}
 
     plan = {
         "dest": str(dest),
@@ -291,6 +293,7 @@ def _prepare(
         "obs_columns": list(obs_columns),
         "genes": shared,
         "feature_types": types,
+        "gene_ids": gene_ids,
         "written": written,
         "todo": [str(m.uid) for m in todo],
         "fit": any(_needs_fit(a) for a in adapters),
@@ -560,22 +563,47 @@ def _release(cohort: Any) -> str:
 
 @dataclasses.dataclass(frozen=True)
 class _Features:
-    """A member's features on their way to the collection's var: which source columns, under which names."""
+    """A member's features on their way to the collection's var: every source column, under its new name."""
 
-    columns: np.ndarray  # positions in the source var
-    names: pd.Index  # the new names, unique
+    names: pd.Index  # the new names, unique, in source order
     types: np.ndarray  # var["feature_types"] of each
-    counts: dict[str, int]  # what was left out or renamed
+    gene_ids: np.ndarray  # the Ensembl id of each Gene Expression feature, None where it has none
+    counts: dict[str, int]  # information: nothing is left out
+
+
+def _ensembl_ids(var: pd.DataFrame, names: np.ndarray) -> np.ndarray:
+    """Each row's Ensembl id (version suffix stripped), ``None`` where it has none.
+
+    The source is the one ``to_anndata(gene_key="ensembl")`` takes (:func:`sddb.concat._harmonize_var`): the var
+    names if they look like Ensembl ids, else the first such column of :data:`sddb.concat._ENSEMBL_COLUMNS`.
+    """
+    candidates = [pd.Series(names, dtype="string")]
+    candidates += [pd.Series(var[c].to_numpy(), dtype="string") for c in _ENSEMBL_COLUMNS if c in var.columns]
+    key = next((c for c in candidates if _looks_ensembl(c)), None)
+    out = np.full(len(names), None, dtype=object)
+    if key is None:
+        return out
+    key = key.str.strip().str.replace(r"\.\d+$", "", regex=True)
+    usable = key.str.fullmatch(_ENSEMBL).fillna(False).astype(bool).to_numpy()
+    out[usable] = key[usable].astype(str).to_numpy()
+    return out
 
 
 def _features(item: LoaderItem) -> _Features:
-    """The item's features: Gene Expression keyed by Ensembl id, the others by their own (unique) name.
+    """Every feature of the item: Gene Expression by its Ensembl id where it has one, the others by their name.
+
+    A Gene Expression feature without an Ensembl id keeps its name. Repeated names, such as two rows with one id, are
+    made unique the way anndata does (``anndata.utils.make_index_unique``, ``anndata/utils.py:226``: the second ``A``
+    becomes ``A-1``, ``:265``). Nothing is left out; ``counts`` says how many rows had no id, repeated an id or were
+    renamed.
 
     Raises
     ------
     ValueError
-        If a feature that is not Gene Expression has no name.
+        If a feature keyed by its name has no name.
     """
+    from anndata.utils import make_index_unique
+
     var = item.table.var
     n = item.table.n_vars
     if "feature_types" in var.columns:
@@ -584,55 +612,58 @@ def _features(item: LoaderItem) -> _Features:
         types = np.full(n, _GENE_EXPRESSION, dtype=object)
     ge = types == _GENE_EXPRESSION
     names = np.asarray(item.table.var_names.astype(str), dtype=object)
-    if (blank := ~ge & (pd.Series(names).str.strip() == "").to_numpy()).any():
-        raise ValueError(f"{item.uid}: {int(blank.sum())} features that are not {_GENE_EXPRESSION} have no var name")
-    keep = ~ge
-    n_drop = n_dup = 0
-    if ge.any():
-        import anndata as ad
-
-        ge_var = var[ge].copy()
-        ge_var["_position"] = np.flatnonzero(ge)
-        keyed, n_drop, n_dup = _harmonize_var(ad.AnnData(var=ge_var), "ensembl", item.uid)
-        position = keyed.var["_position"].to_numpy()
-        keep[position] = True
-        names[position] = keyed.var_names.to_numpy()
-    columns = np.flatnonzero(keep)
-    index = pd.Index(names[columns].astype(str))
-    n_rep = int(index.duplicated().sum())
-    if n_rep:
-        from anndata.utils import make_index_unique
-
-        index = make_index_unique(index)
-    counts = {"source": n, "no_ensembl_id": n_drop, "duplicates": n_dup, "made_unique": n_rep}
-    return _Features(columns=columns, names=index, types=types[columns], counts=counts)
+    gene_ids = np.full(n, None, dtype=object)
+    gene_ids[ge] = _ensembl_ids(var[ge], names[ge])
+    has_id = pd.notna(gene_ids)
+    if (blank := ~has_id & (pd.Series(names).str.strip() == "").to_numpy()).any():
+        raise ValueError(f"{item.uid}: {int(blank.sum())} features without an Ensembl id have no var name")
+    keys = np.where(has_id, gene_ids, names).astype(str)
+    index = pd.Index(keys)
+    counts = {
+        "source": n,
+        "no_ensembl_id": int((ge & ~has_id).sum()),
+        "duplicates": int(pd.Series(gene_ids[has_id]).duplicated().sum()),
+        "made_unique": int(index.duplicated().sum()),
+    }
+    return _Features(names=make_index_unique(index), types=types, gene_ids=gene_ids, counts=counts)
 
 
-def _shared_features(items: Mapping[str, LoaderItem], root: Any, written: list[str]) -> tuple[list[str], list[str]]:
-    """The collection's var and its feature types: the sorted union over the members, or the written datasets' var."""
+def _shared_features(
+    items: Mapping[str, LoaderItem], root: Any, written: list[str]
+) -> tuple[list[str], list[str], list[str | None]]:
+    """The collection's var, its feature types and Ensembl ids: the sorted union over the members, or the written var.
+
+    Features join by their name in the collection: the Ensembl id, else the source var name (``to_anndata`` joins
+    by var name, ``ad.concat(join="outer")`` in ``sddb/concat.py``). A repeated name joins by its suffix, so the
+    second row of an id in one member meets the second row of that id in another.
+    """
     if written:
         var = root[written[0]]["var"]
-        if "present" not in var.attrs.get("column-order", []):
-            raise ValueError(f"{written[0]} was written without var['present'] (an older materialize); use a new dest")
+        if "gene_ids" not in var.attrs.get("column-order", []):
+            raise ValueError(f"{written[0]} was written without var['gene_ids'] (an older materialize); use a new dest")
         names = [str(g) for g in np.asarray(read_elem(var[var.attrs["_index"]]))]
-        return names, [str(t) for t in np.asarray(read_elem(var["feature_types"]))]
-    types: dict[str, str] = {}
+        types = [str(t) for t in np.asarray(read_elem(var["feature_types"]))]
+        ids = [None if pd.isna(i) else str(i) for i in read_elem(var["gene_ids"])]
+        return names, types, ids
+    seen: dict[str, tuple[str, str | None]] = {}
     for uid, item in items.items():
         features = _features(item)
-        for name, kind in zip(features.names, features.types, strict=True):
-            if types.setdefault(name, kind) != kind:
-                logger.warning(f"{uid}: {name} is {kind!r}, an earlier member has it as {types[name]!r}, which is kept")
-    if not types:
+        for name, kind, gid in zip(features.names, features.types, features.gene_ids, strict=True):
+            if seen.setdefault(name, (kind, gid))[0] != kind:
+                logger.warning(
+                    f"{uid}: {name} is {kind!r}, an earlier member has it as {seen[name][0]!r}, which is kept"
+                )
+    if not seen:
         raise ValueError("the members have no feature")
-    names = sorted(types)
-    return names, [types[name] for name in names]
+    names = sorted(seen)
+    return names, [seen[k][0] for k in names], [seen[k][1] for k in names]
 
 
-def _rekey(item: LoaderItem, shared: Sequence[str], types: Sequence[str]) -> LoaderItem:
+def _rekey(item: LoaderItem, shared: Sequence[str], types: Sequence[str], gene_ids: Sequence[str | None]) -> LoaderItem:
     """Put the item's table on the collection's var `shared`, 0 where it lacks a feature, and record the counts.
 
-    Each kept source column is moved to its column of `shared` by one product with a 0/1 matrix, so ``X`` stays
-    sparse, keeps its dtype, and stays lazy if it is a dask array.
+    Each source column is moved to its column of `shared` by one product with a 0/1 matrix, so ``X`` stays sparse,
+    keeps its dtype, and stays lazy if it is a dask array.
 
     Raises
     ------
@@ -646,11 +677,9 @@ def _rekey(item: LoaderItem, shared: Sequence[str], types: Sequence[str]) -> Loa
     counts = features.counts
     if counts["no_ensembl_id"] or counts["duplicates"]:
         logger.warning(
-            f"{uid}: left out {counts['no_ensembl_id']} {_GENE_EXPRESSION} features without an Ensembl id and "
-            f"{counts['duplicates']} repeats of one id"
+            f"{uid}: kept {counts['no_ensembl_id']} {_GENE_EXPRESSION} features without an Ensembl id (by name) and "
+            f"{counts['duplicates']} repeats of an id (made unique)"
         )
-    if counts["made_unique"]:
-        logger.warning(f"{uid}: made {counts['made_unique']} repeated feature names unique")
     target = pd.Index(shared).get_indexer(features.names)
     if (outside := target < 0).any():
         raise ValueError(
@@ -662,8 +691,11 @@ def _rekey(item: LoaderItem, shared: Sequence[str], types: Sequence[str]) -> Loa
     n_filled = int((~present).sum())
     if n_filled:
         logger.warning(f"{uid}: {n_filled} of {len(shared)} features of the collection are not measured, set to 0")
-    var = pd.DataFrame({"feature_types": list(types), "present": present}, index=pd.Index(shared))
-    X = _move_columns(table.X, features.columns, target, len(shared))
+    var = pd.DataFrame(
+        {"feature_types": list(types), "gene_ids": pd.array(list(gene_ids), dtype="string"), "present": present},
+        index=pd.Index(shared),
+    )
+    X = _move_columns(table.X, np.arange(table.n_vars), target, len(shared))
     params = {"gene_key": "ensembl", "join": "outer", **counts, "present": int(present.sum()), "filled": n_filled}
     record = AdapterRecord(name=_GENE_KEY, version=_GENE_KEY_VERSION, params=params)
     rekeyed = ad.AnnData(X=X, obs=table.obs, var=var, obsm=dict(table.obsm))

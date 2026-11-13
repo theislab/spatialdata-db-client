@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 
@@ -360,3 +361,38 @@ def test_encoding_before_crop_at_read_is_refused(tmp_path):
     assert len(issues) == 1
     assert "encoding-version" in issues[0]
     assert "0.2.0" in issues[0]
+
+
+def test_ensembl_ids_checked_only_where_a_gene_has_one(tmp_path):
+    ids = [*VAR_NAMES[:-2], None, VAR_NAMES[0]]  # one Gene Expression row without an id, one repeated id
+    names = [*VAR_NAMES[:-2], "NOID", f"{VAR_NAMES[0]}-1"]
+    knobs = {"var_names": names, "var_columns": {"feature_types": ["Gene Expression"] * N_VARS, "gene_ids": ids}}
+    assert _issues(tmp_path / "a", n_datasets=1, **knobs) == []
+    bad = {**knobs, "var_columns": {**knobs["var_columns"], "gene_ids": [*ids[:-1], "X123"]}}
+    issues = _issues(tmp_path / "b", n_datasets=1, **bad)
+    assert len(issues) == 1
+    assert "var['gene_ids'] has 1 Gene Expression names not matching ^ENS" in issues[0]
+
+
+def test_gene_key_counts_must_match_the_var(tmp_path):
+    ids = [*VAR_NAMES[:-2], None, VAR_NAMES[0]]
+    names = [*VAR_NAMES[:-2], "NOID", f"{VAR_NAMES[0]}-1"]
+    columns = {"feature_types": ["Gene Expression"] * N_VARS, "gene_ids": ids, "present": [True] * N_VARS}
+
+    def record(**params):
+        rec = {"name": "GeneKey", "version": "0.3.0", "params": {"source": N_VARS, **params}}
+        return {"adapters": [json.dumps(rec, sort_keys=True)], "n_features_present": N_VARS}
+
+    knobs = {"var_names": names, "var_columns": columns}
+    assert _issues(tmp_path / "a", n_datasets=1, **knobs, contract=record(no_ensembl_id=1, duplicates=1)) == []
+    issues = _issues(tmp_path / "b", n_datasets=1, **knobs, contract=record(no_ensembl_id=0, duplicates=2))
+    assert sorted(i.split(": ", 1)[1] for i in issues) == [
+        "the GeneKey record's duplicates is 2, var gives 1",
+        "the GeneKey record's no_ensembl_id is 0, var gives 1",
+    ]
+    rec = record(no_ensembl_id=1, duplicates=1)
+    rec["adapters"] = [rec["adapters"][0].replace(f'"source": {N_VARS}', f'"source": {N_VARS + 3}')]
+    issues = _issues(tmp_path / "c", n_datasets=1, **knobs, contract=rec)
+    assert issues == [
+        f"dataset_0: the GeneKey record's source is {N_VARS + 3}, var gives {N_VARS} (a source feature was dropped)"
+    ]

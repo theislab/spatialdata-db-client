@@ -454,10 +454,20 @@ def _check_var(group: Any, contract: DatasetContract, rows: np.ndarray) -> tuple
     ge = np.ones(len(index), bool)
     if "feature_types" in columns:
         ge = np.asarray(_read(var["feature_types"])).astype(str) == _GENE_EXPRESSION
-    bad = index[ge & ~index.str.match(r"^ENS")]
+    if "gene_ids" in columns:  # the Ensembl id where a feature has one, null where it has none
+        ids = pd.array(_read(var["gene_ids"]), dtype="string")
+        has_id = ~np.asarray(pd.isna(ids))
+        ids_str = np.asarray(ids.fillna(""), dtype=str)
+        bad = pd.Index(ids_str[ge & has_id])
+        bad = bad[~bad.str.match(r"^ENS")]
+        where = "var['gene_ids'] has"
+    else:
+        has_id, ids_str = ge, index.to_numpy(dtype=str)
+        bad = index[ge & ~index.str.match(r"^ENS")]
+        where = "var index has"
     if len(bad):
         issues.append(
-            f"var index has {len(bad)} {_GENE_EXPRESSION} names not matching ^ENS (Ensembl ids), e.g. {list(bad[:3])}"
+            f"{where} {len(bad)} {_GENE_EXPRESSION} names not matching ^ENS (Ensembl ids), e.g. {list(bad[:3])}"
         )
     if "present" not in columns:
         if contract.n_features_filled or contract.n_features_present not in (0, len(index)):
@@ -473,6 +483,8 @@ def _check_var(group: Any, contract: DatasetContract, rows: np.ndarray) -> tuple
     for name, n in counts.items():
         if getattr(contract, name) != n:
             issues.append(f"the contract's {name} is {getattr(contract, name)}, var['present'] gives {n}")
+    if "gene_ids" in columns:
+        issues += _check_gene_key(contract, present, ge & ~has_id, np.where(has_id, ids_str, None))
     if (~present).any() and len(rows):
         X = group["X"]
         sub: Any = (
@@ -484,6 +496,25 @@ def _check_var(group: Any, contract: DatasetContract, rows: np.ndarray) -> tuple
                 f"X has {n_nonzero} values != 0 in the sampled rows for features var['present'] says are filled"
             )
     return issues, index
+
+
+def _check_gene_key(contract: DatasetContract, present: np.ndarray, no_id: np.ndarray, ids: np.ndarray) -> list[str]:
+    """No source feature was dropped, and the ``GeneKey`` counts match the features this dataset measured."""
+    records = [a for a in contract.adapters if a.name == "GeneKey"]
+    if not records:
+        return []
+    params = records[0].params
+    found = {
+        "source": int(present.sum()),
+        "no_ensembl_id": int((no_id & present).sum()),
+        "duplicates": int(pd.Series(ids[present & pd.notna(ids)]).duplicated().sum()),
+    }
+    return [
+        f"the GeneKey record's {k} is {params[k]}, var gives {n}"
+        + (" (a source feature was dropped)" if k == "source" else "")
+        for k, n in found.items()
+        if k in params and params[k] != n
+    ]
 
 
 def _index_diff(var: pd.Index, ref: pd.Index) -> str:

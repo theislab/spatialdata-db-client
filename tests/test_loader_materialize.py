@@ -58,8 +58,11 @@ class FakeCohort(list):
     _source = SimpleNamespace(release="2026-11-01")
 
 
-def write_member(tmp_path, uid, *, seed, extra_gene=False, tiny=False, labels=False):
-    """A member store: H&E tissue disc, square cells, a table keyed by symbol with Ensembl ids and controls."""
+def write_member(tmp_path, uid, *, seed, extra_gene=False, tiny=False, labels=False, dup_id=False):
+    """A member store: H&E tissue disc, square cells, a table keyed by symbol with Ensembl ids and controls.
+
+    `dup_id` adds a Gene Expression row ``GENE1B`` with GENE1's Ensembl id.
+    """
     img = he_image(SIZE, SIZE, seed=seed, disk=(SIZE / 2, SIZE / 2, SIZE * 0.4))
     xy = [(x, y) for x in range(20, 80, 12) for y in range(20, 80, 12)]
     shapes = squares(xy, 6)
@@ -75,6 +78,8 @@ def write_member(tmp_path, uid, *, seed, extra_gene=False, tiny=False, labels=Fa
     else:
         sdata = make_sdata(img, shapes=shapes, image_chunks=32)
     genes = dict(GENES) if extra_gene else {k: v for k, v in GENES.items() if k != "GENE5"}
+    if dup_id:
+        genes["GENE1B"] = GENES["GENE1"]
     var = pd.DataFrame(
         {
             "gene_ids": [*genes.values(), "", "NegCtrl_1", "NegCtrl_2"],
@@ -132,8 +137,8 @@ def test_materialize_synthetic_cohort_validates(cohort, tmp_path, caplog):
     root = zarr.open_group(dest, mode="r")
     assert sorted(k for k in root.group_keys() if k.startswith("dataset_")) == ["dataset_0", "dataset_1"]
 
-    # the union, sorted: GENE5 only in uidB; NOENSEMBL (Gene Expression without an Ensembl id) is left out
-    union = [GENES[f"GENE{i}"] for i in range(1, 6)] + ["NegCtrl_1", "NegCtrl_2"]
+    # the union, sorted: GENE5 only in uidB; NOENSEMBL (Gene Expression without an Ensembl id) kept by its name
+    union = [GENES[f"GENE{i}"] for i in range(1, 6)] + ["NOENSEMBL", "NegCtrl_1", "NegCtrl_2"]
     references = []
     for key, uid in (("dataset_0", "uidA"), ("dataset_1", "uidB")):
         contract = _contract(dest, key)
@@ -153,13 +158,14 @@ def test_materialize_synthetic_cohort_validates(cohort, tmp_path, caplog):
         assert genes["join"] == "outer"
         assert genes["no_ensembl_id"] == 1
         assert genes["filled"] == (1 if uid == "uidA" else 0)
-        assert (contract.n_features_present, contract.n_features_filled) == ((6, 1) if uid == "uidA" else (7, 0))
+        assert (contract.n_features_present, contract.n_features_filled) == ((7, 1) if uid == "uidA" else (8, 0))
         references.append(contract.stain_reference)
 
         table = _table(dest, key)
         assert list(table.var_names) == union
-        assert table.var["feature_types"].tolist() == ["Gene Expression"] * 5 + ["Negative Control Probe"] * 2
-        assert table.var["present"].tolist() == [True] * 4 + [uid == "uidB"] + [True] * 2
+        assert table.var["feature_types"].tolist() == ["Gene Expression"] * 6 + ["Negative Control Probe"] * 2
+        assert table.var["present"].tolist() == [True] * 4 + [uid == "uidB"] + [True] * 3
+        assert table.var["gene_ids"].isna().tolist() == [False] * 5 + [True] * 3
         assert set(table.obs["uid"]) == {uid}
         assert set(table.obs["tissue"]) == {"breast"}
         _, _, counts, var = sources[uid]
@@ -167,7 +173,7 @@ def test_materialize_synthetic_cohort_validates(cohort, tmp_path, caplog):
         source_rows = table.obs["label_id"].to_numpy() - 1
         expected = np.zeros((len(source_rows), len(union)), counts.dtype)
         for j, name in enumerate(union):
-            if len(hit := np.flatnonzero(var["gene_ids"].to_numpy() == name)):
+            if len(hit := np.flatnonzero((var["gene_ids"].to_numpy() == name) | (var.index == name))):
                 expected[:, j] = counts[source_rows, hit[0]]
         np.testing.assert_array_equal(
             np.asarray(table.X.todense() if hasattr(table.X, "todense") else table.X), expected
@@ -176,7 +182,7 @@ def test_materialize_synthetic_cohort_validates(cohort, tmp_path, caplog):
         assert json.loads((state / "done" / uid).read_text())["key"] == key
     assert references[0] is not None
     assert references[0] == references[1]  # one pooled reference for the cohort
-    assert "uidA: 1 of 7 features of the collection are not measured, set to 0" in caplog.text
+    assert "uidA: 1 of 8 features of the collection are not measured, set to 0" in caplog.text
     assert not (state / "scratch").exists()
     assert sorted(p.name for p in dest.iterdir() if not p.name.startswith("zarr.json")) == ["dataset_0", "dataset_1"]
 
@@ -515,3 +521,26 @@ def test_write_without_spatialbatch_names_the_loader_extra(monkeypatch):
     monkeypatch.setitem(sys.modules, "spatialbatch", None)
     with pytest.raises(ImportError, match=r"loader.*spatialdata-db\[loader\]"):
         _materialize.write_collection_dataset()
+
+
+def test_every_gene_expression_row_is_kept(tmp_path):
+    """A row without an Ensembl id and a repeated id are kept, in one member and in the union of two."""
+    a = write_member(tmp_path, "uidA", seed=0, dup_id=True)
+    b = write_member(tmp_path, "uidB", seed=1, dup_id=True, extra_gene=True)
+    cohort = FakeCohort([FakeMember("uidA", a[0]), FakeMember("uidB", b[0])])
+    dest = materialize(cohort, tmp_path / "c.zarr", adapters=[Rasterize(None), Centroids()], role="he", roles=ROLES)
+    assert validate(dest) == []
+    one = GENES["GENE1"]
+    union = [one, f"{one}-1", *(GENES[f"GENE{i}"] for i in range(2, 6)), "NOENSEMBL", "NegCtrl_1", "NegCtrl_2"]
+    for key, (_, _, counts, var) in zip(("dataset_0", "dataset_1"), (a, b), strict=True):
+        table = _table(dest, key)
+        assert list(table.var_names) == union
+        assert table.var["gene_ids"].tolist()[:2] == [one, one]
+        assert pd.isna(table.var.loc["NOENSEMBL", "gene_ids"])
+        params = _contract(dest, key).adapters[0].params
+        assert (params["no_ensembl_id"], params["duplicates"], params["made_unique"]) == (1, 1, 1)
+        assert params["source"] == len(var) == int(table.var["present"].sum())  # no feature dropped
+        rows = table.obs["label_id"].to_numpy() - 1
+        dense = np.asarray(table.X.todense() if hasattr(table.X, "todense") else table.X)
+        for name, source in ((f"{one}-1", "GENE1B"), ("NOENSEMBL", "NOENSEMBL"), (one, "GENE1")):
+            np.testing.assert_array_equal(dense[:, union.index(name)], counts[rows, var.index.get_loc(source)])
