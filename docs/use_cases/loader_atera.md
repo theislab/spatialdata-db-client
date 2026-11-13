@@ -31,8 +31,8 @@ Each step is one Slurm job; the scripts are in `scripts/` of the client reposito
 python scripts/atera_loader_cohort.py store <bundle>/work <uid> <out>/stores
 
 # 2. the controller: opens the stores, writes the workflow and runs snakemake, which submits one job per rule
-python scripts/atera_loader_cohort.py materialize <out>/stores <out>/atera-he.zarr --workers 2 \
-    --slurm-json '{"runtime": 360, "mem_mb": 32000, "slurm_partition": "cpu_p", "qos": "cpu_normal",
+python scripts/atera_loader_cohort.py materialize <out>/stores <out>/atera-he.zarr --workers 1 \
+    --slurm-json '{"runtime": 360, "mem_mb": 56000, "slurm_partition": "cpu_p", "qos": "cpu_normal",
                    "fit_stain": {"mem_mb": 24000, "runtime": 720}}'
 
 # 3. checks: validate, cells in tissue, the change made by stain normalisation, a figure of the tissue masks
@@ -49,32 +49,45 @@ materialize(
     members, dest,
     adapters=[Rasterize(0.5), Centroids(), TissueMask(method="weka"), StainNormalize()],
     role="he", roles={"image": "^images/he_image$", "table": "^tables/table$"}, mpp_native=mpp,
-    runner="snakemake", executor="slurm", workers=2, slurm=slurm,
+    runner="snakemake", executor="slurm", workers=1, slurm=slurm,
 )
 ```
 
+These are the resources of the run that completed. A member job asks for 56,000 MB and one runs at a time
+(`workers=1`). The first run asked for 32,000 MB with two workers, and both member jobs (Slurm jobs 43220827 and
+43220828) were killed for running out of memory while they wrote the table. Two member jobs at 56,000 MB would ask
+for more than the 68 GB this run was allowed on the shared cluster, so the members ran one after another.
+`fit_stain` asked for 24,000 MB and used 6.8 GiB.
+
 The chain is {func}`~sddb.loader.default_chain` with squidpy's `weka` tissue detection instead of the default
 `otsu`. On the brain slide `otsu` keeps only the nuclei, because the tissue is nearly as pale as the glass, and its
-area filter then drops them all, so the stain fit fails with "no tissue pixels". `weka` finds the tissue on all
-four slides.
+area filter then drops them all, so the stain fit fails with "no tissue pixels". `weka` gives a non-empty mask on
+all four slides, but on the brain slide it also covers bands of glass (see the checks below).
 
 ## Slurm run
 
-The controller ran as a Slurm job of its own (4 GB), because it opens every store before it starts snakemake, and
+The controller ran as a Slurm job of its own (4 GiB requested, 2.05 GiB used), because it opens every store before it starts snakemake, and
 snakemake's Slurm executor submitted one job per rule from there. Each rule job has one CPU.
 
-| rule | jobs | wall time | peak memory |
+| rule | jobs | wall time | peak memory (sacct MaxRSS) |
 |---|---|---|---|
-| `fit_stain` (Rasterize, Centroids and TissueMask on all four slides, then the pooled stain fit) | 1 | 48 min | 6.8 GB |
-| `dataset_<uid>` (the whole chain on one slide, then the write) | 4 | 15 to 25 min | 9.5 to 40 GB |
-| `validate` | 1 | 2 min | 0.4 GB |
+| `fit_stain` (Rasterize, Centroids and TissueMask on all four slides, then the pooled stain fit) | 1 | 48 min | 6.8 GiB |
+| `dataset_<uid>` (the whole chain on one slide, then the write) | 4 | 15 to 26 min | 9.5 to 40.0 GiB |
+| `validate` | 1 | 2 min | 0.4 GiB |
 
 The member jobs need the most memory, and it grows with the number of nonzeros in the slide's table. The breast
-table has 1.48e9 nonzeros and its job peaked at 40 GB, so a member job asks for 56 GB. The first member jobs asked
-for 32 GB and were killed while they wrote the table. The run state lives beside the collection in
-`atera-he.zarr.sddb/`, and a rerun skips the slides that are done.
+table has 1.48e9 nonzeros and its job peaked at 40.0 GiB. The run state lives beside the collection in
+`atera-he.zarr.sddb/`. A rerun skips the slides that are done, and it keeps the fitted stain reference
+(`stain.json`) when the chain and the members are the same as in the run that fitted it.
 
-The collection is 13 GB on disk, with 1,423,292 cells and 18,049 genes keyed by Ensembl id.
+The collection is 13.2 GB on disk (13,231,857,664 bytes by `du -s --block-size=1 atera-he.zarr` on the cluster),
+with 1,423,292 cells and 18,049 genes keyed by Ensembl id.
+
+`Centroids` drops the rows of cells that have no pixel in the cell labels at 0.5 µm per pixel, so the collection
+has 21 fewer cells than the bundles: 3 colorectal, 5 breast, 3 brain and 10 kidney. The member job logs
+(`atera-he.zarr.sddb/logs/dataset_<uid>.log`) say, for example, "sddb_a722jfj3pq: dropped 5 of 485985 rows whose
+cell has no pixel in labels['cells'] (smaller than a pixel of the written grid, or outside the image)". The count
+is only in these logs, not in the collection's metadata.
 
 ## Checks
 
