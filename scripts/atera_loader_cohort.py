@@ -124,6 +124,8 @@ def check(dest: Path, out: Path, version: str) -> None:
             "n_features_present": contract.get("n_features_present"),
             "n_features_filled": contract.get("n_features_filled"),
             "n_centroid_fallback": contract.get("n_centroid_fallback"),
+            "n_outside_image": contract.get("n_outside_image"),
+            "outside_image_flags": int(np.asarray(read_elem(g["obs"]["outside_image"])).sum()),
             "in_tissue_share": float(in_tissue.mean()),
             "he": list(he.shape),
             "tissue_px_share": float(tissue.mean().compute()),
