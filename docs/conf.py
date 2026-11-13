@@ -80,9 +80,28 @@ nitpick_ignore = [
     # The docstrings of `count` and `index`, inherited from `collections.abc.Sequence`, read as return types.
     ("py:class", "integer -- return number of occurrences of value"),
     ("py:class", "integer -- return first index of value."),
+    ("py:class", "integer -- return first index of"),
+    # Internal names in the signatures of the loader API (sddb.loader, sddb.contract).
+    ("py:class", "sddb.loader._adapters._Adapter"),
+    ("py:class", "sddb.loader._item._Source"),
+    # xarray and zarr classes under their defining module path, as dataclass field types resolve them.
+    ("py:class", "xarray.core.dataarray.DataArray"),
+    ("py:class", "zarr.core.group.Group"),
+    # squidpy's stain reference, a type hint only; squidpy's experimental API is not in its intersphinx inventory.
+    ("py:class", "StainFit"),
+    # pydantic field constraints in the contract models' signatures.
+    ("py:class", "annotated_types.Ge"),
+    ("py:class", "annotated_types.Gt"),
+    ("py:class", "pydantic.types.Strict"),
+]
+nitpick_ignore_regex = [
+    # spatialbatch, the loader the collections are written for, publishes no API docs to link to.
+    (r"py:.*", r"spatialbatch(\..*)?"),
 ]
 
-html_logo = "_static/logo.svg"  # the sidebar fallback (og:image is ogp_image above); the sidebar shows the wordmarks below
+html_logo = (
+    "_static/logo.svg"  # the sidebar fallback (og:image is ogp_image above); the sidebar shows the wordmarks below
+)
 html_favicon = "_static/logo.svg"
 html_static_path = ["_static"]
 html_css_files = ["css/sddb.css"]

@@ -63,7 +63,7 @@ def validate_dataset(group: zarr.Group, *, sample: int = 2000, seed: int = 0) ->
 
 
 def validate(path: str | Path, *, sample: int = 2000, seed: int = 0) -> list[str]:
-    """Check a collection: every dataset (see :func:`validate_dataset`) plus the checks across datasets.
+    """Check a collection: every dataset (see :func:`~sddb.contract.validate_dataset`) plus the checks across datasets.
 
     Across datasets, the collection has one image role, the same var index in every dataset, one ``mpp_target`` on
     the target grid, and grids of one kind (``target`` or ``native``) unless every dataset sets ``allow_mixed_grids``.
@@ -114,7 +114,7 @@ def validate(path: str | Path, *, sample: int = 2000, seed: int = 0) -> list[str
 
 
 def assert_valid(path: str | Path, *, sample: int = 2000, seed: int = 0) -> None:
-    """Raise :class:`ContractError` if :func:`validate` finds issues."""
+    """Raise :class:`~sddb.contract.ContractError` if :func:`~sddb.contract.validate` finds issues."""
     if issues := validate(path, sample=sample, seed=seed):
         raise ContractError(issues)
 

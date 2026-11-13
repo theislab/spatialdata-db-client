@@ -414,8 +414,8 @@ class SpatialDataCohort(Sequence[Dataset]):
     ) -> Path:
         """Write the cohort as a loader collection for :mod:`spatialbatch` at ``dest`` and validate it.
 
-        Needs the ``loader`` extra. See ``sddb.loader.materialize`` for the steps and the parameters, and
-        ``sddb.contract`` for what the collection holds.
+        Needs the ``loader`` extra. See :func:`sddb.loader.materialize` for the steps and the parameters, and
+        :mod:`sddb.contract` for what the collection holds.
         """
         from sddb.loader import materialize
 

@@ -440,8 +440,8 @@ class Centroids(_Adapter):
       frames (microns for Atera, pixels for CODEX, DNB units for Stereo-seq in spatialdata-io), and spatialdata
       gives a table no transformation, so :class:`Rasterize` maps it as intrinsic coordinates of the element the
       table annotates (that element's transformation), and this step checks the mapping on up to
-      :data:`_TABLE_CHECK_ROWS` cells that have pixels: the median distance to their pixel centroid must be at most
-      :data:`_TABLE_CENTROID_PX`, else it raises, as ``obsm["spatial"]`` is then not in that element's frame.
+      ``_TABLE_CHECK_ROWS`` cells that have pixels: the median distance to their pixel centroid must be at most
+      ``_TABLE_CENTROID_PX``, else it raises, as ``obsm["spatial"]`` is then not in that element's frame.
 
     The count goes to ``item.n_centroid_fallback`` and into the contract as ``n_centroid_fallback``, and is logged.
 
@@ -587,7 +587,7 @@ def _checked_table_centroids(item: LoaderItem, xy: np.ndarray, present: np.ndarr
     Raises
     ------
     ValueError
-        If the median distance to the pixel centroids is above :data:`_TABLE_CENTROID_PX`: ``obsm["spatial"]`` is not
+        If the median distance to the pixel centroids is above ``_TABLE_CENTROID_PX``: ``obsm["spatial"]`` is not
         in the frame of the element the table annotates.
     """
     mapped, element = item.table_centroids, item.table_centroids_element
@@ -923,13 +923,13 @@ MATERIALIZE_RECORDS = (GENE_KEY,)
 
 
 def adapter_from_record(rec: AdapterRecord) -> _Adapter:
-    """Rebuild any loader adapter from its record (see :meth:`_Adapter.to_record`).
+    """Rebuild any loader adapter from its record (an adapter's ``to_record()``).
 
     Raises
     ------
     ValueError
         If no loader adapter has the record's name, also for the steps of materialize itself
-        (:data:`MATERIALIZE_RECORDS`), which a caller rebuilding a chain skips.
+        (``MATERIALIZE_RECORDS``), which a caller rebuilding a chain skips.
     """
     if rec.name in MATERIALIZE_RECORDS:
         raise ValueError(

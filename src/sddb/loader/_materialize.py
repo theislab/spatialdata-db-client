@@ -102,7 +102,7 @@ def materialize(
        already written is binding, and a member with a feature outside it raises. No feature is left out. The
        counts (features without an id, repeated ids, renamed, filled) go into the ``GeneKey`` record, the
        first of ``uns["sddb_contract"]["adapters"]`` (a step of this function, not an adapter: see
-       :data:`~sddb.loader.MATERIALIZE_RECORDS`), and are logged;
+       ``sddb.loader.MATERIALIZE_RECORDS``), and are logged;
     2. the adapters run in order. An adapter with a ``fit`` method and no ``reference`` (:class:`StainNormalize`) is
        fit once on all members at that point of the chain, or takes the reference of the members already written;
     3. after the step that makes ``labels["cells"]`` (:class:`Rasterize`), the labels are written once to
@@ -125,7 +125,7 @@ def materialize(
     (:func:`~sddb.loader.adapter_from_record`), so every adapter must be a loader adapter.
 
     Memory: a member with a local store (a :class:`~sddb.Dataset`) is opened with its tables' ``X`` as dask arrays
-    (:func:`_read_store`), as the snakemake jobs open it, so that the controller holds only obs and var of the members
+    (``_read_store``), as the snakemake jobs open it, so that the controller holds only obs and var of the members
     not yet written. ``X`` is computed once, by :func:`spatialbatch.write_collection_dataset` after it sorts the rows,
     so a member's write holds one ``X`` in memory. Images and labels stay lazy (dask) and are written block by block.
 
