@@ -91,7 +91,7 @@ def _open(config: Mapping[str, Any], uid: str) -> LoaderItem:
         roles=config["roles"],
         mpp_native=m["mpp_native"],
     )
-    return _rekey(item, config["genes"], config["feature_types"], config["gene_ids"])
+    return _rekey(item, config["genes"], config["var"])
 
 
 def _write_json(path: Path, content: Mapping[str, Any]) -> None:

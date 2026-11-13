@@ -97,8 +97,11 @@ fallback centroid outside the written grid [0, w) x [0, h), e.g. [x, y]". The ol
 of the 21 cells were outside the image, so whether a new run on these slides keeps all 21 or raises has not been
 checked.
 
-The run also kept only the 18,049 Gene Expression features of the 24,677 per slide. `materialize` now writes the
-union of the members' features, so a new run keeps all 24,677, with `var["feature_types"]` from the source.
+The run also kept only the 18,049 Gene Expression features. The source tables have 24,677 features for the
+colorectal, breast and brain slides and 24,674 for the kidney slide (`"table"` in `stores/<uid>.json` of this run).
+`materialize` now writes the union of the members' features and keeps every source feature, with
+`var["feature_types"]` from the source. This run predates that change, so the size of the union on these slides has
+not been measured.
 
 ## Checks
 

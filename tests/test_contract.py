@@ -11,7 +11,6 @@ import pytest
 
 # the loader extra
 pytest.importorskip("pydantic")
-pytest.importorskip("spatialbatch")
 import zarr
 from scipy import ndimage
 from tests._contract_fixture import N_VARS, VAR_NAMES, base_contract, draw_cells, write_collection
@@ -264,7 +263,8 @@ def test_import_sddb_does_not_import_pydantic_stack():
 
 
 def test_spatialbatch_loader_uses_validator(tmp_path):
-    from spatialbatch import Loader, SpatialDatasetCollection
+    spatialbatch = pytest.importorskip("spatialbatch")
+    Loader, SpatialDatasetCollection = spatialbatch.Loader, spatialbatch.SpatialDatasetCollection
 
     good = SpatialDatasetCollection(write_collection(tmp_path / "good.zarr", n_datasets=1))
     assert Loader(images=["he"], crop_px=16).use_collection(good).n_obs == 60

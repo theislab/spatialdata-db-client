@@ -537,8 +537,10 @@ def test_every_gene_expression_row_is_kept(tmp_path):
         assert list(table.var_names) == union
         assert table.var["gene_ids"].tolist()[:2] == [one, one]
         assert pd.isna(table.var.loc["NOENSEMBL", "gene_ids"])
+        assert table.var["original_var_name"].tolist()[:3] == ["GENE1", "GENE1B", "GENE2"]  # the symbols are kept
         params = _contract(dest, key).adapters[0].params
         assert (params["no_ensembl_id"], params["duplicates"], params["made_unique"]) == (1, 1, 1)
+        assert params["feature_types_from_source"] is True
         assert params["source"] == len(var) == int(table.var["present"].sum())  # no feature dropped
         rows = table.obs["label_id"].to_numpy() - 1
         dense = np.asarray(table.X.todense() if hasattr(table.X, "todense") else table.X)

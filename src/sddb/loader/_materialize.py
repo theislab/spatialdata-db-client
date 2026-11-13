@@ -46,6 +46,8 @@ logger = logging.getLogger(__name__)
 _DATASET = re.compile(r"^dataset_\d+$")
 _GENE_EXPRESSION = "Gene Expression"
 _GENE_KEY_VERSION = "0.3.0"
+#: The columns of the collection's var besides ``present``, carried from the first member that has the feature.
+_VAR_COLUMNS = ("feature_types", "gene_ids", "original_var_name")
 _LOADER_EXTRA = "pip install 'spatialdata-db[loader]'"
 
 
@@ -91,8 +93,10 @@ def materialize(
        ``"Gene Expression"`` features (``var["feature_types"]``; all of them without that column) are re-keyed to
        their Ensembl id (``gene_key="ensembl"``), kept in ``var["gene_ids"]``. A Gene Expression feature without an
        id keeps its name (``gene_ids`` null), as do the other features, e.g. control probes; repeated names, such as
-       two rows with one id, are made unique (``A``, ``A-1``). Features join by that name. ``var["feature_types"]``
-       and ``var["gene_ids"]`` are carried from the first member that has the feature. A
+       two rows with one id, are made unique (``A``, ``A-1``). Features join by that name. ``var["feature_types"]``,
+       ``var["gene_ids"]`` and ``var["original_var_name"]`` (the source name, e.g. the gene symbol) are carried from
+       the first member that has the feature. A source without ``var["feature_types"]`` has its features typed
+       ``"Gene Expression"``, spatialdata-io's rule, and the GeneKey record says so (``feature_types_from_source``). A
        feature a member did not measure is 0 in its ``X``, and ``var["present"]`` of its dataset is False there; the
        contract counts both (``n_features_present``, ``n_features_filled``). On a rerun the var of the datasets
        already written is binding, and a member with a feature outside it raises. No feature is left out. The
@@ -281,8 +285,8 @@ def _prepare(
         items[uid] = LoaderItem.from_sdata(
             sdata, uid=uid, study_id=str(m.study_id), role=role, roles=roles, mpp_native=mpps.get(uid)
         )
-    shared, types, gene_ids = _shared_features(items, root, written) if items else ([], [], [])
-    items = {uid: _rekey(item, shared, types, gene_ids) for uid, item in items.items()}
+    shared, columns = _shared_features(items, root, written) if items else ([], {c: [] for c in _VAR_COLUMNS})
+    items = {uid: _rekey(item, shared, columns) for uid, item in items.items()}
 
     plan = {
         "dest": str(dest),
@@ -292,8 +296,7 @@ def _prepare(
         "allow_mixed_grids": allow_mixed_grids,
         "obs_columns": list(obs_columns),
         "genes": shared,
-        "feature_types": types,
-        "gene_ids": gene_ids,
+        "var": columns,
         "written": written,
         "todo": [str(m.uid) for m in todo],
         "fit": any(_needs_fit(a) for a in adapters),
@@ -568,6 +571,7 @@ class _Features:
     names: pd.Index  # the new names, unique, in source order
     types: np.ndarray  # var["feature_types"] of each
     gene_ids: np.ndarray  # the Ensembl id of each Gene Expression feature, None where it has none
+    original: np.ndarray  # the source var name of each, e.g. the gene symbol
     counts: dict[str, int]  # information: nothing is left out
 
 
@@ -606,9 +610,10 @@ def _features(item: LoaderItem) -> _Features:
 
     var = item.table.var
     n = item.table.n_vars
-    if "feature_types" in var.columns:
+    typed = "feature_types" in var.columns
+    if typed:
         types = var["feature_types"].astype(str).to_numpy(dtype=object)
-    else:
+    else:  # spatialdata-io's rule for an untyped feature (readers/_utils/_features.py:37-39, visium.py:257-258)
         types = np.full(n, _GENE_EXPRESSION, dtype=object)
     ge = types == _GENE_EXPRESSION
     names = np.asarray(item.table.var_names.astype(str), dtype=object)
@@ -624,42 +629,44 @@ def _features(item: LoaderItem) -> _Features:
         "no_ensembl_id": int((ge & ~has_id).sum()),
         "duplicates": int(pd.Series(gene_ids[has_id]).duplicated().sum()),
         "made_unique": int(index.duplicated().sum()),
+        "feature_types_from_source": typed,
     }
-    return _Features(names=make_index_unique(index), types=types, gene_ids=gene_ids, counts=counts)
+    unique = make_index_unique(index)
+    return _Features(names=unique, types=types, gene_ids=gene_ids, original=names, counts=counts)
 
 
 def _shared_features(
     items: Mapping[str, LoaderItem], root: Any, written: list[str]
-) -> tuple[list[str], list[str], list[str | None]]:
-    """The collection's var, its feature types and Ensembl ids: the sorted union over the members, or the written var.
+) -> tuple[list[str], dict[str, list[Any]]]:
+    """The collection's var: the sorted union over the members, or the written var, and its :data:`_VAR_COLUMNS`.
 
     Features join by their name in the collection: the Ensembl id, else the source var name (``to_anndata`` joins
     by var name, ``ad.concat(join="outer")`` in ``sddb/concat.py``). A repeated name joins by its suffix, so the
-    second row of an id in one member meets the second row of that id in another.
+    second row of an id in one member meets the second row of that id in another. Each column comes from the first
+    member that has the feature.
     """
     if written:
         var = root[written[0]]["var"]
-        if "gene_ids" not in var.attrs.get("column-order", []):
-            raise ValueError(f"{written[0]} was written without var['gene_ids'] (an older materialize); use a new dest")
+        if missing := [c for c in _VAR_COLUMNS if c not in var.attrs.get("column-order", [])]:
+            raise ValueError(f"{written[0]} was written without var{missing} (an older materialize); use a new dest")
         names = [str(g) for g in np.asarray(read_elem(var[var.attrs["_index"]]))]
-        types = [str(t) for t in np.asarray(read_elem(var["feature_types"]))]
-        ids = [None if pd.isna(i) else str(i) for i in read_elem(var["gene_ids"])]
-        return names, types, ids
-    seen: dict[str, tuple[str, str | None]] = {}
+        columns = {c: [None if pd.isna(v) else str(v) for v in read_elem(var[c])] for c in _VAR_COLUMNS}
+        return names, columns
+    seen: dict[str, tuple[Any, ...]] = {}
     for uid, item in items.items():
-        features = _features(item)
-        for name, kind, gid in zip(features.names, features.types, features.gene_ids, strict=True):
-            if seen.setdefault(name, (kind, gid))[0] != kind:
+        f = _features(item)
+        for name, *values in zip(f.names, f.types, f.gene_ids, f.original, strict=True):
+            if seen.setdefault(name, tuple(values))[0] != values[0]:
                 logger.warning(
-                    f"{uid}: {name} is {kind!r}, an earlier member has it as {seen[name][0]!r}, which is kept"
+                    f"{uid}: {name} is {values[0]!r}, an earlier member has it as {seen[name][0]!r}, which is kept"
                 )
     if not seen:
         raise ValueError("the members have no feature")
     names = sorted(seen)
-    return names, [seen[k][0] for k in names], [seen[k][1] for k in names]
+    return names, {c: [seen[k][i] for k in names] for i, c in enumerate(_VAR_COLUMNS)}
 
 
-def _rekey(item: LoaderItem, shared: Sequence[str], types: Sequence[str], gene_ids: Sequence[str | None]) -> LoaderItem:
+def _rekey(item: LoaderItem, shared: Sequence[str], columns: Mapping[str, Sequence[Any]]) -> LoaderItem:
     """Put the item's table on the collection's var `shared`, 0 where it lacks a feature, and record the counts.
 
     Each source column is moved to its column of `shared` by one product with a 0/1 matrix, so ``X`` stays sparse,
@@ -692,7 +699,12 @@ def _rekey(item: LoaderItem, shared: Sequence[str], types: Sequence[str], gene_i
     if n_filled:
         logger.warning(f"{uid}: {n_filled} of {len(shared)} features of the collection are not measured, set to 0")
     var = pd.DataFrame(
-        {"feature_types": list(types), "gene_ids": pd.array(list(gene_ids), dtype="string"), "present": present},
+        {
+            "feature_types": list(columns["feature_types"]),
+            "gene_ids": pd.array(list(columns["gene_ids"]), dtype="string"),
+            "original_var_name": pd.array(list(columns["original_var_name"]), dtype="string"),
+            "present": present,
+        },
         index=pd.Index(shared),
     )
     X = _move_columns(table.X, np.arange(table.n_vars), target, len(shared))
