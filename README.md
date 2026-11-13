@@ -7,16 +7,31 @@ Lean read client for the spatialdata-db spatial-omics collection: query the cata
 ## Install
 
 ```bash
-pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.4"
+pip install --pre spatialdata-db
 ```
 
-This installs the alpha release, v0.1.4. The `main` branch may be ahead of it, and you get the newest code if you leave out `@v0.1.4`.
+The client needs Python 3.12 or newer and is imported as `sddb`. `--pre` is needed while only pre-releases are published, because pip installs only stable versions without it. Extras: `spatialdata-db[viz]` for interactive Vitessce views in notebooks, `spatialdata-db[mcp]` for the `sddb-mcp` server for AI agents.
 
-## Usage
+## Quickstart
 
 ```python
 import sddb
+
+cat = sddb.Catalog(version="2026-11-12")  # a dated catalog release, the same rows every time
+hits = cat.query(organism="human", tissue="liver", assay="spatial-CITE-seq")
+print(len(hits), "datasets")
+
+ds = min(hits, key=lambda ds: ds.size_bytes)  # the smallest match
+sdata = ds.to_sdata()  # copied to the local cache on the first call, then reused
+print(sdata)
+
+adata = hits.to_anndata()  # the tables of all matches joined into one AnnData
+print(adata)
 ```
+
+The documentation is at https://spatialdata-db.readthedocs.io.
+
+## Usage
 
 ### Getting the catalog
 
@@ -34,10 +49,10 @@ cat.query(organism="human")
 
 `from_file` accepts absolute or relative paths and `file://` URLs, and validates the file against the catalog schema.
 
-Catalog schema version: the client loads any catalog up to schema version `2`; a catalog cut under a newer schema is refused with a clear error asking you to `pip install -U spatialdata-db-client`. A legacy catalog that declares no version loads unchanged.
+Catalog schema version: the client loads any catalog up to schema version `2`; a catalog cut under a newer schema is refused with a clear error asking you to `pip install -U --pre spatialdata-db`. A legacy catalog that declares no version loads unchanged.
 
 Remote datasets: query the catalog, inspect with `elements()` (no download), or load it with `to_sdata()` (copies the store to the cache). Lazy/partial remote open is not supported yet (spatialdata upstream limitation); local stores open lazily.
 
 ## Releasing
 
-Cut code releases with `gh release create vX.Y.Z --latest=false` so catalog releases keep resolving for older installs. The `release-guard` workflow re-marks the newest dated catalog release as Latest if one slips through.
+Pushing a `v*` tag (for example `v0.2.0a1`) builds the package and publishes it to PyPI through trusted publishing (`.github/workflows/release.yml`), and the version comes from the tag. That workflow creates no GitHub release. If you also create one, use `gh release create vX.Y.Z --latest=false` so catalog releases keep resolving for older installs. The `release-guard` workflow re-marks the newest dated catalog release as Latest if one slips through.
