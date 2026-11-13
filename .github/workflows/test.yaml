@@ -51,8 +51,8 @@ jobs:
       - name: Upgrade pip
         run: python -m pip install -U pip
       - name: Install spatialbatch
-        # TODO(T144): replace <sha> with the merged commit of rushin682/spatialbatch, and pin it in pyproject.toml
-        run: pip install "spatialbatch @ git+https://github.com/rushin682/spatialbatch@<sha>"
+        # rushin682/spatialbatch#3 (obsm centres, crop at read time); move to rushin682/spatialbatch once merged
+        run: pip install "spatialbatch @ git+https://github.com/timtreis/spatialbatch@93f49aa120dae38aead17b86e6b5745ee2529e7b"
       - name: Install
         run: pip install -e ".[loader]" --group test
       - name: Test

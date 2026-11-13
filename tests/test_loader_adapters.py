@@ -1,4 +1,4 @@
-"""The loader adapters (Task 3 of T144): Rasterize, Centroids, TissueMask and StainNormalize on synthetic SpatialData."""
+"""The loader adapters: Rasterize, Centroids, TissueMask and StainNormalize on synthetic SpatialData."""
 
 from __future__ import annotations
 

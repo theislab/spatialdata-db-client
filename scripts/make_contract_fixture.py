@@ -41,7 +41,7 @@ BUNDLE_NAME = "Atera_v1_WTA_S4C_Breast_Cancer_FF"
 UID = "Oc0RVwT6WdZXOkAv0000"
 STUDY_ID = "10x:atera-wta-ff-human-breast-cancer"
 CATALOG_RELEASE = "2026-11-12"
-SIDE_UM = 400.0  # 1000 um gave 83.5 MB zipped (X 88 of 105 MB on disk); see the T144 task-6 report
+SIDE_UM = 400.0  # 1000 um gave 83.5 MB zipped (X 88 of 105 MB on disk)
 BIN_UM = 100.0
 # (x0, y0, x1, y1) in microns of the global frame; the densest 1000 um window was (4800, 1600, 5800, 2600)
 WINDOW_UM: tuple[float, float, float, float] | None = (5400.0, 2000.0, 5800.0, 2400.0)
@@ -190,7 +190,7 @@ def main() -> None:
     # No TissueMask and no StainNormalize: a 400 um crop of tissue has no glass, so squidpy's otsu tissue split is
     # meaningless (it flagged 59.5% of the cells in tissue), and StainNormalize needs that mask (labels["tissue"]).
     # Both are optional in the contract; this fixture tests the contract and the loader, and the full chain is checked
-    # on whole Atera slides in T144 Task 7.
+    # on whole Atera slides (docs/use_cases/loader_atera.md).
     chain = [Rasterize(MPP_TARGET), Centroids()]
     # a member list has no catalog; carry the release the way a Cohort does (materialize._release reads _source)
     cohort = type("FixtureCohort", (list,), {"_source": type("Release", (), {"release": CATALOG_RELEASE})})

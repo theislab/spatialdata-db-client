@@ -1,4 +1,4 @@
-"""``materialize(runner="snakemake")`` (Task 5 of T144): the generated workflow, run locally, against the in-process run."""
+"""``materialize(runner="snakemake")``: the generated workflow, run locally, against the in-process run."""
 
 from __future__ import annotations
 

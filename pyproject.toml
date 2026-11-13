@@ -37,8 +37,7 @@ loader = [
   "squidpy>=1.8.2",
   "dask-image",
   "scikit-image",
-  # TODO(T144): pin "spatialbatch @ git+https://github.com/rushin682/spatialbatch@<sha>" once merged, which needs
-  # [tool.hatch.metadata] allow-direct-references = true; until then CI installs it first (test.yaml, job loader)
+  # spatialbatch is not on PyPI; CI installs it from git first (test.yaml, job loader). Pin it here once it is released.
   "spatialbatch",
   "snakemake>=9",
   "snakemake-executor-plugin-slurm",

@@ -43,8 +43,7 @@ def chain(stain_json: Path | None = None):
     pale tissue is close to the glass, otsu keeps only nuclei (5.4% of the overview), and the area filter
     (min_specimen_area_frac 0.01) drops them all, so StainNormalize's fit fails ("[image_2] no tissue pixels for
     stain fitting"). weka gives a non-empty mask for the brain (86% of the overview, which includes bands of glass,
-    so it is too high) and follows the tissue outline on the other three (T144 task-7 report, scratchpad diag of the
-    overviews TissueMask sees).
+    so it is too high) and follows the tissue outline on the other three.
 
     `stain_json` is a ``stain.json`` that an earlier run's ``fit_stain`` job wrote: StainNormalize then applies that
     pooled reference and the run skips the fit. Since eb2c96b a rerun with the same chain and members keeps

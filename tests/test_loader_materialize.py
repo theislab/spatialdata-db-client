@@ -1,4 +1,4 @@
-"""``materialize`` (Task 4 of T144): a synthetic cohort written as a loader collection, rerun and read back."""
+"""``materialize``: a synthetic cohort written as a loader collection, rerun and read back."""
 
 from __future__ import annotations
 

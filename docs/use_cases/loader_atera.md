@@ -54,8 +54,7 @@ materialize(
 ```
 
 These are the resources of the run that completed. A member job asks for 56,000 MB and one runs at a time
-(`workers=1`). The first run asked for 32,000 MB with two workers, and both member jobs (Slurm jobs 43220827 and
-43220828) were killed for running out of memory while they wrote the table. Two member jobs at 56,000 MB would ask
+(`workers=1`). The first run asked for 32,000 MB with two workers, and both member jobs were killed for running out of memory while they wrote the table. Two member jobs at 56,000 MB would ask
 for more than the 68 GB this run was allowed on the shared cluster, so the members ran one after another.
 `fit_stain` asked for 24,000 MB and used 6.8 GiB.
 
