@@ -6,9 +6,11 @@ import json
 from types import SimpleNamespace
 
 import anndata as ad
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
+import shapely
 import spatialdata as sd
 import zarr
 from anndata.io import read_elem
@@ -38,11 +40,14 @@ class FakeCohort(list):
     _source = SimpleNamespace(release="2026-11-01")
 
 
-def write_member(tmp_path, uid, *, seed, extra_gene=False):
+def write_member(tmp_path, uid, *, seed, extra_gene=False, tiny=False):
     """A member store: H&E tissue disc, square cells, a table keyed by symbol with Ensembl ids and controls."""
     img = he_image(SIZE, SIZE, seed=seed, disk=(SIZE / 2, SIZE / 2, SIZE * 0.4))
     xy = [(x, y) for x in range(20, 80, 12) for y in range(20, 80, 12)]
-    sdata = make_sdata(img, shapes=squares(xy, 6), image_chunks=32)
+    shapes = squares(xy, 6)
+    if tiny:  # a cell between the squares that covers no pixel centre, on the source grid or the written one
+        shapes = pd.concat([shapes, gpd.GeoDataFrame(geometry=[shapely.box(50.1, 50.1, 50.3, 50.3)], index=["tiny"])])
+    sdata = make_sdata(img, shapes=shapes, image_chunks=32)
     genes = dict(GENES) if extra_gene else {k: v for k, v in GENES.items() if k != "GENE5"}
     var = pd.DataFrame(
         {
@@ -406,3 +411,26 @@ def test_rerun_with_another_chain_raises(cohort, tmp_path, monkeypatch, changed)
     with pytest.raises(ValueError, match=rf"dataset_0 ran (Rasterize|TissueMask) with {param}="):
         materialize(members, dest, adapters=changed, **kwargs)
     assert written == []
+
+
+def test_cell_without_pixels_is_kept_and_counted_in_the_contract(tmp_path):
+    path = write_member(tmp_path, "uidA", seed=0, tiny=True)[0]
+    dest = materialize(
+        FakeCohort([FakeMember("uidA", path)]),
+        tmp_path / "c.zarr",
+        adapters=[Rasterize(0.5), Centroids()],
+        role="he",
+        roles=ROLES,
+        mpp_native={"uidA": 0.25},
+    )
+    assert validate(dest) == []
+    contract = _contract(dest, "dataset_0")
+    assert contract.n_centroid_fallback == 1
+    group = zarr.open_group(dest / "dataset_0", mode="r")
+    obs = read_elem(group["obs"])
+    assert "tiny" in obs["cell_id"].tolist()
+    assert len(obs) == len(sd.read_zarr(path).tables["table"])
+    row = obs["cell_id"].tolist().index("tiny")
+    # intrinsic (50.2, 50.2) at 0.25 um/px is (25.1, 25.1) at 0.5 um/px, minus 0.5 for the pixel-centre convention
+    np.testing.assert_allclose(np.asarray(group["obsm"]["spatial"][row]), [24.6, 24.6], atol=1e-9)
+    assert DatasetContract.from_uns(contract.to_uns()).n_centroid_fallback == 1

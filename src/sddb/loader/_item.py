@@ -77,6 +77,12 @@ class LoaderItem:
         How the source pixels were converted to the role's dtype, ``None`` if they already had it.
     stain_reference
         The stain reference applied by :class:`~sddb.loader.StainNormalize`, as plain lists.
+    shape_centroids
+        ``(n_obs, 2)`` ``(x, y)`` centroid of each row's polygon in written pixel-index coordinates, set by
+        :class:`~sddb.loader.Rasterize` when the cells are shapes (NaN for a row without a shape), ``None``
+        otherwise. :class:`~sddb.loader.Centroids` uses it for cells that have no pixel on the written grid.
+    n_centroid_fallback
+        How many rows took their centroid from `shape_centroids`, set by :class:`~sddb.loader.Centroids`.
     label_rule
         Where ``obs["label_id"]`` came from (see :meth:`from_sdata`).
     """
@@ -97,6 +103,8 @@ class LoaderItem:
     channels: list[str] | None = None
     dtype_rule: str | None = None
     stain_reference: dict[str, Any] | None = None
+    shape_centroids: np.ndarray | None = field(default=None, repr=False)
+    n_centroid_fallback: int = 0
     label_rule: str = ""
     source: _Source | None = field(default=None, repr=False)
 

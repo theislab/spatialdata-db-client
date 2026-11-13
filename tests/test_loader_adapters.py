@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from types import SimpleNamespace
 
@@ -317,17 +318,31 @@ def test_centroids_equal_scipy_center_of_mass():
     assert item.records[-1] == AdapterRecord(name="Centroids", version="0.1.0", params={})
 
 
-def test_centroids_tiny_cell_dropped_and_counted(caplog):
+def test_centroids_tiny_cell_kept_with_polygon_centroid(caplog):
     cells = squares([(8, 8), (24, 8), (8, 24)], 6)
     tiny = gpd.GeoDataFrame(geometry=[shapely.box(24.6, 24.6, 24.8, 24.8)], index=["tiny"])  # covers no pixel centre
     sdata = make_sdata(np.zeros((3, 32, 32), np.uint8), shapes=pd.concat([cells, tiny]))
     item = Rasterize(None, tile=16).build(item_of(sdata))
     with caplog.at_level(logging.WARNING, logger="sddb.loader"):
         item = Centroids().build(item)
-    assert item.table.n_obs == 3
-    assert "tiny" not in item.table.obs["cell_id"].tolist()
-    assert len(item.table.obsm["spatial"]) == 3
-    assert "dropped 1 of 4 rows" in caplog.text
+    assert item.table.n_obs == 4
+    assert item.n_centroid_fallback == 1
+    row = item.table.obs["cell_id"].tolist().index("tiny")
+    assert not (np.asarray(item.labels["cells"]) == item.table.obs["label_id"].iloc[row]).any()
+    # intrinsic (24.7, 24.7) on a grid whose pixel j has its centre at intrinsic j + 0.5
+    np.testing.assert_allclose(item.table.obsm["spatial"][row], [24.2, 24.2], atol=1e-9)
+    assert np.isfinite(item.table.obsm["spatial"]).all()
+    assert "1 of 4 rows have no pixel" in caplog.text
+
+
+def test_centroids_no_fallback_for_label_cells():
+    labels = draw_cells(4, 40, 40)
+    sdata = make_sdata(np.zeros((3, 40, 40), np.uint8), labels=labels, annotate="cell_labels", ids=[1, 2, 3, 4])
+    item = Rasterize(None, tile=16).build(item_of(sdata, roles={**TABLE_ROLES, "labels": "^labels/cell_labels$"}))
+    assert item.shape_centroids is None
+    erased = item.labels["cells"].where(item.labels["cells"] != 4, 0)
+    with pytest.raises(ValueError, match="no polygon centroid"):
+        Centroids().build(dataclasses.replace(item, labels={**item.labels, "cells": erased}))
 
 
 # -- TissueMask --------------------------------------------------------------------------------------------------------

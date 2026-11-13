@@ -624,6 +624,7 @@ def _write(group: Any, key: str, item: LoaderItem, plan: Mapping[str, Any]) -> N
         channels=item.channels,
         adapters=item.records,
         stain_reference=item.stain_reference,
+        n_centroid_fallback=item.n_centroid_fallback,
     )
     target = item.grid == "target"
     entry = SpatialEntry.model_validate(

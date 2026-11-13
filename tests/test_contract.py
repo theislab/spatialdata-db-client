@@ -266,3 +266,31 @@ def test_spatialbatch_check_contract_uses_validator(tmp_path):
     bad = zarr.open_group(write_collection(tmp_path / "bad.zarr", n_datasets=1, image_dtype=np.uint16), mode="r")
     with pytest.raises(ValueError, match="uint8"):
         check_contract(bad["dataset_0"])
+
+
+def test_absent_cells_allowed_up_to_the_centroid_fallback_count(tmp_path):
+    knobs = {"height": 200, "width": 280, "n_cells": 200, "n_datasets": 1}
+    assert (
+        _issues(tmp_path / "a", **knobs, overrides={0: {"erase_cells": 1, "contract": {"n_centroid_fallback": 1}}})
+        == []
+    )
+    issues = _issues(tmp_path / "b", **knobs, overrides={0: {"erase_cells": 2, "contract": {"n_centroid_fallback": 1}}})
+    assert len(issues) == 1
+    assert "allows 1 (n_centroid_fallback)" in issues[0]
+
+
+@pytest.mark.parametrize("value", [-1, 1.5, "2"])
+def test_bad_centroid_fallback_count(tmp_path, value):
+    issues = _issues(tmp_path, n_datasets=1, overrides={0: {"contract": {"n_centroid_fallback": value}}})
+    assert len(issues) == 1
+    assert "n_centroid_fallback" in issues[0]
+
+
+def test_contract_without_centroid_fallback_field_still_validates(tmp_path):
+    """Datasets written before n_centroid_fallback existed have no such key in uns; it reads as 0."""
+    path = write_collection(tmp_path / "c.zarr", n_datasets=1)
+    uns = zarr.open_group(path / "dataset_0" / "uns" / "sddb_contract", mode="a")
+    del uns["n_centroid_fallback"]
+    assert "n_centroid_fallback" not in uns
+    assert validate(path) == []
+    assert DatasetContract.from_uns(base_contract()).n_centroid_fallback == 0

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 import dask
 import dask.array as da
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 from sddb.contract import AdapterRecord
@@ -223,6 +224,7 @@ class Rasterize(_Adapter):
                 mode="grid-constant",
                 cval=0,
             )
+            shape_centroids = None
         else:
             labels = _rasterize_shapes(
                 src.cells,
@@ -232,6 +234,7 @@ class Rasterize(_Adapter):
                 src.cells_to_cs,
                 self.tile,
             )
+            shape_centroids = _shape_centroids(src.cells, item.table.obs[src.instance_key], grid, src.cells_to_cs)
 
         upsampled = factor is not None and factor > 1
         return self._done(
@@ -242,6 +245,7 @@ class Rasterize(_Adapter):
             mpp_target=self.mpp if target else None,
             flags={**item.flags, "allow_upsample": self.allow_upsample, "upsampled": upsampled},
             dtype_rule=dtype_rule,
+            shape_centroids=shape_centroids,
             source=None,
         )
 
@@ -361,6 +365,25 @@ def _rasterize_shapes(
     return template.map_blocks(block, dtype=np.uint32)
 
 
+def _shape_centroids(shapes: Any, instance: Any, grid: _Grid, to_cs: np.ndarray) -> np.ndarray:
+    """Each table row's polygon centroid ``(x, y)`` in written pixel-index coordinates; NaN for a row without a shape.
+
+    The centroids go through the same affine as the drawn polygons (``grid.to_index(to_cs)``, as in
+    :func:`_rasterize_shapes`), so they share the frame of :class:`Centroids`' pixel means: pixel ``j`` at ``j``. An
+    affine map sends a polygon's centroid to the centroid of its image, so the centroid is taken first and then mapped.
+    A circle's centroid is its point.
+    """
+    import shapely
+
+    t = grid.to_index(to_cs)
+    xy = shapely.get_coordinates(shapely.centroid(shapes.geometry.to_numpy()))
+    xy = xy @ t[:2, :2].T + t[:2, 2]
+    pos = pd.Index(shapes.index).get_indexer(instance.to_numpy())
+    out = np.full((len(pos), 2), np.nan)
+    out[pos >= 0] = xy[pos[pos >= 0]]
+    return out
+
+
 def _draw_tile(
     geoms: np.ndarray, values: np.ndarray, tree: Any, y0: int, x0: int, shape: tuple[int, int]
 ) -> np.ndarray:
@@ -389,8 +412,16 @@ def _draw_tile(
 class Centroids(_Adapter):
     """Each cell's centre of mass in ``labels["cells"]`` as ``obsm["spatial"]`` ``(x, y)``, in table row order.
 
-    The pixel sums per label run block by block and are reduced over the blocks. Rows whose label has no pixel
-    (a cell smaller than a pixel of the written grid, or outside the image) are dropped, and the count is logged.
+    The pixel sums per label run block by block and are reduced over the blocks. No row is dropped. A row whose
+    label has no pixel (a cell smaller than a pixel of the written grid) takes the centroid of its polygon instead
+    (``item.shape_centroids``, set by :class:`Rasterize` for shape cells); the count goes to
+    ``item.n_centroid_fallback`` and into the contract as ``n_centroid_fallback``, and is logged.
+
+    Raises
+    ------
+    ValueError
+        If a row has no pixel and no polygon centroid (the cells are labels, or the row has no shape), or its polygon
+        centroid is outside the written grid.
     """
 
     name = "Centroids"
@@ -407,24 +438,41 @@ class Centroids(_Adapter):
         return [] if "cells" in sdata.labels else ["it has no labels['cells']; run Rasterize first"]
 
     def build(self, sdata: LoaderItem) -> LoaderItem:
-        """Return the item with ``obsm["spatial"]`` and ``obs["label_id"]``, without rows whose cell vanished."""
+        """Return the item with ``obsm["spatial"]`` and ``obs["label_id"]``, one centroid per row."""
         item = sdata
         self._check(item)
-        ids, n, sx, sy = _label_sums(_dask(item.labels["cells"]))
+        cells = _dask(item.labels["cells"])
+        ids, n, sx, sy = _label_sums(cells)
         label_id = np.asarray(item.table.obs["label_id"], dtype=np.int64)
         pos = np.clip(np.searchsorted(ids, label_id), 0, max(len(ids) - 1, 0))
         present = (ids[pos] == label_id) if len(ids) else np.zeros(len(label_id), bool)
-        dropped = int((~present).sum())
-        if dropped:
+        xy = np.full((len(label_id), 2), np.nan)
+        xy[present] = np.column_stack([sx[pos[present]] / n[pos[present]], sy[pos[present]] / n[pos[present]]])
+        fallback = int((~present).sum())
+        if fallback:
+            polygon = item.shape_centroids
+            if polygon is None or np.isnan(polygon[~present]).any():
+                raise ValueError(
+                    f"{item.uid}: {fallback} of {len(label_id)} rows have no pixel in labels['cells'] and no polygon "
+                    "centroid to fall back on (the cells are labels, or a row has no shape); rows are never dropped"
+                )
+            h, w = cells.shape
+            fb = polygon[~present]
+            outside = (fb[:, 0] < 0) | (fb[:, 0] >= w) | (fb[:, 1] < 0) | (fb[:, 1] >= h)
+            if outside.any():
+                raise ValueError(
+                    f"{item.uid}: {int(outside.sum())} rows with no pixel in labels['cells'] have their polygon "
+                    f"centroid outside the written grid [0, {w}) x [0, {h}), e.g. {fb[np.argmax(outside)].tolist()}"
+                )
+            xy[~present] = fb
             logger.warning(
-                f"{item.uid}: dropped {dropped} of {len(label_id)} rows whose cell has no pixel in labels['cells'] "
-                "(smaller than a pixel of the written grid, or outside the image)"
+                f"{item.uid}: {fallback} of {len(label_id)} rows have no pixel in labels['cells'] (smaller than a "
+                "pixel of the written grid); their obsm['spatial'] is the centroid of their polygon"
             )
-        table = item.table[present].copy()
-        pos = pos[present]
-        table.obs["label_id"] = label_id[present]
-        table.obsm["spatial"] = np.column_stack([sx[pos] / n[pos], sy[pos] / n[pos]]).astype(np.float64)
-        return self._done(item, table=table)
+        table = item.table.copy()
+        table.obs["label_id"] = label_id
+        table.obsm["spatial"] = xy.astype(np.float64)
+        return self._done(item, table=table, n_centroid_fallback=fallback)
 
 
 def _label_sums(labels: da.Array) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:

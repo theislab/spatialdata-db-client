@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any, Literal, Self
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, PositiveFloat, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, StrictInt, model_validator
 
 CONTRACT_VERSION = "0.1.0"
 
@@ -50,6 +50,10 @@ class DatasetContract(BaseModel):
         The adapter steps, in the order they ran.
     stain_reference
         The H&E stain normalisation reference (stain matrix, white point, max concentrations), if one was applied.
+    n_centroid_fallback
+        How many cells have no pixel in ``labels/cells`` (smaller than a pixel of the written grid) and so took the
+        centroid of their polygon as ``obsm["spatial"]`` (:class:`~sddb.loader.Centroids`). 0 when absent, as in
+        datasets written before the field existed.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -69,6 +73,7 @@ class DatasetContract(BaseModel):
     channels: list[str] | None = None
     adapters: list[AdapterRecord]
     stain_reference: dict[str, list[float] | list[list[float]] | str] | None = None
+    n_centroid_fallback: StrictInt = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:

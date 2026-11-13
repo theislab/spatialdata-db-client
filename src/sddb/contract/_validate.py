@@ -167,7 +167,7 @@ def _check_dataset(group: Any, out: _Result, *, sample: int, seed: int) -> None:
     rng = np.random.default_rng(seed)
     rows = np.sort(rng.choice(n_obs, size=min(sample, n_obs), replace=False))
     if cells is not None and centres is not None and label_id is not None and len(rows):
-        out.issues += _check_cells(cells, centres[rows], label_id[rows])
+        out.issues += _check_cells(cells, centres[rows], label_id[rows], contract.n_centroid_fallback)
     out.issues += _check_counts(group, rows)
     issues, out.var = _check_var(group)
     out.issues += issues
@@ -361,21 +361,28 @@ def _check_centres(group: Any, n_obs: int, grid: tuple[int, ...] | None) -> tupl
     return [], centres
 
 
-def _check_cells(cells: zarr.Array[Any], centres: np.ndarray, label_id: np.ndarray) -> list[str]:
-    """R2 on the sampled cells: each has pixels in ``labels/cells``, and >= 99% of centroids lie in their own label."""
+def _check_cells(cells: zarr.Array[Any], centres: np.ndarray, label_id: np.ndarray, n_fallback: int = 0) -> list[str]:
+    """R2 on the sampled cells: each has pixels in ``labels/cells``, and >= 99% of centroids lie in their own label.
+
+    A cell without pixels is allowed only as one of the contract's `n_fallback` cells (``n_centroid_fallback``: too
+    small for the written grid, centroid taken from its polygon), so at most that many sampled cells may lack pixels.
+    Those cells have no label to lie in, so the 99% share is taken over the sampled cells that have pixels.
+    """
     height, width = cells.shape
     xs = np.clip(np.floor(centres[:, 0] + 0.5).astype(np.int64), 0, width - 1)
     ys = np.clip(np.floor(centres[:, 1] + 0.5).astype(np.int64), 0, height - 1)
     inside = np.asarray(cells.get_coordinate_selection((ys, xs))) == label_id
     issues = []
-    if absent := _absent(cells, label_id[~inside], ys[~inside], xs[~inside]):
+    absent = _absent(cells, label_id[~inside], ys[~inside], xs[~inside])
+    if len(absent) > n_fallback:
         issues.append(
             f"{len(absent)} of {len(label_id)} sampled cells have no pixel of their obs['label_id'] in labels/cells, "
-            f"e.g. label_id {sorted(absent)[:5]}"
+            f"e.g. label_id {sorted(absent)[:5]}; the contract allows {n_fallback} (n_centroid_fallback)"
         )
-    if (share := inside.mean()) < _INSIDE:
+    with_pixels = len(label_id) - len(absent)
+    if with_pixels and (share := inside.sum() / with_pixels) < _INSIDE:
         issues.append(
-            f"{share:.1%} of {len(label_id)} sampled centroids (rounded to the pixel) lie inside their own label in "
+            f"{share:.1%} of {with_pixels} sampled centroids (rounded to the pixel) lie inside their own label in "
             f"labels/cells, fewer than {_INSIDE:.0%}. The 1% tolerance is there because a concave cell's centre of "
             "mass can lie outside its mask; more than that means the centroids and the labels disagree"
         )
