@@ -51,9 +51,9 @@ class DatasetContract(BaseModel):
     stain_reference
         The H&E stain normalisation reference (stain matrix, white point, max concentrations), if one was applied.
     n_centroid_fallback
-        How many cells have no pixel in ``labels/cells`` (smaller than a pixel of the written grid) and so took the
-        centroid of their polygon as ``obsm["spatial"]`` (:class:`~sddb.loader.Centroids`). 0 when absent, as in
-        datasets written before the field existed.
+        How many cells have no pixel in ``labels/cells`` (smaller than a pixel of the written grid), so that
+        :class:`~sddb.loader.Centroids` took their ``obsm["spatial"]`` from their polygon or from the source table's
+        centroid. Optional: 0 when the key is absent.
     """
 
     model_config = ConfigDict(extra="forbid")

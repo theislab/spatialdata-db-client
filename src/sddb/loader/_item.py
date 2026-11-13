@@ -37,6 +37,10 @@ class _Source:
     cells: Any  # the labels' scale 0 (y, x) DataArray, or the shapes' GeoDataFrame
     cells_to_cs: np.ndarray
     instance_key: str
+    # the source table's obsm["spatial"] in row order (None without one), and the affine of the element the table
+    # annotates (its region), whose intrinsic coordinates those are taken to be
+    table_centroids: np.ndarray | None = None
+    region_to_cs: np.ndarray | None = None
 
 
 @dataclass
@@ -81,8 +85,14 @@ class LoaderItem:
         ``(n_obs, 2)`` ``(x, y)`` centroid of each row's polygon in written pixel-index coordinates, set by
         :class:`~sddb.loader.Rasterize` when the cells are shapes (NaN for a row without a shape), ``None``
         otherwise. :class:`~sddb.loader.Centroids` uses it for cells that have no pixel on the written grid.
+    table_centroids
+        ``(n_obs, 2)`` the source table's ``obsm["spatial"]`` mapped into written pixel-index coordinates by
+        :class:`~sddb.loader.Rasterize`, as intrinsic coordinates of the element the table annotates; ``None``
+        without one. `table_centroids_source` keeps the unmapped values, for :class:`~sddb.loader.Centroids` to fit
+        their frame when the mapping disagrees with the cells that have pixels.
     n_centroid_fallback
-        How many rows took their centroid from `shape_centroids`, set by :class:`~sddb.loader.Centroids`.
+        How many rows took their centroid from `shape_centroids` or `table_centroids`, set by
+        :class:`~sddb.loader.Centroids`.
     label_rule
         Where ``obs["label_id"]`` came from (see :meth:`from_sdata`).
     """
@@ -104,6 +114,8 @@ class LoaderItem:
     dtype_rule: str | None = None
     stain_reference: dict[str, Any] | None = None
     shape_centroids: np.ndarray | None = field(default=None, repr=False)
+    table_centroids: np.ndarray | None = field(default=None, repr=False)
+    table_centroids_source: np.ndarray | None = field(default=None, repr=False)
     n_centroid_fallback: int = 0
     label_rule: str = ""
     source: _Source | None = field(default=None, repr=False)
@@ -151,7 +163,8 @@ class LoaderItem:
         6. the row position plus one (shapes are rasterised with it), e.g. for Xenium's string cell ids.
 
         The ids must be unique, positive and fit uint32. The table keeps ``X``, ``obs`` and ``var``; its ``obsm``
-        (often in microns) and ``uns`` are dropped, as the written dataset gets its own.
+        (often in microns) and ``uns`` are dropped, as the written dataset gets its own. ``obsm["spatial"]`` is kept
+        on the source, for :class:`~sddb.loader.Centroids`' fallback for cells without pixels.
 
         Raises
         ------
@@ -218,6 +231,10 @@ class LoaderItem:
         new_obs["label_id"] = ids
         table = ad.AnnData(X=source_table.X, obs=new_obs, var=source_table.var.copy())
 
+        table_centroids = None
+        if "spatial" in source_table.obsm:
+            table_centroids = np.asarray(source_table.obsm["spatial"], dtype=np.float64)[:, :2]
+        annotated_el = sdata.labels[region] if region in sdata.labels else sdata.shapes[region]
         levels = _levels(image_el)
         channels = [str(c) for c in levels[0].coords["c"].values] if role == "if" else None
         cells = _levels(cells_el)[0] if cells_kind == "labels" else cells_el
@@ -229,6 +246,8 @@ class LoaderItem:
             cells=cells,
             cells_to_cs=_affine(cells_el, cs),
             instance_key=instance_key,
+            table_centroids=table_centroids,
+            region_to_cs=_affine(annotated_el, cs),
         )
         if rule == "obs['label_id']" and cells_kind == "labels":
             region_el = sdata.shapes[region] if region in sdata.shapes else None

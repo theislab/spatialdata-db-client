@@ -246,6 +246,10 @@ class Rasterize(_Adapter):
             flags={**item.flags, "allow_upsample": self.allow_upsample, "upsampled": upsampled},
             dtype_rule=dtype_rule,
             shape_centroids=shape_centroids,
+            table_centroids=_map_points(src.table_centroids, grid.to_index(src.region_to_cs))
+            if src.table_centroids is not None and src.region_to_cs is not None
+            else None,
+            table_centroids_source=src.table_centroids,
             source=None,
         )
 
@@ -384,6 +388,11 @@ def _shape_centroids(shapes: Any, instance: Any, grid: _Grid, to_cs: np.ndarray)
     return out
 
 
+def _map_points(xy: np.ndarray, t: np.ndarray) -> np.ndarray:
+    """``(n, 2)`` points ``(x, y)`` through the 3x3 affine `t`."""
+    return xy @ t[:2, :2].T + t[:2, 2]
+
+
 def _draw_tile(
     geoms: np.ndarray, values: np.ndarray, tree: Any, y0: int, x0: int, shape: tuple[int, int]
 ) -> np.ndarray:
@@ -413,15 +422,23 @@ class Centroids(_Adapter):
     """Each cell's centre of mass in ``labels["cells"]`` as ``obsm["spatial"]`` ``(x, y)``, in table row order.
 
     The pixel sums per label run block by block and are reduced over the blocks. No row is dropped. A row whose
-    label has no pixel (a cell smaller than a pixel of the written grid) takes the centroid of its polygon instead
-    (``item.shape_centroids``, set by :class:`Rasterize` for shape cells); the count goes to
-    ``item.n_centroid_fallback`` and into the contract as ``n_centroid_fallback``, and is logged.
+    label has no pixel (a cell smaller than a pixel of the written grid) takes, in this order:
+
+    1. the centroid of its polygon (``item.shape_centroids``, set by :class:`Rasterize` for shape cells);
+    2. the source table's centroid (``obsm["spatial"]``, ``item.table_centroids``). Readers put it in different
+       frames (microns for Atera, pixels for CODEX, DNB units for Stereo-seq in spatialdata-io), and spatialdata gives a table no
+       transformation, so :class:`Rasterize` maps it as intrinsic coordinates of the element the table annotates,
+       and this step checks the mapping on the cells that have pixels: the median distance to their pixel centroid
+       must be at most :data:`_TABLE_CENTROID_PX`. If it is not, an affine fitted from the source values to those
+       pixel centroids is used, under the same check.
+
+    The count goes to ``item.n_centroid_fallback`` and into the contract as ``n_centroid_fallback``, and is logged.
 
     Raises
     ------
     ValueError
-        If a row has no pixel and no polygon centroid (the cells are labels, or the row has no shape), or its polygon
-        centroid is outside the written grid.
+        If a row has no pixel, no polygon centroid and no usable table centroid, or its fallback centroid is outside
+        the written grid.
     """
 
     name = "Centroids"
@@ -450,29 +467,84 @@ class Centroids(_Adapter):
         xy[present] = np.column_stack([sx[pos[present]] / n[pos[present]], sy[pos[present]] / n[pos[present]]])
         fallback = int((~present).sum())
         if fallback:
-            polygon = item.shape_centroids
-            if polygon is None or np.isnan(polygon[~present]).any():
-                raise ValueError(
-                    f"{item.uid}: {fallback} of {len(label_id)} rows have no pixel in labels['cells'] and no polygon "
-                    "centroid to fall back on (the cells are labels, or a row has no shape); rows are never dropped"
-                )
-            h, w = cells.shape
-            fb = polygon[~present]
-            outside = (fb[:, 0] < 0) | (fb[:, 0] >= w) | (fb[:, 1] < 0) | (fb[:, 1] >= h)
-            if outside.any():
-                raise ValueError(
-                    f"{item.uid}: {int(outside.sum())} rows with no pixel in labels['cells'] have their polygon "
-                    f"centroid outside the written grid [0, {w}) x [0, {h}), e.g. {fb[np.argmax(outside)].tolist()}"
-                )
-            xy[~present] = fb
-            logger.warning(
-                f"{item.uid}: {fallback} of {len(label_id)} rows have no pixel in labels['cells'] (smaller than a "
-                "pixel of the written grid); their obsm['spatial'] is the centroid of their polygon"
-            )
+            xy = _fallback_centroids(item, xy, present, cells.shape)
         table = item.table.copy()
         table.obs["label_id"] = label_id
         table.obsm["spatial"] = xy.astype(np.float64)
         return self._done(item, table=table, n_centroid_fallback=fallback)
+
+
+_TABLE_CENTROID_PX = 1.0  # median distance (written px) allowed between mapped table centroids and pixel centroids
+_TABLE_CHECK_ROWS = 10_000  # cells with pixels used to check or fit the table centroids' frame
+
+
+def _fallback_centroids(item: LoaderItem, xy: np.ndarray, present: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
+    """Fill the rows without pixels from the polygon centroid, else the checked table centroid; see :class:`Centroids`."""
+    xy = xy.copy()
+    missing = ~present
+    used = {"polygon": 0, "table": 0}
+    if item.shape_centroids is not None:
+        take = missing & np.isfinite(item.shape_centroids).all(axis=1)
+        xy[take] = item.shape_centroids[take]
+        used["polygon"] = int(take.sum())
+        missing &= ~take
+    how = ""
+    if missing.any() and item.table_centroids is not None:
+        mapped, how = _checked_table_centroids(item, xy, present)
+        if mapped is not None:
+            take = missing & np.isfinite(mapped).all(axis=1)
+            xy[take] = mapped[take]
+            used["table"] = int(take.sum())
+            missing &= ~take
+    if missing.any():
+        raise ValueError(
+            f"{item.uid}: {int(missing.sum())} of {len(xy)} rows have no pixel in labels['cells'], no polygon centroid "
+            f"and no usable table centroid (obsm['spatial']{': ' + how if how else ''}); rows are never dropped"
+        )
+    h, w = shape[-2:]
+    fb = xy[~present]
+    outside = (fb[:, 0] < 0) | (fb[:, 0] >= w) | (fb[:, 1] < 0) | (fb[:, 1] >= h)
+    if outside.any():
+        raise ValueError(
+            f"{item.uid}: {int(outside.sum())} rows with no pixel in labels['cells'] have their fallback centroid "
+            f"outside the written grid [0, {w}) x [0, {h}), e.g. {fb[np.argmax(outside)].tolist()}"
+        )
+    logger.warning(
+        f"{item.uid}: {int((~present).sum())} of {len(xy)} rows have no pixel in labels['cells'] (smaller than a pixel "
+        f"of the written grid); obsm['spatial'] is their polygon centroid for {used['polygon']} and their table "
+        f"centroid for {used['table']}{' (' + how + ')' if used['table'] else ''}"
+    )
+    return xy
+
+
+def _checked_table_centroids(item: LoaderItem, xy: np.ndarray, present: np.ndarray) -> tuple[np.ndarray | None, str]:
+    """The table centroids on the written grid if they agree with the pixel centroids, and how they were mapped."""
+    mapped, source = item.table_centroids, item.table_centroids_source
+    assert mapped is not None
+    ok = present & np.isfinite(mapped).all(axis=1)
+    if not ok.any():
+        return None, "no cell with pixels to check its frame against"
+    rows = np.flatnonzero(ok)
+    if len(rows) > _TABLE_CHECK_ROWS:
+        rows = np.random.default_rng(0).choice(rows, _TABLE_CHECK_ROWS, replace=False)
+    err = float(np.median(np.hypot(*(mapped[rows] - xy[rows]).T)))
+    if err <= _TABLE_CENTROID_PX:
+        return mapped, f"as coordinates of the annotated element, median {err:.2f} px from the pixel centroids"
+    if source is None or len(rows) < 3:
+        return None, f"as coordinates of the annotated element it is a median {err:.2f} px from the pixel centroids"
+    a = np.c_[source[rows], np.ones(len(rows))]
+    coef, *_ = np.linalg.lstsq(a, xy[rows], rcond=None)
+    fitted = np.c_[source, np.ones(len(source))] @ coef
+    fit_err = float(np.median(np.hypot(*(fitted[rows] - xy[rows]).T)))
+    if fit_err <= _TABLE_CENTROID_PX:
+        return fitted, (
+            f"an affine fitted on {len(rows)} cells with pixels, median {fit_err:.2f} px; as coordinates of the "
+            f"annotated element it was {err:.2f} px off"
+        )
+    return None, (
+        f"{err:.2f} px off as coordinates of the annotated element and {fit_err:.2f} px off with a fitted affine, "
+        f"above {_TABLE_CENTROID_PX:g} px"
+    )
 
 
 def _label_sums(labels: da.Array) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:

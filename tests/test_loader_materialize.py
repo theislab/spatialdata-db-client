@@ -14,6 +14,7 @@ import shapely
 import spatialdata as sd
 import zarr
 from anndata.io import read_elem
+from scipy import ndimage
 from spatialdata.models import TableModel
 from tests.test_loader_adapters import he_image, make_sdata, squares
 
@@ -40,14 +41,22 @@ class FakeCohort(list):
     _source = SimpleNamespace(release="2026-11-01")
 
 
-def write_member(tmp_path, uid, *, seed, extra_gene=False, tiny=False):
+def write_member(tmp_path, uid, *, seed, extra_gene=False, tiny=False, labels=False):
     """A member store: H&E tissue disc, square cells, a table keyed by symbol with Ensembl ids and controls."""
     img = he_image(SIZE, SIZE, seed=seed, disk=(SIZE / 2, SIZE / 2, SIZE * 0.4))
     xy = [(x, y) for x in range(20, 80, 12) for y in range(20, 80, 12)]
     shapes = squares(xy, 6)
     if tiny:  # a cell between the squares that covers no pixel centre, on the source grid or the written one
         shapes = pd.concat([shapes, gpd.GeoDataFrame(geometry=[shapely.box(50.1, 50.1, 50.3, 50.3)], index=["tiny"])])
-    sdata = make_sdata(img, shapes=shapes, image_chunks=32)
+    if labels:  # the cells as a raster, plus two 1 px cells: at 0.5 um/px only one of them keeps a pixel
+        raster = np.asarray(_rasterize(shapes, SIZE))
+        raster[50, 50], raster[51, 51] = raster.max() + 1, raster.max() + 2
+        sdata = make_sdata(img, labels=raster, annotate="cell_labels", image_chunks=32)
+        ids = np.asarray(sdata.tables["table"].obs["cell_id"])
+        # obsm["spatial"] in the labels' intrinsic coordinates, where pixel j has its centre at j + 0.5
+        com = np.asarray(ndimage.center_of_mass(np.ones_like(raster), raster, ids))[:, ::-1] + 0.5
+    else:
+        sdata = make_sdata(img, shapes=shapes, image_chunks=32)
     genes = dict(GENES) if extra_gene else {k: v for k, v in GENES.items() if k != "GENE5"}
     var = pd.DataFrame(
         {
@@ -60,7 +69,10 @@ def write_member(tmp_path, uid, *, seed, extra_gene=False, tiny=False):
     counts = np.random.default_rng(seed).poisson(2.0, (old.n_obs, len(var))).astype(np.int32)
     table = ad.AnnData(X=counts, obs=old.obs.copy(), var=var)
     del sdata.tables["table"]
-    sdata.tables["table"] = TableModel.parse(table, region="cells", region_key="region", instance_key="cell_id")
+    region = "cell_labels" if labels else "cells"
+    if labels:
+        table.obsm["spatial"] = com
+    sdata.tables["table"] = TableModel.parse(table, region=region, region_key="region", instance_key="cell_id")
     path = tmp_path / f"{uid}.zarr"
     sdata.write(path)
     return path, img, counts, var
@@ -434,3 +446,40 @@ def test_cell_without_pixels_is_kept_and_counted_in_the_contract(tmp_path):
     # intrinsic (50.2, 50.2) at 0.25 um/px is (25.1, 25.1) at 0.5 um/px, minus 0.5 for the pixel-centre convention
     np.testing.assert_allclose(np.asarray(group["obsm"]["spatial"][row]), [24.6, 24.6], atol=1e-9)
     assert DatasetContract.from_uns(contract.to_uns()).n_centroid_fallback == 1
+
+
+def _rasterize(shapes, size):
+    """The shapes as a (size, size) uint32 raster with values 1..n (pixel centres inside a shape)."""
+    from skimage.draw import polygon
+
+    out = np.zeros((size, size), np.uint32)
+    for i, geom in enumerate(shapes.geometry, start=1):
+        ring = np.asarray(geom.exterior.coords) - 0.5  # pixel j has its centre at intrinsic j + 0.5
+        rr, cc = polygon(ring[:, 1], ring[:, 0], shape=out.shape)
+        out[rr, cc] = i
+    return out
+
+
+@pytest.mark.parametrize("runner", ["local", "snakemake"])
+def test_labels_cell_without_pixels_takes_its_table_centroid(tmp_path, runner):
+    path = write_member(tmp_path, "uidA", seed=0, labels=True)[0]
+    dest = materialize(
+        FakeCohort([FakeMember("uidA", path)]),
+        tmp_path / "c.zarr",
+        adapters=[Rasterize(0.5), Centroids()],
+        role="he",
+        roles=ROLES,
+        mpp_native={"uidA": 0.25},
+        runner=runner,
+    )
+    assert validate(dest) == []
+    assert _contract(dest, "dataset_0").n_centroid_fallback == 1
+    group = zarr.open_group(dest / "dataset_0", mode="r")
+    obs = read_elem(group["obs"])
+    source = sd.read_zarr(path).tables["table"]
+    assert len(obs) == source.n_obs
+    xy = np.asarray(group["obsm"]["spatial"][...])
+    tiny = obs["label_id"].to_numpy() >= obs["label_id"].max() - 1  # the two 1 px cells
+    # intrinsic (x + 0.5) at 0.25 um/px is (x + 0.5) / 2 - 0.5 at 0.5 um/px, the pixel-centre convention of Centroids
+    expected = source.obsm["spatial"][tiny] / 2 - 0.5
+    np.testing.assert_allclose(xy[tiny], expected, atol=0.5)

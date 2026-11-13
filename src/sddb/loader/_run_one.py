@@ -86,8 +86,8 @@ def _read_store(path: str | Path) -> Any:
     ``sd.read_zarr`` reads a table whole (spatialdata ``_io/io_table.py`` ``_read_table``, anndata's
     ``read_zarr``). The ``fit_stain`` job needs only the tables' obs and var but opens every member, and a member job
     copies its table while re-keying it, so ``X`` stays lazy (``anndata.experimental.read_elem_lazy``) until
-    :func:`~sddb.loader._materialize._write` computes it once. The table keeps ``X``, ``obs``, ``var`` and ``uns``,
-    which is what :meth:`LoaderItem.from_sdata` keeps.
+    :func:`~sddb.loader._materialize._write` computes it once. The table keeps ``X``, ``obs``, ``var``, ``uns`` and
+    ``obsm["spatial"]``, which is what :meth:`LoaderItem.from_sdata` keeps.
     """
     import anndata as ad
     import spatialdata as sd
@@ -103,6 +103,7 @@ def _read_store(path: str | Path) -> Any:
             obs=read_elem(g["obs"]),
             var=read_elem(g["var"]),
             uns=read_elem(g["uns"]) if "uns" in g else None,
+            obsm={"spatial": read_elem(g["obsm"]["spatial"])} if "obsm" in g and "spatial" in g["obsm"] else None,
         )
     return sdata
 

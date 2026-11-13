@@ -335,14 +335,40 @@ def test_centroids_tiny_cell_kept_with_polygon_centroid(caplog):
     assert "1 of 4 rows have no pixel" in caplog.text
 
 
-def test_centroids_no_fallback_for_label_cells():
+def _label_item(obsm=None):
+    """Four disc cells as labels, cell 4 erased after Rasterize so that it has no pixel; ``obsm`` as given."""
     labels = draw_cells(4, 40, 40)
     sdata = make_sdata(np.zeros((3, 40, 40), np.uint8), labels=labels, annotate="cell_labels", ids=[1, 2, 3, 4])
+    com = np.asarray(ndimage.center_of_mass(np.ones_like(labels), labels, [1, 2, 3, 4]))[:, ::-1]
+    if obsm is not None:
+        sdata.tables["table"].obsm["spatial"] = obsm(com)
     item = Rasterize(None, tile=16).build(item_of(sdata, roles={**TABLE_ROLES, "labels": "^labels/cell_labels$"}))
     assert item.shape_centroids is None
     erased = item.labels["cells"].where(item.labels["cells"] != 4, 0)
-    with pytest.raises(ValueError, match="no polygon centroid"):
-        Centroids().build(dataclasses.replace(item, labels={**item.labels, "cells": erased}))
+    return dataclasses.replace(item, labels={**item.labels, "cells": erased}), com
+
+
+def test_centroids_label_cell_takes_its_table_centroid():
+    # obsm in the labels' intrinsic coordinates (pixel j has its centre at j + 0.5): mapped through their transformation
+    item, com = _label_item(lambda com: com + 0.5)
+    out = Centroids().build(item)
+    assert out.table.n_obs == 4
+    assert out.n_centroid_fallback == 1
+    np.testing.assert_allclose(out.table.obsm["spatial"][3], com[3], atol=1e-9)
+
+
+def test_centroids_label_cell_table_centroid_in_another_frame_is_fitted():
+    # obsm in another frame (e.g. microns): the affine fitted on the cells with pixels maps it
+    item, com = _label_item(lambda com: com * 0.2125 + 3.0)
+    out = Centroids().build(item)
+    assert out.n_centroid_fallback == 1
+    np.testing.assert_allclose(out.table.obsm["spatial"][3], com[3], atol=1e-6)
+
+
+def test_centroids_raise_without_pixels_polygon_or_table_centroid():
+    item, _ = _label_item()
+    with pytest.raises(ValueError, match="no pixel in labels.*no polygon centroid.*no usable table centroid"):
+        Centroids().build(item)
 
 
 # -- TissueMask --------------------------------------------------------------------------------------------------------

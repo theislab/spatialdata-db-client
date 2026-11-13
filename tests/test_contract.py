@@ -287,7 +287,7 @@ def test_bad_centroid_fallback_count(tmp_path, value):
 
 
 def test_contract_without_centroid_fallback_field_still_validates(tmp_path):
-    """Datasets written before n_centroid_fallback existed have no such key in uns; it reads as 0."""
+    """n_centroid_fallback is optional: a uns without the key reads as 0 and validates."""
     path = write_collection(tmp_path / "c.zarr", n_datasets=1)
     uns = zarr.open_group(path / "dataset_0" / "uns" / "sddb_contract", mode="a")
     del uns["n_centroid_fallback"]

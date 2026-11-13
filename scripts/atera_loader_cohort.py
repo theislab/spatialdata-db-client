@@ -82,7 +82,11 @@ class Member:
         sdata = sd.read_zarr(self._path, selection=("images", "shapes"))
         g = zarr.open_group(self._path / "tables" / "table", mode="r")
         sdata.tables["table"] = ad.AnnData(
-            X=read_elem_lazy(g["X"]), obs=read_elem(g["obs"]), var=read_elem(g["var"]), uns=read_elem(g["uns"])
+            X=read_elem_lazy(g["X"]),
+            obs=read_elem(g["obs"]),
+            var=read_elem(g["var"]),
+            uns=read_elem(g["uns"]),
+            obsm={"spatial": read_elem(g["obsm"]["spatial"])},
         )
         return sdata
 
