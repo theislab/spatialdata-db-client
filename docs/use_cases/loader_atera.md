@@ -2,7 +2,7 @@
 
 This page writes four whole Atera H&E slides as one loader collection on a Slurm cluster and then measures how
 fast the spatialbatch `Loader` reads training crops from it. The collection follows the loader contract
-({mod}`sddb.contract`): every slide is resampled to 0.5 µm per pixel, every cell has a label and a centroid, the
+({mod}`sddb.contract`): every slide is resampled to 0.5 µm per pixel, every cell has a label id and a centroid, the
 tissue is masked and the H&E stains are normalised to one reference fitted on all slides. The run needs a shared
 filesystem, a Slurm cluster and the `loader` extra.
 
@@ -81,13 +81,16 @@ table has 1.48e9 nonzeros and its job peaked at 40.0 GiB. The run state lives be
 (`stain.json`) when the chain and the members are the same as in the run that fitted it.
 
 The collection is 13.2 GB on disk (13,231,857,664 bytes by `du -s --block-size=1 atera-he.zarr` on the cluster),
-with 1,423,292 cells and 18,049 genes keyed by Ensembl id.
+with 1,423,292 cells (see below) and 18,049 genes keyed by Ensembl id.
 
-`Centroids` drops the rows of cells that have no pixel in the cell labels at 0.5 µm per pixel, so the collection
-has 21 fewer cells than the bundles: 3 colorectal, 5 breast, 3 brain and 10 kidney. The member job logs
-(`atera-he.zarr.sddb/logs/dataset_<uid>.log`) say, for example, "sddb_a722jfj3pq: dropped 5 of 485985 rows whose
-cell has no pixel in labels['cells'] (smaller than a pixel of the written grid, or outside the image)". The count
-is only in these logs, not in the collection's metadata.
+Some cells are smaller than a pixel at 0.5 µm per pixel, so they have no pixel in the cell labels. `Centroids`
+keeps them and takes the centroid of their polygon as their position, and the contract records how many cells did
+so per dataset as `n_centroid_fallback`. On these slides that is 21 cells: 3 colorectal, 5 breast, 3 brain and 10
+kidney. The counts come from the member job logs of this run (`atera-he.zarr.sddb/logs/dataset_<uid>.log`, e.g.
+"sddb_a722jfj3pq: dropped 5 of 485985 rows whose cell has no pixel in labels['cells'] (smaller than a pixel of the
+written grid, or outside the image)"). The run used an earlier version of `Centroids` that dropped these rows, so
+the collection measured on this page has the 21 cells fewer (1,423,292 instead of 1,423,313) and no
+`n_centroid_fallback`. A new run keeps them.
 
 ## Checks
 
