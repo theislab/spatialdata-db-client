@@ -162,13 +162,17 @@ def _check_dataset(group: Any, out: _Result, *, sample: int, seed: int) -> None:
     if label_id is not None and cells is not None:
         issues, label_id = _check_label_dtype(label_id, cells.dtype)
         out.issues += issues
-    issues, centres = _check_centres(group, n_obs, None if image is None else image.shape[-2:])
+    issues, flagged = _check_outside_image(group, contract, n_obs)
+    out.issues += issues
+    issues, centres = _check_centres(group, n_obs, None if image is None else image.shape[-2:], flagged)
     out.issues += issues
 
     rng = np.random.default_rng(seed)
     rows = np.sort(rng.choice(n_obs, size=min(sample, n_obs), replace=False))
     if cells is not None and centres is not None and label_id is not None and len(rows):
-        out.issues += _check_cells(cells, centres[rows], label_id[rows], contract.n_centroid_fallback)
+        on_image = rows if flagged is None else rows[~flagged[rows]]  # R2 skips the cells flagged outside the image
+        if len(on_image):
+            out.issues += _check_cells(cells, centres[on_image], label_id[on_image], contract.n_centroid_fallback)
     out.issues += _check_counts(group, rows)
     issues, out.var = _check_var(group, contract, rows)
     out.issues += issues
@@ -342,8 +346,34 @@ def _check_label_dtype(label_id: np.ndarray, dtype: np.dtype[Any]) -> tuple[list
     return [], label_id
 
 
-def _check_centres(group: Any, n_obs: int, grid: tuple[int, ...] | None) -> tuple[list[str], np.ndarray | None]:
-    """``obsm["spatial"]`` is ``(n_obs, 2)`` finite ``(x, y)`` inside ``[0, w) x [0, h)``; returns it if so."""
+def _check_outside_image(group: Any, contract: DatasetContract, n_obs: int) -> tuple[list[str], np.ndarray | None]:
+    """``obs["outside_image"]``, if present, is bool and its count is ``n_outside_image``; returns the flags.
+
+    Without the column, ``n_outside_image`` must be 0 (a dataset written before the field validates as before).
+    """
+    obs = group["obs"]
+    if "outside_image" not in list(obs.attrs.get("column-order", [])):
+        if contract.n_outside_image:
+            return [f"n_outside_image is {contract.n_outside_image} but obs has no column 'outside_image'"], None
+        return [], None
+    flags = np.asarray(_read(obs["outside_image"]))
+    if flags.dtype != np.bool_ or flags.shape != (n_obs,):
+        return [f"obs['outside_image'] has dtype {flags.dtype} and shape {flags.shape}, needs bool ({n_obs},)"], None
+    if int(flags.sum()) != contract.n_outside_image:
+        return [
+            f"obs['outside_image'] flags {int(flags.sum())} cells, the contract's n_outside_image is "
+            f"{contract.n_outside_image}"
+        ], flags
+    return [], flags
+
+
+def _check_centres(
+    group: Any, n_obs: int, grid: tuple[int, ...] | None, flagged: np.ndarray | None = None
+) -> tuple[list[str], np.ndarray | None]:
+    """``obsm["spatial"]`` is ``(n_obs, 2)`` finite ``(x, y)``; returns it if so.
+
+    A centre outside ``[0, w) x [0, h)`` is allowed only for a cell flagged in ``obs["outside_image"]`` (`flagged`).
+    """
     try:
         centres = np.asarray(group["obsm"]["spatial"][...], dtype=np.float64)
     except KeyError:
@@ -357,11 +387,13 @@ def _check_centres(group: Any, n_obs: int, grid: tuple[int, ...] | None) -> tupl
     height, width = grid
     x, y = centres[:, 0], centres[:, 1]
     outside = (x < 0) | (x >= width) | (y < 0) | (y >= height)
+    if flagged is not None:
+        outside &= ~flagged
     if outside.any():
         first = centres[np.argmax(outside)].tolist()
         return [
-            f"obsm['spatial'] has {int(outside.sum())} centres (x, y) outside the image [0, {width}) x [0, {height}), "
-            f"e.g. {first}"
+            f"obsm['spatial'] has {int(outside.sum())} centres (x, y) outside the image [0, {width}) x [0, {height}) "
+            f"that obs['outside_image'] does not flag, e.g. {first}"
         ], None
     return [], centres
 

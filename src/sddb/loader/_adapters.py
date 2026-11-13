@@ -255,6 +255,8 @@ class Rasterize(_Adapter):
             table_centroids_element=src.region,
             native_cells=native_cells,
             native_cells_to_index=native_to_index,
+            # the image's scale-0 extent through the affine the image is resampled with (index_map is its inverse)
+            image_footprint=_map_points(np.array([[0, 0], [w0, 0], [w0, h0], [0, h0]], float), grid.to_index(a)),
             source=None,
         )
 
@@ -443,12 +445,19 @@ class Centroids(_Adapter):
 
     The count goes to ``item.n_centroid_fallback`` and into the contract as ``n_centroid_fallback``, and is logged.
 
+    A fallback centroid keeps its true position, also outside the written grid (a cell of the labels that lies
+    beyond the H&E). ``obs["outside_image"]`` is True for every row whose centroid is not on the image's footprint:
+    the quadrilateral of the source image's scale-0 extent mapped onto the grid (``item.image_footprint``, set by
+    :class:`Rasterize` with the affine it resamples the image with), points on its edge counting as on it, or whose
+    centroid lies outside ``[0, w) x [0, h)``. With a rotated image the grid's corners are fill, so a cell there is
+    flagged too. The count goes to ``item.n_outside_image`` and into the contract as ``n_outside_image``.
+
     Raises
     ------
     ValueError
         If a row has no pixel and no fallback (labels cells: no pixel in the native labels either; shape cells: no
-        polygon centroid and no usable table centroid), if the table centroids are not in the frame of the element
-        the table annotates (the check above), or a fallback centroid is outside the written grid.
+        polygon centroid and no usable table centroid), or if the table centroids are not in the frame of the
+        element the table annotates (the check above).
     """
 
     name = "Centroids"
@@ -478,9 +487,15 @@ class Centroids(_Adapter):
         fallback = int((~present).sum())
         if fallback:
             xy = _fallback_centroids(item, xy, present, cells.shape)
-        table = _with_obs(item.table, label_id=label_id)  # X is shared, not copied
+        outside = _outside_image(xy, item.image_footprint, cells.shape)
+        if outside.any():
+            logger.warning(
+                f"{item.uid}: {int(outside.sum())} of {len(xy)} rows have their centroid outside the image's footprint "
+                f"(obs['outside_image']), {int(_outside_grid(xy, cells.shape).sum())} of them outside the written grid"
+            )
+        table = _with_obs(item.table, label_id=label_id, outside_image=outside)  # X is shared, not copied
         table.obsm["spatial"] = xy.astype(np.float64)
-        return self._done(item, table=table, n_centroid_fallback=fallback)
+        return self._done(item, table=table, n_centroid_fallback=fallback, n_outside_image=int(outside.sum()))
 
 
 _TABLE_CENTROID_PX = 1.0  # median distance (written px) allowed between mapped table centroids and pixel centroids
@@ -522,14 +537,6 @@ def _fallback_centroids(item: LoaderItem, xy: np.ndarray, present: np.ndarray, s
             f"{item.uid}: {int(missing.sum())} of {len(xy)} rows have no pixel in labels['cells'], no polygon centroid "
             f"and no usable table centroid (obsm['spatial']{': ' + how if how else ''}); rows are never dropped"
         )
-    h, w = shape[-2:]
-    fb = xy[~present]
-    outside = (fb[:, 0] < 0) | (fb[:, 0] >= w) | (fb[:, 1] < 0) | (fb[:, 1] >= h)
-    if outside.any():
-        raise ValueError(
-            f"{item.uid}: {int(outside.sum())} rows with no pixel in labels['cells'] have their fallback centroid "
-            f"outside the written grid [0, {w}) x [0, {h}), e.g. {fb[np.argmax(outside)].tolist()}"
-        )
     logger.warning(
         f"{item.uid}: {int((~present).sum())} of {len(xy)} rows have no pixel in labels['cells'] (smaller than a pixel "
         f"of the written grid); obsm['spatial'] is their centre of mass in the native labels for "
@@ -537,6 +544,21 @@ def _fallback_centroids(item: LoaderItem, xy: np.ndarray, present: np.ndarray, s
         f"{used['table']}{' (' + how + ')' if used['table'] else ''}"
     )
     return xy
+
+
+def _outside_grid(xy: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
+    h, w = shape[-2:]
+    return (xy[:, 0] < 0) | (xy[:, 0] >= w) | (xy[:, 1] < 0) | (xy[:, 1] >= h)
+
+
+def _outside_image(xy: np.ndarray, footprint: np.ndarray | None, shape: tuple[int, ...]) -> np.ndarray:
+    """Rows whose centroid is outside the written grid or not on the image's footprint (edges count as on it)."""
+    import shapely
+
+    outside = _outside_grid(xy, shape)
+    if footprint is not None:
+        outside |= ~shapely.intersects_xy(shapely.Polygon(footprint), xy[:, 0], xy[:, 1])
+    return outside
 
 
 def _native_centroids(item: LoaderItem, cells: xr.DataArray, to_index: np.ndarray) -> np.ndarray:
@@ -736,6 +758,8 @@ class TissueMask(_Adapter):
         px = np.clip(xy[:, 0], 0, w - 1)
         py = np.clip(xy[:, 1], 0, h - 1)
         in_tissue = tissue.vindex[py, px].compute() > 0 if len(xy) else np.zeros(0, bool)
+        if "outside_image" in item.table.obs:  # off the image, so not on its tissue
+            in_tissue &= ~item.table.obs["outside_image"].to_numpy(dtype=bool)
         table = _with_obs(item.table, in_tissue=np.asarray(in_tissue, dtype=bool))
         return self._done(item, table=table, labels={**item.labels, "tissue": xr.DataArray(tissue, dims=("y", "x"))})
 

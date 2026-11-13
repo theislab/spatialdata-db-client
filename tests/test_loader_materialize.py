@@ -478,6 +478,65 @@ def test_cell_without_pixels_is_kept_and_counted_in_the_contract(tmp_path):
     assert DatasetContract.from_uns(contract.to_uns()).n_centroid_fallback == 1
 
 
+def test_cells_outside_the_image_are_kept_flagged_and_counted(tmp_path):
+    """A rotated H&E: a cell over a fill corner of the grid and one beyond the grid keep their true centroids."""
+    from spatialdata.transformations import Affine
+
+    theta = np.deg2rad(20)
+    rot = np.array([[np.cos(theta), -np.sin(theta), 0], [np.sin(theta), np.cos(theta), 0], [0, 0, 1]])
+    corners = (rot @ np.array([[0, SIZE, SIZE, 0], [0, 0, SIZE, SIZE], [1, 1, 1, 1]]))[:2].T
+    lo, hi = corners.min(axis=0), corners.max(axis=0)
+    centre = corners.mean(axis=0)
+    xy = [tuple(centre + d) for d in ((0, 0), (-12, 0), (12, 0), (0, -12), (0, 12))]
+    xy += [tuple(lo + 6), (hi[0] + 20, centre[1])]  # over the fill corner; beyond the grid
+    shapes = squares(xy, 6)
+    img = he_image(SIZE, SIZE, seed=0, disk=(SIZE / 2, SIZE / 2, SIZE * 0.4))
+    sdata = make_sdata(img, image_tf=Affine(rot, input_axes=("x", "y"), output_axes=("x", "y")), shapes=shapes)
+    old = sdata.tables["table"]
+    var = pd.DataFrame({"gene_ids": list(GENES.values()), "feature_types": "Gene Expression"}, index=list(GENES))
+    table = ad.AnnData(X=np.ones((old.n_obs, len(var)), np.int32), obs=old.obs.copy(), var=var)
+    del sdata.tables["table"]
+    sdata.tables["table"] = TableModel.parse(table, region="cells", region_key="region", instance_key="cell_id")
+    path = tmp_path / "rot.zarr"
+    sdata.write(path)
+
+    dest = materialize(
+        FakeCohort([FakeMember("uidR", path)]),
+        tmp_path / "c.zarr",
+        adapters=[Rasterize(0.5), Centroids(), TissueMask(method="otsu")],
+        role="he",
+        roles=ROLES,
+        mpp_native={"uidR": 0.25},
+    )
+    assert validate(dest) == []
+    contract = _contract(dest, "dataset_0")
+    assert contract.n_outside_image == 2
+    assert contract.n_centroid_fallback == 1  # the cell beyond the grid has no pixel
+    group = zarr.open_group(dest / "dataset_0", mode="r")
+    obs = read_elem(group["obs"])
+    assert len(obs) == len(xy)
+    flagged = obs.set_index("cell_id")["outside_image"]
+    assert flagged.sum() == 2
+    assert bool(flagged[shapes.index[5]])
+    assert bool(flagged[shapes.index[6]])
+    assert not obs.set_index("cell_id")["in_tissue"][shapes.index[5:]].any()
+    centres = np.asarray(group["obsm"]["spatial"][...])
+    h, w = group["images"]["he"].shape[-2:]
+    row = obs["cell_id"].tolist().index(shapes.index[6])
+    assert centres[row, 0] >= w  # kept at its true position, beyond the grid
+
+    # the loader pads a crop that leaves the image (spatialbatch reads only the part inside)
+    spatialbatch = pytest.importorskip("spatialbatch")
+    n = len(xy)  # one batch of every row, so it holds both flagged cells
+    loader = spatialbatch.Loader(
+        images=["he"], labels=["cells"], crop_px=16, batch_size=n, chunk_size=n, preload_nchunks=1, shuffle=False
+    )
+    batch = next(iter(loader.use_collection(spatialbatch.SpatialDatasetCollection(dest))))
+    he = np.asarray(batch["images"]["he"])
+    assert he.shape == (n, 3, 16, 16)
+    assert batch["X"].shape[0] == n
+
+
 def _rasterize(shapes, size):
     """The shapes as a (size, size) uint32 raster with values 1..n (pixel centres inside a shape)."""
     from skimage.draw import polygon

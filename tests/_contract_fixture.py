@@ -90,6 +90,7 @@ def write_dataset(
     labels_shape: tuple[int, int] | None = None,
     erase_cells: int = 0,
     move_centroid: tuple[float, float] | None = None,
+    outside_image: Sequence[int] | None = None,
     fractional_counts: bool = False,
     negative_counts: bool = False,
     label_ids: Sequence[int] | None = None,
@@ -119,6 +120,9 @@ def write_dataset(
         Erase the pixels of this many cells from ``labels/cells``, keeping their rows.
     move_centroid
         Set the first row's ``obsm["spatial"]`` to this ``(x, y)``.
+    outside_image
+        Write ``obs["outside_image"]`` with these row positions True (the contract's count is not set; pass it in
+        `contract`).
     fractional_counts
         Write float counts with a fractional part.
     negative_counts
@@ -173,6 +177,10 @@ def write_dataset(
         ),
         var=pd.DataFrame(dict(var_columns), index=names),
     )
+    if outside_image is not None:
+        flags = np.zeros(n_cells, bool)
+        flags[list(outside_image)] = True
+        table.obs["outside_image"] = flags
     table.obsm["spatial"] = centres
     fields = base_contract(role, uid=uid, study_id=study_id)
     if stain_reference is not None:

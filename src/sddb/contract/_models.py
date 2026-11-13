@@ -55,6 +55,10 @@ class DatasetContract(BaseModel):
         :class:`~sddb.loader.Centroids` took their ``obsm["spatial"]`` from the source: the centre of mass in the
         source labels at native resolution, the polygon centroid or the source table's centroid. Optional: 0 when the
         key is absent.
+    n_outside_image
+        How many cells have ``obs["outside_image"]`` True: their centroid is not on the H&E or IF image's footprint
+        (beyond the written grid, or on the fill of a rotated image's corners). Their ``obsm["spatial"]`` is still
+        their true position, so it may lie outside ``[0, w) x [0, h)``. Optional: 0 when the key is absent.
     n_features_present, n_features_filled
         How many features of the collection's var this dataset's source measured (``var["present"]`` True), and how
         many it did not, which are 0 in ``X``. Optional: 0 when the key is absent.
@@ -78,6 +82,7 @@ class DatasetContract(BaseModel):
     adapters: list[AdapterRecord]
     stain_reference: dict[str, list[float] | list[list[float]] | str] | None = None
     n_centroid_fallback: StrictInt = Field(default=0, ge=0)
+    n_outside_image: StrictInt = Field(default=0, ge=0)
     n_features_present: StrictInt = Field(default=0, ge=0)
     n_features_filled: StrictInt = Field(default=0, ge=0)
 

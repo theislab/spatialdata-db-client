@@ -423,13 +423,36 @@ def test_centroids_shape_cell_table_centroid_in_another_frame_raises():
         Centroids().build(_shape_item(lambda xy: xy * 0.2125))
 
 
-def test_centroids_fallback_outside_the_grid_raises():
+def test_centroids_keep_and_flag_a_cell_beyond_the_grid():
     # a tiny cell beyond the image: the written grid covers the image's footprint, so its polygon centroid is outside
     tiny = gpd.GeoDataFrame(geometry=[shapely.box(40.6, 40.6, 40.8, 40.8)], index=["tiny"])
     sdata = make_sdata(np.zeros((3, 32, 32), np.uint8), shapes=pd.concat([squares([(8, 8)], 6), tiny]))
-    item = Rasterize(None, tile=16).build(item_of(sdata))
-    with pytest.raises(ValueError, match=r"1 rows with no pixel.*fallback centroid outside the written grid \[0, 32\)"):
-        Centroids().build(item)
+    out = Centroids().build(Rasterize(None, tile=16).build(item_of(sdata)))
+    assert out.table.obs["outside_image"].tolist() == [False, True]
+    assert out.n_outside_image == 1
+    assert out.n_centroid_fallback == 1
+    np.testing.assert_allclose(out.table.obsm["spatial"][1], [40.2, 40.2], atol=1e-9)  # its true position, kept
+
+
+def test_centroids_flag_a_cell_over_the_fill_corner_of_a_rotated_image():
+    theta = np.deg2rad(20)
+    rot = np.array([[np.cos(theta), -np.sin(theta), 0], [np.sin(theta), np.cos(theta), 0], [0, 0, 1]])
+    corners = (rot @ np.array([[0, 64, 64, 0], [0, 0, 64, 64], [1, 1, 1, 1]]))[:2].T
+    lo = corners.min(axis=0)
+    corner_cell = lo + 5  # inside the bounding box (the written grid), off the rotated image
+    assert not shapely.Polygon(corners).intersects(shapely.Point(*corner_cell))
+    centre = corners.mean(axis=0)
+    sdata = make_sdata(
+        np.zeros((3, 64, 64), np.uint8),
+        image_tf=Affine(rot, input_axes=("x", "y"), output_axes=("x", "y")),
+        shapes=squares([tuple(centre), tuple(corner_cell)], 4),
+    )
+    item = Rasterize(None, tile=32).build(item_of(sdata))
+    np.testing.assert_allclose(item.image_footprint, corners - lo - 0.5, atol=1e-6)  # pixel j's centre is at j
+    out = Centroids().build(item)
+    assert out.table.obs["outside_image"].tolist() == [False, True]
+    assert out.n_outside_image == 1
+    assert out.n_centroid_fallback == 0  # both cells have pixels: the flag is about the image, not the grid
 
 
 def test_centroids_raise_without_pixels_polygon_or_table_centroid():

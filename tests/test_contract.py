@@ -396,3 +396,25 @@ def test_gene_key_counts_must_match_the_var(tmp_path):
     assert issues == [
         f"dataset_0: the GeneKey record's source is {N_VARS + 3}, var gives {N_VARS} (a source feature was dropped)"
     ]
+
+
+def test_flagged_centroid_outside_the_grid_validates(tmp_path):
+    """A cell beyond the image keeps its true centroid when obs['outside_image'] flags it; R2 skips it."""
+    knobs = {"n_datasets": 1}
+    flagged = {"move_centroid": (-5.0, 10.0), "outside_image": [0], "contract": {"n_outside_image": 1}}
+    assert _issues(tmp_path / "a", **knobs, overrides={0: flagged}) == []
+    # unflagged: the out-of-grid centre fails
+    issues = _issues(tmp_path / "b", **knobs, overrides={0: {"move_centroid": (-5.0, 10.0)}})
+    assert any("outside the image" in i and "does not flag" in i for i in issues)
+    # the count must match the flags
+    bad = {**flagged, "contract": {"n_outside_image": 2}}
+    assert any("n_outside_image is 2" in i for i in _issues(tmp_path / "c", **knobs, overrides={0: bad}))
+    # a count without the column fails
+    issues = _issues(tmp_path / "d", **knobs, overrides={0: {"contract": {"n_outside_image": 1}}})
+    assert any("no column 'outside_image'" in i for i in issues)
+
+
+@pytest.mark.parametrize("value", [-1, 1.5, "2"])
+def test_bad_outside_image_count(tmp_path, value):
+    issues = _issues(tmp_path, n_datasets=1, overrides={0: {"contract": {"n_outside_image": value}}})
+    assert any("n_outside_image" in i for i in issues)

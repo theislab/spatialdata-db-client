@@ -793,6 +793,7 @@ def _write(group: Any, key: str, item: LoaderItem, plan: Mapping[str, Any]) -> N
         adapters=item.records,
         stain_reference=item.stain_reference,
         n_centroid_fallback=item.n_centroid_fallback,
+        n_outside_image=item.n_outside_image,
         n_features_present=int(present.sum()),
         n_features_filled=int((~present).sum()),
     )

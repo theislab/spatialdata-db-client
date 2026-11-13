@@ -102,6 +102,12 @@ class LoaderItem:
     n_centroid_fallback
         How many rows took their centroid from `native_cells`, `shape_centroids` or `table_centroids`, set by
         :class:`~sddb.loader.Centroids`.
+    image_footprint
+        ``(4, 2)`` ``(x, y)`` corners of the source image's scale-0 extent in written pixel-index coordinates, set by
+        :class:`~sddb.loader.Rasterize`. The written grid is the bounding box of this quadrilateral, so with a rotated
+        image its corners are fill. :class:`~sddb.loader.Centroids` flags cells whose centroid is not on it.
+    n_outside_image
+        How many rows have ``obs["outside_image"]`` True, set by :class:`~sddb.loader.Centroids`.
     label_rule
         Where ``obs["label_id"]`` came from (see :meth:`from_sdata`).
     """
@@ -128,6 +134,8 @@ class LoaderItem:
     native_cells: xr.DataArray | None = field(default=None, repr=False)
     native_cells_to_index: np.ndarray | None = field(default=None, repr=False)
     n_centroid_fallback: int = 0
+    image_footprint: np.ndarray | None = field(default=None, repr=False)
+    n_outside_image: int = 0
     label_rule: str = ""
     source: _Source | None = field(default=None, repr=False)
 
