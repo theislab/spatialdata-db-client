@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import json
 import logging
+import os
 import re
 import shutil
 from collections.abc import Iterable, Mapping, Sequence
@@ -31,7 +33,7 @@ from sddb.contract import (
     validate_dataset,
 )
 from sddb.loader._adapters import GENE_KEY as _GENE_KEY
-from sddb.loader._adapters import Rasterize, StainNormalize
+from sddb.loader._adapters import MATERIALIZE_RECORDS, Rasterize, StainNormalize
 from sddb.loader._item import LoaderItem
 
 if TYPE_CHECKING:
@@ -138,7 +140,7 @@ def materialize(
         raise ValueError("pass roles (the image and the table of each member): the catalog has no image-role field yet")
     if workers < 1:
         raise ValueError(f"workers must be at least 1, not {workers}")
-    adapters = list(adapters)
+    adapters = [copy.deepcopy(a) for a in adapters]  # a fit sets a reference: never on the caller's objects
     rasterize = _rasterize_step(adapters)
     mpps = dict(mpp_native or {})
 
@@ -158,6 +160,9 @@ def materialize(
         )
     done = {uid for uid in uids if _is_done(dest, uid, keys[uid])}
 
+    written = [keys[u] for u in uids if u in done]
+    _check_chain(adapters, root, written)
+
     for uid in sorted(set(mpps) - set(uids)):
         logger.warning(f"mpp_native has {uid!r}, which is not a member of the cohort")
     grids = {
@@ -176,7 +181,6 @@ def materialize(
     todo = [m for m in members if str(m.uid) not in done]
     if todo:
         release = _release(cohort)
-        written = [keys[u] for u in uids if u in done]
         with dask.config.set(num_workers=workers):
             _run(
                 todo,
@@ -243,11 +247,60 @@ def _run(
         key = keys[uid]
         _write(root, dest, key, item, by_uid[uid], obs_columns, release, allow_mixed_grids)
         if issues := validate_dataset(root[key]):
+            # a dataset that does not conform is not left in the collection
+            shutil.rmtree(dest / key)
+            zarr.consolidate_metadata(root.store)
             raise ContractError([f"{key} ({uid}): {issue}" for issue in issues])
-        marker = _state(dest) / "done" / uid
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(json.dumps({"uid": uid, "key": key, "contract": CONTRACT_VERSION}))
+        _mark_done(_state(dest) / "done" / uid, {"uid": uid, "key": key, "contract": CONTRACT_VERSION})
         shutil.rmtree(scratch / uid, ignore_errors=True)
+
+
+def _mark_done(marker: Path, content: Mapping[str, str]) -> None:
+    """Write the done marker atomically: a temp file in the same dir, renamed over the marker."""
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    tmp = marker.with_name(f".{marker.name}.tmp")
+    tmp.write_text(json.dumps(dict(content)))
+    os.replace(tmp, marker)
+
+
+def _record(step: Any) -> dict[str, Any]:
+    """A step's record as a dataset stores it (params through JSON); a given stain reference is kept apart."""
+    params = json.loads(json.dumps(dict(step.config)))
+    return {"name": step.name, "version": step.version, "params": params, "reference": params.pop("reference", None)}
+
+
+def _check_chain(adapters: Sequence[Any], root: Any, written: list[str]) -> None:
+    """Refuse a rerun whose chain differs from the one the written datasets ran, before anything is written.
+
+    Records are compared by name, version and params. The fitted stain reference is left out, since a rerun reuses
+    it, unless this chain was given one.
+    """
+    now = [_record(a) for a in adapters]
+    for key in written:
+        before = []
+        for rec in _contract(root[key]).adapters:
+            if rec.name in MATERIALIZE_RECORDS:
+                continue
+            params = dict(rec.params)
+            ref = params.pop("reference", None)
+            before.append({"name": rec.name, "version": rec.version, "params": params, "reference": ref})
+        if [r["name"] for r in before] != [r["name"] for r in now]:
+            raise ValueError(
+                f"{key} was written by the chain {[r['name'] for r in before]}, this run has "
+                f"{[r['name'] for r in now]}; use a new dest"
+            )
+        for old, new in zip(before, now, strict=True):
+            if old["version"] != new["version"]:
+                raise ValueError(f"{key} ran {old['name']} {old['version']}, this run has {new['version']}")
+            for param in sorted(old["params"].keys() | new["params"].keys()):
+                was, is_ = old["params"].get(param, "<unset>"), new["params"].get(param, "<unset>")
+                if was != is_:
+                    raise ValueError(
+                        f"{key} ran {old['name']} with {param}={was!r}, this run has {param}={is_!r}; use the same "
+                        "chain or a new dest"
+                    )
+            if new["reference"] is not None and new["reference"] != old["reference"]:
+                raise ValueError(f"{key} ran {old['name']} with another reference than the one given; use a new dest")
 
 
 def _needs_fit(step: Any) -> bool:
@@ -289,7 +342,11 @@ def _is_done(dest: Path, uid: str, key: str) -> bool:
     marker = _state(dest) / "done" / uid
     if not marker.is_file():
         return False
-    recorded = json.loads(marker.read_text()).get("key")
+    try:
+        recorded = json.loads(marker.read_text())["key"]
+    except (OSError, ValueError, KeyError, TypeError) as e:  # json.JSONDecodeError is a ValueError
+        logger.warning(f"{uid}: the done marker {marker} is unreadable ({e!r}), so {uid} is written again")
+        return False
     if recorded != key:
         raise ValueError(
             f"{uid} was written as {recorded} in {dest}, but this cohort maps it to {key}: the cohort changed, use a "

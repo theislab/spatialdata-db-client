@@ -302,10 +302,13 @@ def test_failed_member_not_marked_and_rewritten(cohort, tmp_path, monkeypatch):
         m.setattr(_materialize, "validate_dataset", lambda group: ["synthetic issue"])
         with pytest.raises(ContractError, match=r"dataset_0 \(uidA\): synthetic issue"):
             materialize(members, dest, **kwargs)
-    assert (dest / "dataset_0").is_dir()
+    assert not (dest / "dataset_0").exists()  # a dataset that fails validation is removed
     assert not (state / "done").exists()
 
-    materialize(members, dest, **kwargs)  # the leftover dataset_0 is replaced
+    # what an interrupted write leaves: a dataset dir without a done marker, replaced by the next run
+    (dest / "dataset_1").mkdir()
+    (dest / "dataset_1" / "partial").write_text("")
+    materialize(members, dest, **kwargs)
     assert validate(dest) == []
     assert sorted(p.name for p in (state / "done").iterdir()) == ["uidA", "uidB"]
 
@@ -343,3 +346,63 @@ def test_materialize_records_are_not_rebuilt(cohort, tmp_path):
     assert [a.to_record() for a in rebuilt] == records[1:]
     with pytest.raises(ValueError, match="no loader adapter named 'Nope'"):
         adapter_from_record(records[1].model_copy(update={"name": "Nope"}))
+
+
+def test_unreadable_marker_is_not_done(cohort, tmp_path, monkeypatch, caplog):
+    members, _ = cohort
+    dest, state = tmp_path / "c.zarr", tmp_path / "c.zarr.sddb"
+    kwargs = {"adapters": [Rasterize(0.5), Centroids()], "role": "he", "roles": ROLES}
+    kwargs["mpp_native"] = {"uidA": 0.25, "uidB": 0.25}
+    materialize(members, dest, **kwargs)
+    assert sorted(p.name for p in (state / "done").iterdir()) == ["uidA", "uidB"]  # no temp file left
+    (state / "done" / "uidB").write_text("{trunc")
+
+    written = []
+    write = _materialize.write_collection_dataset
+    monkeypatch.setattr(
+        _materialize,
+        "write_collection_dataset",
+        lambda group, *, key, **kw: written.append(key) or write(group, key=key, **kw),
+    )
+    materialize(members, dest, **kwargs)
+    assert written == ["dataset_1"]
+    assert "unreadable" in caplog.text
+    assert json.loads((state / "done" / "uidB").read_text())["key"] == "dataset_1"
+
+
+def test_caller_chain_is_not_mutated(cohort, tmp_path, monkeypatch):
+    import squidpy.experimental.im as sqim
+
+    calls = []
+    fit = sqim.fit_stain_reference
+    monkeypatch.setattr(sqim, "fit_stain_reference", lambda *a, **k: calls.append(1) or fit(*a, **k))
+    members, _ = cohort
+    chain = default_chain(0.5)
+    kwargs = {"role": "he", "roles": ROLES, "mpp_native": {"uidA": 0.25, "uidB": 0.25}}
+    materialize(members, tmp_path / "a.zarr", adapters=chain, **kwargs)
+    materialize(members, tmp_path / "b.zarr", adapters=chain, **kwargs)
+    assert len(calls) == 2  # fit once per dest, not carried from the first into the second
+    assert chain[-1].reference is None
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        [Rasterize(0.4), Centroids(), TissueMask()],
+        [Rasterize(0.5), Centroids(), TissueMask(auto_max_pixels=1000)],
+    ],
+    ids=["rasterize-mpp", "tissue-kwarg"],
+)
+def test_rerun_with_another_chain_raises(cohort, tmp_path, monkeypatch, changed):
+    members, _ = cohort
+    dest, state = tmp_path / "c.zarr", tmp_path / "c.zarr.sddb"
+    kwargs = {"role": "he", "roles": ROLES, "mpp_native": {"uidA": 0.25, "uidB": 0.25}}
+    materialize(members, dest, adapters=[Rasterize(0.5), Centroids(), TissueMask()], **kwargs)
+    (state / "done" / "uidB").unlink()
+
+    written = []
+    monkeypatch.setattr(_materialize, "write_collection_dataset", lambda *a, key, **kw: written.append(key))
+    param = "mpp" if changed[0].mpp != 0.5 else "auto_max_pixels"
+    with pytest.raises(ValueError, match=rf"dataset_0 ran (Rasterize|TissueMask) with {param}="):
+        materialize(members, dest, adapters=changed, **kwargs)
+    assert written == []
