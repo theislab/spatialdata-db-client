@@ -182,10 +182,14 @@ def main() -> None:
     del sdata, crop, table, obs, shapes
 
     from sddb.contract import validate
-    from sddb.loader import Centroids, Rasterize, StainNormalize, TissueMask, materialize
+    from sddb.loader import Centroids, Rasterize, materialize
 
     dest = out / FIXTURE
-    chain = [Rasterize(MPP_TARGET), Centroids(), TissueMask(), StainNormalize()]
+    # No TissueMask and no StainNormalize: a 400 um crop of tissue has no glass, so squidpy's otsu tissue split is
+    # meaningless (it flagged 59.5% of the cells in tissue), and StainNormalize needs that mask (labels["tissue"]).
+    # Both are optional in the contract; this fixture tests the contract and the loader, and the full chain is checked
+    # on whole Atera slides in T144 Task 7.
+    chain = [Rasterize(MPP_TARGET), Centroids()]
     materialize(
         [Member(UID, STUDY_ID, crop_path)],
         dest,
