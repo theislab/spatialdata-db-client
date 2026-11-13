@@ -3,12 +3,18 @@
 A collection is a :class:`spatialbatch.SpatialDatasetCollection`: a zarr v3 group with one ``dataset_<i>`` group per
 cohort member, each written by :func:`spatialbatch.write_collection_dataset`. Per dataset:
 
-- the table (annbatch layout), rows Morton-sorted on ``obsm["spatial"]``, the centre of mass ``(x, y)`` float64 of
-  each cell's label in pixels of the written grid, inside ``[0, w) x [0, h)``;
+- the table (annbatch layout), rows Morton-sorted on ``obsm["spatial"]``, each cell's centre ``(x, y)`` float64 in
+  pixel-index coordinates of the written grid (pixel ``j`` has its centre at ``j``), inside ``[0, w) x [0, h)``. It is
+  the centre of mass of the cell's label in ``labels/cells``, except for the ``n_centroid_fallback`` cells that have
+  no pixel there (smaller than a pixel of the written grid), whose centre comes from the source (see
+  :class:`DatasetContract`);
 - ``obs["uid"]`` and ``obs["study_id"]`` of the source member, and ``obs["label_id"]``, the integer value of the
   row's cell in ``labels/cells``;
-- ``X`` integer counts (an integer dtype, or a float dtype with integral values) and an Ensembl var index
-  (``^ENS``), the same in every dataset;
+- ``X`` integer counts (an integer dtype, or a float dtype with integral values) over one var index, the same in
+  every dataset: the union of the members' features. ``var["feature_types"]`` comes from the source, and the
+  ``"Gene Expression"`` rows are Ensembl ids (``^ENS``). ``var["present"]`` says which features this dataset's
+  source measured; a feature it did not measure is all 0 in ``X``. ``n_features_present`` and
+  ``n_features_filled`` in the contract count the two;
 - ``images/<role>``, the one image ``(c, y, x)``: ``he`` uint8 with 3 channels or ``if`` uint16 with one channel per
   name in ``channels``. One role per collection;
 - ``labels/cells`` ``(y, x)`` integer on the image's grid, and optionally ``labels/tissue``. Images and labels are
@@ -17,9 +23,9 @@ cohort member, each written by :func:`spatialbatch.write_collection_dataset`. Pe
 - ``uns["spatial"][uid]``, a :class:`SpatialEntry`. It follows Squidpy's layout (``scalefactors``, ``metadata``) but
   holds no image arrays: the image is ``images/<role>`` of the dataset.
 
-Every sampled cell (``sample`` cells drawn with ``seed``) must have at least one pixel of its ``label_id``, and at
-least 99% of their centroids, rounded to the pixel, must lie inside their own label: a concave cell's centre of mass
-can lie outside its mask.
+Every sampled cell (``sample`` cells drawn with ``seed``) must have at least one pixel of its ``label_id``, except for
+at most ``n_centroid_fallback`` of them, and at least 99% of the centroids of those with pixels, rounded to the
+pixel, must lie inside their own label: a concave cell's centre of mass can lie outside its mask.
 
 Resolution: on the ``target`` grid the image was resampled to ``mpp_target``. A target finer than the native grid
 (``mpp_native / mpp_target > 1``, by any factor) is upsampling, which needs ``allow_upsample``. A dataset whose mpp is

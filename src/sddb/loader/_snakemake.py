@@ -63,11 +63,16 @@ rule $name:$input
 
 
 def fit_key(config: Mapping[str, Any]) -> dict[str, Any]:
-    """What a stain fit depends on: the chain's records and the members' uids.
+    """What a stain fit depends on: the chain's records, the roles, and the members' uids and ``mpp_native``.
 
     Not their stores: a written member's store is ``None`` in the plan of the next run.
     """
-    return {"adapters": config["adapters"], "members": sorted(config["members"])}
+    members = config["members"]
+    return {
+        "adapters": config["adapters"],
+        "roles": config["roles"],
+        "members": {uid: members[uid]["mpp_native"] for uid in sorted(members)},
+    }
 
 
 def records(adapters: Sequence[Any]) -> list[dict[str, Any]]:

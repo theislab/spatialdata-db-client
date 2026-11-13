@@ -18,11 +18,10 @@ import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
+import scipy.sparse as sp
 import xarray as xr
 import zarr
-from annbatch.io import V1_ENCODING  # type: ignore[import-untyped]
 from anndata.io import read_elem
-from spatialbatch import write_collection_dataset  # type: ignore[import-untyped]
 from zarr.errors import ZarrUserWarning
 
 from sddb.concat import _harmonize_var
@@ -40,15 +39,30 @@ from sddb.loader._adapters import MATERIALIZE_RECORDS, Rasterize, StainNormalize
 from sddb.loader._item import LoaderItem
 
 if TYPE_CHECKING:
-    from anndata import AnnData
-
     from sddb.adapter import TaskAdapter
 
 logger = logging.getLogger(__name__)
 
 _DATASET = re.compile(r"^dataset_\d+$")
 _GENE_EXPRESSION = "Gene Expression"
-_GENE_KEY_VERSION = "0.1.0"
+_GENE_KEY_VERSION = "0.2.0"
+_LOADER_EXTRA = "pip install 'spatialdata-db[loader]'"
+
+
+def _spatialbatch() -> Any:
+    """:mod:`spatialbatch`, imported only when a collection is written: it is not a dependency of ``import sddb``."""
+    try:
+        import spatialbatch  # type: ignore[import-untyped]
+    except ImportError as e:
+        raise ImportError(
+            f"writing a loader collection needs spatialbatch, from the `loader` extra: {_LOADER_EXTRA}"
+        ) from e
+    return spatialbatch
+
+
+def write_collection_dataset(*args: Any, **kwargs: Any) -> None:
+    """:func:`spatialbatch.write_collection_dataset`, imported when called."""
+    _spatialbatch().write_collection_dataset(*args, **kwargs)
 
 
 def materialize(
@@ -72,13 +86,17 @@ def materialize(
     state lives beside the collection, in ``<dest>.sddb/`` (``done/<uid>`` markers and ``scratch/``), so that `dest`
     holds only zarr groups. Per member:
 
-    1. its table is re-keyed to Ensembl ids (``gene_key="ensembl"`` of :meth:`~sddb.SpatialDataCohort.to_anndata`).
-       Only features whose ``var["feature_types"]`` is ``"Gene Expression"`` are kept, if the column exists. The
-       shared var is the intersection of the members' Gene Expression Ensembl ids, sorted, so that every dataset has
-       the same var. On a rerun the var of the datasets already written is binding, and a member that lacks any of
-       its genes raises. What is left out is counted in the ``GeneKey`` record, the first of
-       ``uns["sddb_contract"]["adapters"]`` (a step of this function, not an adapter: see
-       :data:`~sddb.loader.MATERIALIZE_RECORDS`), and logged;
+    1. its table is put on the collection's var, the union of the members' features, sorted: the outer join of
+       :meth:`~sddb.SpatialDataCohort.to_anndata` (``ad.concat(join="outer")`` in ``sddb/concat.py``). The
+       ``"Gene Expression"`` features (``var["feature_types"]``; all of them without that column) are re-keyed to
+       Ensembl ids (``gene_key="ensembl"``), and the other features, e.g. control probes, keep their names; repeated
+       names are made unique. ``var["feature_types"]`` is carried from the first member that has the feature. A
+       feature a member did not measure is 0 in its ``X``, and ``var["present"]`` of its dataset is False there; the
+       contract counts both (``n_features_present``, ``n_features_filled``). On a rerun the var of the datasets
+       already written is binding, and a member with a feature outside it raises. Only Gene Expression features
+       without an Ensembl id, and repeats of one id, are left out. All counts go into the ``GeneKey`` record, the
+       first of ``uns["sddb_contract"]["adapters"]`` (a step of this function, not an adapter: see
+       :data:`~sddb.loader.MATERIALIZE_RECORDS`), and are logged;
     2. the adapters run in order. An adapter with a ``fit`` method and no ``reference`` (:class:`StainNormalize`) is
        fit once on all members at that point of the chain, or takes the reference of the members already written;
     3. after the step that makes ``labels["cells"]`` (:class:`Rasterize`), the labels are written once to
@@ -100,10 +118,10 @@ def materialize(
     fixed in ``config.yaml`` before any job runs, and each job rebuilds the chain from the adapters' records
     (:func:`~sddb.loader.adapter_from_record`), so every adapter must be a loader adapter.
 
-    Memory: the tables of all members not yet written are held in memory until each is written, since the shared var
-    and a pooled fit need all of them; a member whose ``to_sdata`` gives a dask ``X`` keeps it lazy until its write.
-    The snakemake jobs read ``X`` so (``_run_one._read_store``), and each member job holds one table in memory.
-    Images and labels stay lazy (dask) and are written block by block.
+    Memory: a member with a local store (a :class:`~sddb.Dataset`) is opened with its tables' ``X`` as dask arrays
+    (:func:`_read_store`), as the snakemake jobs open it, so that the controller holds only obs and var of the members
+    not yet written. ``X`` is computed once, by :func:`spatialbatch.write_collection_dataset` after it sorts the rows,
+    so a member's write holds one ``X`` in memory. Images and labels stay lazy (dask) and are written block by block.
 
     Parameters
     ----------
@@ -255,13 +273,14 @@ def _prepare(
     paths: dict[str, str | None] = {}
     for m in todo:
         uid = str(m.uid)
-        sdata = m.to_sdata()
+        store = m._local_store() if callable(getattr(m, "_local_store", None)) else None
+        sdata = _read_store(store) if store is not None else m.to_sdata()
         paths[uid] = None if sdata.path is None else str(Path(sdata.path).absolute())
         items[uid] = LoaderItem.from_sdata(
             sdata, uid=uid, study_id=str(m.study_id), role=role, roles=roles, mpp_native=mpps.get(uid)
         )
-    shared = _shared_genes(items, root, written) if items else []
-    items = {uid: _rekey(item, shared) for uid, item in items.items()}
+    shared, types = _shared_features(items, root, written) if items else ([], [])
+    items = {uid: _rekey(item, shared, types) for uid, item in items.items()}
 
     plan = {
         "dest": str(dest),
@@ -271,6 +290,7 @@ def _prepare(
         "allow_mixed_grids": allow_mixed_grids,
         "obs_columns": list(obs_columns),
         "genes": shared,
+        "feature_types": types,
         "written": written,
         "todo": [str(m.uid) for m in todo],
         "fit": any(_needs_fit(a) for a in adapters),
@@ -380,6 +400,8 @@ def _finalize(dest: Path) -> list[str]:
     -------
     The dataset keys of the collection.
     """
+    from annbatch.io import V1_ENCODING  # type: ignore[import-untyped]
+
     root: Any = zarr.open_group(dest, mode="a", zarr_format=3, use_consolidated=False)
     root.update_attributes(V1_ENCODING)
     with warnings.catch_warnings():
@@ -493,6 +515,34 @@ def _is_done(dest: Path, uid: str, key: str) -> bool:
     return True
 
 
+def _read_store(path: str | Path) -> Any:
+    """A member's SpatialData store with each table's ``X`` as a dask array.
+
+    ``sd.read_zarr`` reads a table whole (spatialdata 0.8.0 ``_io/io_table.py:22-23``, anndata's ``read_zarr``).
+    The controller and the ``fit_stain`` job need only the tables' obs and var but open every member, so ``X`` stays
+    lazy (``anndata.experimental.read_elem_lazy``) until :func:`spatialbatch.write_collection_dataset` computes it
+    once, after it sorts the rows. The table keeps ``X``, ``obs``, ``var``, ``uns`` and
+    ``obsm["spatial"]``, which is what :meth:`LoaderItem.from_sdata` keeps.
+    """
+    import anndata as ad
+    import spatialdata as sd
+    from anndata.experimental import read_elem_lazy
+    from anndata.io import read_elem
+
+    sdata = sd.read_zarr(path, selection=("images", "labels", "points", "shapes"))
+    tables = Path(path) / "tables"
+    for name in sorted(p.name for p in tables.iterdir() if p.is_dir()) if tables.is_dir() else []:
+        g: Any = zarr.open_group(tables / name, mode="r")
+        sdata.tables[name] = ad.AnnData(
+            X=read_elem_lazy(g["X"]) if "X" in g else None,
+            obs=read_elem(g["obs"]),
+            var=read_elem(g["var"]),
+            uns=read_elem(g["uns"]) if "uns" in g else None,
+            obsm={"spatial": read_elem(g["obsm"]["spatial"])} if "obsm" in g and "spatial" in g["obsm"] else None,
+        )
+    return sdata
+
+
 def _contract(group: Any) -> DatasetContract:
     uns: Any = read_elem(group["uns"]["sddb_contract"])
     return DatasetContract.from_uns(uns)
@@ -508,60 +558,133 @@ def _release(cohort: Any) -> str:
     return str(release)
 
 
-def _gene_table(item: LoaderItem) -> tuple[AnnData, dict[str, int]]:
-    """The item's Gene Expression features keyed by Ensembl id, and the counts of what was left out."""
-    table = item.table
-    n_other = 0
-    if "feature_types" in table.var.columns:
-        ge = (table.var["feature_types"].astype(str) == _GENE_EXPRESSION).to_numpy()
-        n_other = int((~ge).sum())
-        table = table[:, ge]
-    table, n_drop, n_dup = _harmonize_var(table, "ensembl", item.uid)
-    return table, {"non_gene_expression": n_other, "no_ensembl_id": n_drop, "duplicates": n_dup}
+@dataclasses.dataclass(frozen=True)
+class _Features:
+    """A member's features on their way to the collection's var: which source columns, under which names."""
+
+    columns: np.ndarray  # positions in the source var
+    names: pd.Index  # the new names, unique
+    types: np.ndarray  # var["feature_types"] of each
+    counts: dict[str, int]  # what was left out or renamed
 
 
-def _shared_genes(items: Mapping[str, LoaderItem], root: Any, written: list[str]) -> list[str]:
-    """The collection's var: the sorted intersection over the members, or the var of the datasets already written."""
-    if written:
-        var = root[written[0]]["var"]
-        shared = [str(g) for g in np.asarray(read_elem(var[var.attrs["_index"]]))]
-    else:
-        shared = sorted(set.intersection(*(set(_gene_table(item)[0].var_names) for item in items.values())))
-    if not shared:
-        raise ValueError("the members share no gene with an Ensembl id")
-    return shared
-
-
-def _rekey(item: LoaderItem, shared: Sequence[str]) -> LoaderItem:
-    """Re-key the item's table to the shared Ensembl index and prepend the ``GeneKey`` record with what was left out.
+def _features(item: LoaderItem) -> _Features:
+    """The item's features: Gene Expression keyed by Ensembl id, the others by their own (unique) name.
 
     Raises
     ------
     ValueError
-        If the item lacks a gene of `shared`: on a rerun, a gene of the datasets already written.
+        If a feature that is not Gene Expression has no name.
     """
-    uid = item.uid
-    table, counts = _gene_table(item)
-    if counts["non_gene_expression"]:
-        logger.warning(
-            f"{uid}: left out {counts['non_gene_expression']} features that are not {_GENE_EXPRESSION} (feature_types)"
-        )
+    var = item.table.var
+    n = item.table.n_vars
+    if "feature_types" in var.columns:
+        types = var["feature_types"].astype(str).to_numpy(dtype=object)
+    else:
+        types = np.full(n, _GENE_EXPRESSION, dtype=object)
+    ge = types == _GENE_EXPRESSION
+    names = np.asarray(item.table.var_names.astype(str), dtype=object)
+    if (blank := ~ge & (pd.Series(names).str.strip() == "").to_numpy()).any():
+        raise ValueError(f"{item.uid}: {int(blank.sum())} features that are not {_GENE_EXPRESSION} have no var name")
+    keep = ~ge
+    n_drop = n_dup = 0
+    if ge.any():
+        import anndata as ad
+
+        ge_var = var[ge].copy()
+        ge_var["_position"] = np.flatnonzero(ge)
+        keyed, n_drop, n_dup = _harmonize_var(ad.AnnData(var=ge_var), "ensembl", item.uid)
+        position = keyed.var["_position"].to_numpy()
+        keep[position] = True
+        names[position] = keyed.var_names.to_numpy()
+    columns = np.flatnonzero(keep)
+    index = pd.Index(names[columns].astype(str))
+    n_rep = int(index.duplicated().sum())
+    if n_rep:
+        from anndata.utils import make_index_unique
+
+        index = make_index_unique(index)
+    counts = {"source": n, "no_ensembl_id": n_drop, "duplicates": n_dup, "made_unique": n_rep}
+    return _Features(columns=columns, names=index, types=types[columns], counts=counts)
+
+
+def _shared_features(items: Mapping[str, LoaderItem], root: Any, written: list[str]) -> tuple[list[str], list[str]]:
+    """The collection's var and its feature types: the sorted union over the members, or the written datasets' var."""
+    if written:
+        var = root[written[0]]["var"]
+        if "present" not in var.attrs.get("column-order", []):
+            raise ValueError(f"{written[0]} was written without var['present'] (an older materialize); use a new dest")
+        names = [str(g) for g in np.asarray(read_elem(var[var.attrs["_index"]]))]
+        return names, [str(t) for t in np.asarray(read_elem(var["feature_types"]))]
+    types: dict[str, str] = {}
+    for uid, item in items.items():
+        features = _features(item)
+        for name, kind in zip(features.names, features.types, strict=True):
+            if types.setdefault(name, kind) != kind:
+                logger.warning(f"{uid}: {name} is {kind!r}, an earlier member has it as {types[name]!r}, which is kept")
+    if not types:
+        raise ValueError("the members have no feature")
+    names = sorted(types)
+    return names, [types[name] for name in names]
+
+
+def _rekey(item: LoaderItem, shared: Sequence[str], types: Sequence[str]) -> LoaderItem:
+    """Put the item's table on the collection's var `shared`, 0 where it lacks a feature, and record the counts.
+
+    Each kept source column is moved to its column of `shared` by one product with a 0/1 matrix, so ``X`` stays
+    sparse, keeps its dtype, and stays lazy if it is a dask array.
+
+    Raises
+    ------
+    ValueError
+        If the item has a feature outside `shared`: on a rerun, outside the var of the datasets already written.
+    """
+    import anndata as ad
+
+    uid, table = item.uid, item.table
+    features = _features(item)
+    counts = features.counts
     if counts["no_ensembl_id"] or counts["duplicates"]:
         logger.warning(
-            f"{uid}: left out {counts['no_ensembl_id']} features without an Ensembl id and {counts['duplicates']} "
-            "duplicate ids"
+            f"{uid}: left out {counts['no_ensembl_id']} {_GENE_EXPRESSION} features without an Ensembl id and "
+            f"{counts['duplicates']} repeats of one id"
         )
-    if lacking := pd.Index(shared).difference(table.var_names).tolist():
+    if counts["made_unique"]:
+        logger.warning(f"{uid}: made {counts['made_unique']} repeated feature names unique")
+    target = pd.Index(shared).get_indexer(features.names)
+    if (outside := target < 0).any():
         raise ValueError(
-            f"{uid} lacks {len(lacking)} genes of the datasets already written (e.g. {lacking[:3]}), so the "
-            "collection's var cannot stay shared; use a new dest"
+            f"{uid} has {int(outside.sum())} features outside the var of the datasets already written (e.g. "
+            f"{features.names[outside][:3].tolist()}), so the collection's var cannot stay shared; use a new dest"
         )
-    n_out = int(table.n_vars - len(shared))
-    if n_out:
-        logger.warning(f"{uid}: left out {n_out} genes that not every member has")
-    params = {"gene_key": "ensembl", "feature_types": _GENE_EXPRESSION, **counts, "not_shared": n_out}
+    present = np.zeros(len(shared), bool)
+    present[target] = True
+    n_filled = int((~present).sum())
+    if n_filled:
+        logger.warning(f"{uid}: {n_filled} of {len(shared)} features of the collection are not measured, set to 0")
+    var = pd.DataFrame({"feature_types": list(types), "present": present}, index=pd.Index(shared))
+    X = _move_columns(table.X, features.columns, target, len(shared))
+    params = {"gene_key": "ensembl", "join": "outer", **counts, "present": int(present.sum()), "filled": n_filled}
     record = AdapterRecord(name=_GENE_KEY, version=_GENE_KEY_VERSION, params=params)
-    return dataclasses.replace(item, table=table[:, list(shared)].copy(), records=[record, *item.records])
+    rekeyed = ad.AnnData(X=X, obs=table.obs, var=var, obsm=dict(table.obsm))
+    return dataclasses.replace(item, table=rekeyed, records=[record, *item.records])
+
+
+def _move_columns(X: Any, columns: np.ndarray, target: np.ndarray, n: int) -> Any:
+    """``X`` with source column ``columns[i]`` at ``target[i]`` of `n` columns, and 0 in the others."""
+    move = sp.csr_matrix(
+        (np.ones(len(columns), dtype=X.dtype), (columns, target)), shape=(X.shape[1], n), dtype=X.dtype
+    )
+    if isinstance(X, da.Array):
+        X = X.rechunk({1: -1})
+        meta = X._meta if sp.issparse(X._meta) else np.empty((0, 0), dtype=X.dtype)
+        return X.map_blocks(_times, move, chunks=(X.chunks[0], (n,)), dtype=X.dtype, meta=meta)
+    return _times(X, move)
+
+
+def _times(block: Any, move: sp.csr_matrix) -> Any:
+    out = block @ move
+    return out.tocsr() if sp.issparse(out) else np.asarray(out)
 
 
 def _fit_or_reuse(step: Any, items: list[LoaderItem], root: Any, written: list[str]) -> None:
@@ -608,6 +731,7 @@ def _write(group: Any, key: str, item: LoaderItem, plan: Mapping[str, Any]) -> N
     if missing:
         raise ValueError(f"{item.uid}: after the chain the item has no {', no '.join(missing)}")
     assert item.grid is not None
+    present = item.table.var["present"].to_numpy(dtype=bool)
     contract = DatasetContract(
         version=CONTRACT_VERSION,
         uid=item.uid,
@@ -625,6 +749,8 @@ def _write(group: Any, key: str, item: LoaderItem, plan: Mapping[str, Any]) -> N
         adapters=item.records,
         stain_reference=item.stain_reference,
         n_centroid_fallback=item.n_centroid_fallback,
+        n_features_present=int(present.sum()),
+        n_features_filled=int((~present).sum()),
     )
     target = item.grid == "target"
     entry = SpatialEntry.model_validate(
@@ -645,14 +771,21 @@ def _write(group: Any, key: str, item: LoaderItem, plan: Mapping[str, Any]) -> N
         }
     )
 
-    table = item.table.copy()
-    if isinstance(table.X, da.Array):  # a lazy X (the snakemake jobs read it so): annbatch writes it from memory
-        table.X = table.X.compute()
-    table.obs["uid"] = item.uid
-    table.obs["study_id"] = item.study_id
+    import anndata as ad
+
+    obs = item.table.obs.copy()
+    obs["uid"] = item.uid
+    obs["study_id"] = item.study_id
     for col, value in plan["members"][item.uid]["obs"].items():
-        table.obs[col] = pd.Categorical([value] * table.n_obs)
-    table.uns = {"sddb_contract": contract.to_uns(), "spatial": {item.uid: entry.model_dump()}}
+        obs[col] = pd.Categorical([value] * len(obs))
+    # X is shared, not copied: a dask X (from _read_store) is computed once by spatialbatch, after it sorts the rows
+    table = ad.AnnData(
+        X=item.table.X,
+        obs=obs,
+        var=item.table.var,
+        obsm=dict(item.table.obsm),
+        uns={"sddb_contract": contract.to_uns(), "spatial": {item.uid: entry.model_dump()}},
+    )
     write_collection_dataset(
         group,
         key=key,

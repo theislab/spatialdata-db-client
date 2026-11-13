@@ -15,6 +15,7 @@ from typing import Any
 import anndata as ad
 import numpy as np
 import pandas as pd
+import pytest
 import zarr
 from scipy import ndimage, sparse
 
@@ -94,6 +95,8 @@ def write_dataset(
     label_ids: Sequence[int] | None = None,
     stain_reference: Mapping[str, Any] | None = None,
     var_names: Sequence[str] | None = None,
+    var_columns: Mapping[str, Sequence[Any]] = MappingProxyType({}),
+    zero_features: Sequence[int] = (),
     contract: Mapping[str, Any] = MappingProxyType({}),
     spatial: Mapping[str, Any] | None = None,
     seed: int = 0,
@@ -126,6 +129,10 @@ def write_dataset(
         ``DatasetContract.stain_reference``, through the model (so it must be valid).
     var_names
         The var index, ``VAR_NAMES`` by default.
+    var_columns
+        Columns of var, e.g. ``feature_types`` and ``present``.
+    zero_features
+        Positions of features whose counts are all 0.
     contract
         Entries merged into the encoded ``uns["sddb_contract"]`` as is, so they may be invalid.
     spatial
@@ -150,6 +157,7 @@ def write_dataset(
 
     names = list(VAR_NAMES if var_names is None else var_names)
     counts = rng.poisson(2.0, (n_cells, len(names))).astype(np.int32)
+    counts[:, list(zero_features)] = 0
     if negative_counts:
         counts[0, 0] = -1
     X = sparse.csr_matrix(counts.astype(np.float32) + 0.5 if fractional_counts else counts)
@@ -163,7 +171,7 @@ def write_dataset(
             },
             index=[f"cell_{i}" for i in ids],
         ),
-        var=pd.DataFrame(index=names),
+        var=pd.DataFrame(dict(var_columns), index=names),
     )
     table.obsm["spatial"] = centres
     fields = base_contract(role, uid=uid, study_id=study_id)
@@ -188,8 +196,7 @@ def write_dataset(
     label_arrays = {"cells": labels}
     if tissue:
         label_arrays["tissue"] = (labels > 0).astype(np.uint8)
-    from spatialbatch.io import write_collection_dataset
-
+    write_collection_dataset = pytest.importorskip("spatialbatch").write_collection_dataset
     write_collection_dataset(group, key=key, table=table, images={role: image}, labels=label_arrays)
     if labels_shape is not None:
         group[key]["labels"].create_array("cells", shape=labels_shape, dtype=np.uint32, fill_value=0, overwrite=True)

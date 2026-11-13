@@ -23,7 +23,7 @@ import zarr
 from sddb.contract import CONTRACT_VERSION, AdapterRecord
 from sddb.loader._adapters import adapter_from_record
 from sddb.loader._item import LoaderItem
-from sddb.loader._materialize import _finalize, _fit_stage, _needs_fit, _rekey, _write_member
+from sddb.loader._materialize import _finalize, _fit_stage, _needs_fit, _read_store, _rekey, _write_member
 from sddb.loader._snakemake import fit_key
 
 
@@ -80,34 +80,6 @@ def _chain(config: Mapping[str, Any]) -> list[Any]:
     return [adapter_from_record(AdapterRecord(**record)) for record in config["adapters"]]
 
 
-def _read_store(path: str | Path) -> Any:
-    """A member's SpatialData store with each table's ``X`` as a dask array.
-
-    ``sd.read_zarr`` reads a table whole (spatialdata ``_io/io_table.py`` ``_read_table``, anndata's
-    ``read_zarr``). The ``fit_stain`` job needs only the tables' obs and var but opens every member, and a member job
-    copies its table while re-keying it, so ``X`` stays lazy (``anndata.experimental.read_elem_lazy``) until
-    :func:`~sddb.loader._materialize._write` computes it once. The table keeps ``X``, ``obs``, ``var``, ``uns`` and
-    ``obsm["spatial"]``, which is what :meth:`LoaderItem.from_sdata` keeps.
-    """
-    import anndata as ad
-    import spatialdata as sd
-    from anndata.experimental import read_elem_lazy
-    from anndata.io import read_elem
-
-    sdata = sd.read_zarr(path, selection=("images", "labels", "points", "shapes"))
-    tables = Path(path) / "tables"
-    for name in sorted(p.name for p in tables.iterdir() if p.is_dir()) if tables.is_dir() else []:
-        g: Any = zarr.open_group(tables / name, mode="r")
-        sdata.tables[name] = ad.AnnData(
-            X=read_elem_lazy(g["X"]) if "X" in g else None,
-            obs=read_elem(g["obs"]),
-            var=read_elem(g["var"]),
-            uns=read_elem(g["uns"]) if "uns" in g else None,
-            obsm={"spatial": read_elem(g["obsm"]["spatial"])} if "obsm" in g and "spatial" in g["obsm"] else None,
-        )
-    return sdata
-
-
 def _open(config: Mapping[str, Any], uid: str) -> LoaderItem:
     """Open one member from its store (``X`` lazily, see :func:`_read_store`), re-keyed to the collection's var."""
     m = config["members"][uid]
@@ -119,7 +91,7 @@ def _open(config: Mapping[str, Any], uid: str) -> LoaderItem:
         roles=config["roles"],
         mpp_native=m["mpp_native"],
     )
-    return _rekey(item, config["genes"])
+    return _rekey(item, config["genes"], config["feature_types"])
 
 
 def _write_json(path: Path, content: Mapping[str, Any]) -> None:

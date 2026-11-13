@@ -24,6 +24,7 @@ _DTYPES = {"he": np.dtype(np.uint8), "if": np.dtype(np.uint16)}
 _LABELS = {"cells", "tissue"}
 _TRANSFORM_ATTRS = {"coordinateTransformations", "multiscales", "transform", "transformations"}
 _INSIDE = 0.99  # share of sampled centroids that must lie inside their own label
+_GENE_EXPRESSION = "Gene Expression"
 _WINDOW = 64  # half side of the window searched around a centroid before scanning the whole labels array
 
 
@@ -169,7 +170,7 @@ def _check_dataset(group: Any, out: _Result, *, sample: int, seed: int) -> None:
     if cells is not None and centres is not None and label_id is not None and len(rows):
         out.issues += _check_cells(cells, centres[rows], label_id[rows], contract.n_centroid_fallback)
     out.issues += _check_counts(group, rows)
-    issues, out.var = _check_var(group)
+    issues, out.var = _check_var(group, contract, rows)
     out.issues += issues
 
 
@@ -242,6 +243,10 @@ def _check_encoding(group: Any) -> list[str]:
     meta = group.attrs.get("spatialbatch")
     if not isinstance(meta, dict) or meta.get("centres") != "obsm/spatial":
         return ["not written by spatialbatch.write_collection_dataset (no attrs['spatialbatch'] with centres in obsm)"]
+    version = str(meta.get("encoding-version", ""))
+    m = _SEMVER.match(version)
+    if not m or tuple(int(p) for p in m.groups()) < (0, 2, 0):  # spatialbatch crops at read time from 0.2.0 on
+        return [f"attrs['spatialbatch']['encoding-version'] is {version!r}, needs 0.2.0 or later (centres in obsm)"]
     return []
 
 
@@ -373,7 +378,7 @@ def _check_cells(cells: zarr.Array[Any], centres: np.ndarray, label_id: np.ndarr
     ys = np.clip(np.floor(centres[:, 1] + 0.5).astype(np.int64), 0, height - 1)
     inside = np.asarray(cells.get_coordinate_selection((ys, xs))) == label_id
     issues = []
-    absent = _absent(cells, label_id[~inside], ys[~inside], xs[~inside])
+    absent = _absent(cells, label_id[~inside], ys[~inside], xs[~inside], n_fallback)
     if len(absent) > n_fallback:
         issues.append(
             f"{len(absent)} of {len(label_id)} sampled cells have no pixel of their obs['label_id'] in labels/cells, "
@@ -389,14 +394,19 @@ def _check_cells(cells: zarr.Array[Any], centres: np.ndarray, label_id: np.ndarr
     return issues
 
 
-def _absent(cells: zarr.Array[Any], ids: np.ndarray, ys: np.ndarray, xs: np.ndarray) -> set[int]:
-    """The `ids` with no pixel in `cells`: first searched near their centroid, then over the whole array by block."""
+def _absent(cells: zarr.Array[Any], ids: np.ndarray, ys: np.ndarray, xs: np.ndarray, allowed: int = 0) -> set[int]:
+    """The `ids` with no pixel in `cells`: first searched near their centroid, then over the whole array by block.
+
+    The whole array is scanned only if more than `allowed` ids have no pixel near their centroid. Otherwise those are
+    returned as absent, though one may have pixels farther away; it is then left out of the share of centroids that
+    lie inside their label, as an absent cell is.
+    """
     missing = set()
     for value, y, x in zip(ids.tolist(), ys.tolist(), xs.tolist(), strict=True):
         window = cells[max(y - _WINDOW, 0) : y + _WINDOW, max(x - _WINDOW, 0) : x + _WINDOW]
         if not (np.asarray(window) == value).any():
             missing.add(value)
-    if not missing:
+    if len(missing) <= allowed:
         return missing
     height, width = cells.shape
     step = max((cells.shards or cells.chunks)[0], 1024)
@@ -431,14 +441,49 @@ def _check_counts(group: Any, rows: np.ndarray) -> list[str]:
     return issues
 
 
-def _check_var(group: Any) -> tuple[list[str], pd.Index | None]:
-    """The var index is Ensembl gene ids; returns it for the comparison across datasets."""
+def _check_var(group: Any, contract: DatasetContract, rows: np.ndarray) -> tuple[list[str], pd.Index | None]:
+    """The ``"Gene Expression"`` features are Ensembl ids, and ``var["present"]`` agrees with the contract and ``X``.
+
+    Without ``var["feature_types"]`` every feature is taken as Gene Expression. Without ``var["present"]`` every
+    feature is taken as measured. Returns the var index for the comparison across datasets.
+    """
     var = group["var"]
     index = pd.Index(np.asarray(_read(var[var.attrs["_index"]])).astype(str))
-    bad = index[~index.str.match(r"^ENS")]
+    columns = list(var.attrs.get("column-order", []))
+    issues = []
+    ge = np.ones(len(index), bool)
+    if "feature_types" in columns:
+        ge = np.asarray(_read(var["feature_types"])).astype(str) == _GENE_EXPRESSION
+    bad = index[ge & ~index.str.match(r"^ENS")]
     if len(bad):
-        return [f"var index has {len(bad)} names not matching ^ENS (Ensembl ids), e.g. {list(bad[:3])}"], index
-    return [], index
+        issues.append(
+            f"var index has {len(bad)} {_GENE_EXPRESSION} names not matching ^ENS (Ensembl ids), e.g. {list(bad[:3])}"
+        )
+    if "present" not in columns:
+        if contract.n_features_filled or contract.n_features_present not in (0, len(index)):
+            issues.append(
+                f"the contract has n_features_present {contract.n_features_present} and n_features_filled "
+                f"{contract.n_features_filled} of {len(index)} features, but var has no 'present' column"
+            )
+        return issues, index
+    present = np.asarray(_read(var["present"]))
+    if present.dtype != np.bool_:
+        return [*issues, f"var['present'] has dtype {present.dtype}, needs bool"], index
+    counts = {"n_features_present": int(present.sum()), "n_features_filled": int((~present).sum())}
+    for name, n in counts.items():
+        if getattr(contract, name) != n:
+            issues.append(f"the contract's {name} is {getattr(contract, name)}, var['present'] gives {n}")
+    if (~present).any() and len(rows):
+        X = group["X"]
+        sub: Any = (
+            sparse_dataset(X)[rows] if isinstance(X, zarr.Group) else X.get_orthogonal_selection((rows, slice(None)))
+        )
+        filled = sub[:, np.flatnonzero(~present)]
+        if n_nonzero := int(filled.count_nonzero() if hasattr(filled, "count_nonzero") else np.count_nonzero(filled)):
+            issues.append(
+                f"X has {n_nonzero} values != 0 in the sampled rows for features var['present'] says are filled"
+            )
+    return issues, index
 
 
 def _index_diff(var: pd.Index, ref: pd.Index) -> str:

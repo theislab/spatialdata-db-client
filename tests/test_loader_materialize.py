@@ -10,6 +10,12 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
+
+# the loader extra
+pytest.importorskip("pydantic")
+pytest.importorskip("squidpy")
+pytest.importorskip("dask_image")
+pytest.importorskip("spatialbatch")
 import shapely
 import spatialdata as sd
 import zarr
@@ -19,7 +25,15 @@ from spatialdata.models import TableModel
 from tests.test_loader_adapters import he_image, make_sdata, squares
 
 from sddb.contract import DatasetContract, validate
-from sddb.loader import Centroids, Rasterize, StainNormalize, TissueMask, _materialize, default_chain, materialize
+from sddb.loader import (
+    Centroids,
+    Rasterize,
+    StainNormalize,
+    TissueMask,
+    _materialize,
+    default_chain,
+    materialize,
+)
 
 ROLES = {"image": "^images/he$", "table": "^tables/table$"}
 SIZE = 96
@@ -35,6 +49,9 @@ class FakeMember:
 
     def to_sdata(self):
         return sd.read_zarr(self._path)
+
+    def _local_store(self):
+        return self._path
 
 
 class FakeCohort(list):
@@ -115,7 +132,8 @@ def test_materialize_synthetic_cohort_validates(cohort, tmp_path, caplog):
     root = zarr.open_group(dest, mode="r")
     assert sorted(k for k in root.group_keys() if k.startswith("dataset_")) == ["dataset_0", "dataset_1"]
 
-    shared = [GENES[f"GENE{i}"] for i in range(1, 5)]  # GENE5 only in uidB; the controls and NOENSEMBL left out
+    # the union, sorted: GENE5 only in uidB; NOENSEMBL (Gene Expression without an Ensembl id) is left out
+    union = [GENES[f"GENE{i}"] for i in range(1, 6)] + ["NegCtrl_1", "NegCtrl_2"]
     references = []
     for key, uid in (("dataset_0", "uidA"), ("dataset_1", "uidB")):
         contract = _contract(dest, key)
@@ -132,27 +150,33 @@ def test_materialize_synthetic_cohort_validates(cohort, tmp_path, caplog):
             "StainNormalize",
         ]
         genes = contract.adapters[0].params
-        assert genes["non_gene_expression"] == 2
+        assert genes["join"] == "outer"
         assert genes["no_ensembl_id"] == 1
-        assert genes["not_shared"] == (1 if uid == "uidB" else 0)
+        assert genes["filled"] == (1 if uid == "uidA" else 0)
+        assert (contract.n_features_present, contract.n_features_filled) == ((6, 1) if uid == "uidA" else (7, 0))
         references.append(contract.stain_reference)
 
         table = _table(dest, key)
-        assert list(table.var_names) == shared
+        assert list(table.var_names) == union
+        assert table.var["feature_types"].tolist() == ["Gene Expression"] * 5 + ["Negative Control Probe"] * 2
+        assert table.var["present"].tolist() == [True] * 4 + [uid == "uidB"] + [True] * 2
         assert set(table.obs["uid"]) == {uid}
         assert set(table.obs["tissue"]) == {"breast"}
         _, _, counts, var = sources[uid]
-        # X holds the source counts of the shared genes, row for row by label id
+        # X holds the source counts of every feature, row for row by label id, and 0 for the one not measured
         source_rows = table.obs["label_id"].to_numpy() - 1
-        cols = [var.index.get_loc(g) for g in var.index[var["gene_ids"].isin(shared)]]
+        expected = np.zeros((len(source_rows), len(union)), counts.dtype)
+        for j, name in enumerate(union):
+            if len(hit := np.flatnonzero(var["gene_ids"].to_numpy() == name)):
+                expected[:, j] = counts[source_rows, hit[0]]
         np.testing.assert_array_equal(
-            np.asarray(table.X.todense() if hasattr(table.X, "todense") else table.X), counts[source_rows][:, cols]
+            np.asarray(table.X.todense() if hasattr(table.X, "todense") else table.X), expected
         )
         assert (state / "done" / uid).is_file()
         assert json.loads((state / "done" / uid).read_text())["key"] == key
     assert references[0] is not None
     assert references[0] == references[1]  # one pooled reference for the cohort
-    assert "2 features that are not Gene Expression" in caplog.text
+    assert "uidA: 1 of 7 features of the collection are not measured, set to 0" in caplog.text
     assert not (state / "scratch").exists()
     assert sorted(p.name for p in dest.iterdir() if not p.name.startswith("zarr.json")) == ["dataset_0", "dataset_1"]
 
@@ -461,7 +485,7 @@ def _rasterize(shapes, size):
 
 
 @pytest.mark.parametrize("runner", ["local", "snakemake"])
-def test_labels_cell_without_pixels_takes_its_table_centroid(tmp_path, runner):
+def test_labels_cell_without_pixels_takes_its_native_centre_of_mass(tmp_path, runner):
     path = write_member(tmp_path, "uidA", seed=0, labels=True)[0]
     dest = materialize(
         FakeCohort([FakeMember("uidA", path)]),
@@ -483,3 +507,11 @@ def test_labels_cell_without_pixels_takes_its_table_centroid(tmp_path, runner):
     # intrinsic (x + 0.5) at 0.25 um/px is (x + 0.5) / 2 - 0.5 at 0.5 um/px, the pixel-centre convention of Centroids
     expected = source.obsm["spatial"][tiny] / 2 - 0.5
     np.testing.assert_allclose(xy[tiny], expected, atol=0.5)
+
+
+def test_write_without_spatialbatch_names_the_loader_extra(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "spatialbatch", None)
+    with pytest.raises(ImportError, match=r"loader.*spatialdata-db\[loader\]"):
+        _materialize.write_collection_dataset()

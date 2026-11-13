@@ -8,6 +8,13 @@ import sys
 
 import numpy as np
 import pytest
+
+# the loader extra
+pytest.importorskip("pydantic")
+pytest.importorskip("squidpy")
+pytest.importorskip("dask_image")
+pytest.importorskip("spatialbatch")
+pytest.importorskip("snakemake")
 import yaml
 import zarr
 from tests.test_loader_materialize import ROLES, FakeCohort, FakeMember, _contract, write_member
@@ -329,12 +336,10 @@ def test_parallel_members_consolidated(tmp_path):
 
 
 def test_jobs_read_x_lazily_and_write_it_whole(tmp_path):
-    """The jobs keep X as dask until the write (_run_one._read_store), and write what the in-process run writes."""
+    """The jobs keep X as dask until the write (_materialize._read_store), and write what the in-process run writes."""
     import dask.array as da
     import spatialdata as sd
     from scipy import sparse
-
-    from sddb.loader import _run_one
 
     members = []
     for uid, seed in (("uidA", 0), ("uidB", 1)):
@@ -345,7 +350,7 @@ def test_jobs_read_x_lazily_and_write_it_whole(tmp_path):
         sparse_path = tmp_path / f"{uid}_csr.zarr"
         sdata.write(sparse_path)
         members.append(FakeMember(uid, sparse_path))
-        lazy = _run_one._read_store(sparse_path).tables["table"]
+        lazy = _materialize._read_store(sparse_path).tables["table"]
         assert isinstance(lazy.X, da.Array)
         assert sparse.issparse(lazy.X.compute())
         np.testing.assert_array_equal(lazy.X.compute().toarray(), table.X.toarray())
@@ -359,3 +364,11 @@ def test_jobs_read_x_lazily_and_write_it_whole(tmp_path):
         assert a["X"].attrs["encoding-type"] == b["X"].attrs["encoding-type"] == "csr_matrix"
         for part in ("data", "indices", "indptr"):
             np.testing.assert_array_equal(a["X"][part][...], b["X"][part][...], err_msg=f"{key} X/{part}")
+
+
+def test_fit_key_changes_with_roles_and_mpp_native():
+    config = {"adapters": [], "roles": dict(ROLES), "members": {"uidA": {"mpp_native": 0.25, "path": "a.zarr"}}}
+    key = _snakemake.fit_key(config)
+    assert _snakemake.fit_key({**config, "members": {"uidA": {"mpp_native": 0.25, "path": None}}}) == key
+    assert _snakemake.fit_key({**config, "members": {"uidA": {"mpp_native": 0.5, "path": "a.zarr"}}}) != key
+    assert _snakemake.fit_key({**config, "roles": {**ROLES, "image": "^images/other$"}}) != key

@@ -7,9 +7,13 @@ import sys
 
 import numpy as np
 import pytest
+
+# the loader extra
+pytest.importorskip("pydantic")
+pytest.importorskip("spatialbatch")
 import zarr
 from scipy import ndimage
-from tests._contract_fixture import base_contract, draw_cells, write_collection
+from tests._contract_fixture import N_VARS, VAR_NAMES, base_contract, draw_cells, write_collection
 
 from sddb.contract import ContractError, DatasetContract, assert_valid, validate, validate_dataset
 
@@ -258,14 +262,14 @@ def test_import_sddb_does_not_import_pydantic_stack():
     assert out.strip() == "[]"
 
 
-def test_spatialbatch_check_contract_uses_validator(tmp_path):
-    from spatialbatch.io import check_contract
+def test_spatialbatch_loader_uses_validator(tmp_path):
+    from spatialbatch import Loader, SpatialDatasetCollection
 
-    good = zarr.open_group(write_collection(tmp_path / "good.zarr", n_datasets=1), mode="r")
-    assert check_contract(good["dataset_0"]) is True
-    bad = zarr.open_group(write_collection(tmp_path / "bad.zarr", n_datasets=1, image_dtype=np.uint16), mode="r")
+    good = SpatialDatasetCollection(write_collection(tmp_path / "good.zarr", n_datasets=1))
+    assert Loader(images=["he"], crop_px=16).use_collection(good).n_obs == 60
+    bad = SpatialDatasetCollection(write_collection(tmp_path / "bad.zarr", n_datasets=1, image_dtype=np.uint16))
     with pytest.raises(ValueError, match="uint8"):
-        check_contract(bad["dataset_0"])
+        Loader(images=["he"], crop_px=16).use_collection(bad)
 
 
 def test_absent_cells_allowed_up_to_the_centroid_fallback_count(tmp_path):
@@ -294,3 +298,65 @@ def test_contract_without_centroid_fallback_field_still_validates(tmp_path):
     assert "n_centroid_fallback" not in uns
     assert validate(path) == []
     assert DatasetContract.from_uns(base_contract()).n_centroid_fallback == 0
+
+
+def _features(n_controls=2, present=None):
+    """Var columns: GE Ensembl ids first, then `n_controls` controls; `present` as given."""
+    types = ["Gene Expression"] * (N_VARS - n_controls) + ["Negative Control Probe"] * n_controls
+    names = VAR_NAMES[: N_VARS - n_controls] + [f"NegCtrl_{i}" for i in range(n_controls)]
+    columns = {"feature_types": types}
+    if present is not None:
+        columns["present"] = present
+    return {"var_names": names, "var_columns": columns}
+
+
+def test_ensembl_ids_required_only_for_gene_expression(tmp_path):
+    assert _issues(tmp_path / "a", n_datasets=1, **_features()) == []
+    knobs = _features()
+    knobs["var_columns"]["feature_types"] = ["Gene Expression"] * N_VARS  # the controls marked as genes
+    issues = _issues(tmp_path / "b", n_datasets=1, **knobs)
+    assert len(issues) == 1
+    assert "2 Gene Expression names not matching ^ENS" in issues[0]
+
+
+def test_presence_mask_agrees_with_contract_and_x(tmp_path):
+    present = [True] * (N_VARS - 1) + [False]
+    counts = {"n_features_present": N_VARS - 1, "n_features_filled": 1}
+    ok = {**_features(present=present), "zero_features": [N_VARS - 1], "contract": counts}
+    assert _issues(tmp_path / "a", n_datasets=1, **ok) == []
+    issues = _issues(tmp_path / "b", n_datasets=1, **{**ok, "zero_features": []})
+    assert len(issues) == 1
+    assert "values != 0 in the sampled rows for features var['present'] says are filled" in issues[0]
+    issues = _issues(tmp_path / "c", n_datasets=1, **{**ok, "contract": {**counts, "n_features_filled": 0}})
+    assert issues == ["dataset_0: the contract's n_features_filled is 0, var['present'] gives 1"]
+    issues = _issues(tmp_path / "d", n_datasets=1, **{**_features(), "contract": counts})
+    assert len(issues) == 1
+    assert "var has no 'present' column" in issues[0]
+
+
+@pytest.mark.parametrize("field", ["n_features_present", "n_features_filled"])
+@pytest.mark.parametrize("value", [-1, 1.5, "2"])
+def test_bad_feature_count(tmp_path, field, value):
+    issues = _issues(tmp_path, n_datasets=1, overrides={0: {"contract": {field: value}}})
+    assert len(issues) == 1
+    assert field in issues[0]
+
+
+def test_contract_without_feature_count_fields_still_validates(tmp_path):
+    path = write_collection(tmp_path / "c.zarr", n_datasets=1)
+    uns = zarr.open_group(path / "dataset_0" / "uns" / "sddb_contract", mode="a")
+    for field in ("n_features_present", "n_features_filled"):
+        del uns[field]
+    assert validate(path) == []
+    contract = DatasetContract.from_uns(base_contract())
+    assert (contract.n_features_present, contract.n_features_filled) == (0, 0)
+
+
+def test_encoding_before_crop_at_read_is_refused(tmp_path):
+    path = write_collection(tmp_path / "c.zarr", n_datasets=1)
+    group = zarr.open_group(path / "dataset_0", mode="a")
+    group.attrs["spatialbatch"] = {**group.attrs["spatialbatch"], "encoding-version": "0.1.0"}
+    issues = validate(path)
+    assert len(issues) == 1
+    assert "encoding-version" in issues[0]
+    assert "0.2.0" in issues[0]
