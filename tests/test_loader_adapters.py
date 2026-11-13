@@ -357,12 +357,11 @@ def test_centroids_label_cell_takes_its_table_centroid():
     np.testing.assert_allclose(out.table.obsm["spatial"][3], com[3], atol=1e-9)
 
 
-def test_centroids_label_cell_table_centroid_in_another_frame_is_fitted():
-    # obsm in another frame (e.g. microns): the affine fitted on the cells with pixels maps it
-    item, com = _label_item(lambda com: com * 0.2125 + 3.0)
-    out = Centroids().build(item)
-    assert out.n_centroid_fallback == 1
-    np.testing.assert_allclose(out.table.obsm["spatial"][3], com[3], atol=1e-6)
+def test_centroids_label_cell_table_centroid_in_another_frame_raises():
+    # obsm in microns (0.2125 um/px) against a labels element in pixels: no fit from the data, the check raises
+    item, _ = _label_item(lambda com: (com + 0.5) * 0.2125)
+    with pytest.raises(ValueError, match=r"'cell_labels'.*median \d+\.\d+ px.*not in the frame of 'cell_labels'"):
+        Centroids().build(item)
 
 
 def test_centroids_raise_without_pixels_polygon_or_table_centroid():

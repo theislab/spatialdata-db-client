@@ -249,7 +249,7 @@ class Rasterize(_Adapter):
             table_centroids=_map_points(src.table_centroids, grid.to_index(src.region_to_cs))
             if src.table_centroids is not None and src.region_to_cs is not None
             else None,
-            table_centroids_source=src.table_centroids,
+            table_centroids_element=src.region,
             source=None,
         )
 
@@ -426,18 +426,19 @@ class Centroids(_Adapter):
 
     1. the centroid of its polygon (``item.shape_centroids``, set by :class:`Rasterize` for shape cells);
     2. the source table's centroid (``obsm["spatial"]``, ``item.table_centroids``). Readers put it in different
-       frames (microns for Atera, pixels for CODEX, DNB units for Stereo-seq in spatialdata-io), and spatialdata gives a table no
-       transformation, so :class:`Rasterize` maps it as intrinsic coordinates of the element the table annotates,
-       and this step checks the mapping on the cells that have pixels: the median distance to their pixel centroid
-       must be at most :data:`_TABLE_CENTROID_PX`. If it is not, an affine fitted from the source values to those
-       pixel centroids is used, under the same check.
+       frames (microns for Atera, pixels for CODEX, DNB units for Stereo-seq in spatialdata-io), and spatialdata
+       gives a table no transformation, so :class:`Rasterize` maps it as intrinsic coordinates of the element the
+       table annotates (that element's transformation), and this step checks the mapping on up to
+       :data:`_TABLE_CHECK_ROWS` cells that have pixels: the median distance to their pixel centroid must be at most
+       :data:`_TABLE_CENTROID_PX`, else it raises, as ``obsm["spatial"]`` is then not in that element's frame.
 
     The count goes to ``item.n_centroid_fallback`` and into the contract as ``n_centroid_fallback``, and is logged.
 
     Raises
     ------
     ValueError
-        If a row has no pixel, no polygon centroid and no usable table centroid, or its fallback centroid is outside
+        If a row has no pixel, no polygon centroid and no usable table centroid, if the table centroids are not in the
+        frame of the element the table annotates (the check above), or a fallback centroid is outside
         the written grid.
     """
 
@@ -518,8 +519,17 @@ def _fallback_centroids(item: LoaderItem, xy: np.ndarray, present: np.ndarray, s
 
 
 def _checked_table_centroids(item: LoaderItem, xy: np.ndarray, present: np.ndarray) -> tuple[np.ndarray | None, str]:
-    """The table centroids on the written grid if they agree with the pixel centroids, and how they were mapped."""
-    mapped, source = item.table_centroids, item.table_centroids_source
+    """The table centroids on the written grid, checked against the pixel centroids, and how they were mapped.
+
+    Returns ``None`` if no cell with pixels has a table centroid to check against.
+
+    Raises
+    ------
+    ValueError
+        If the median distance to the pixel centroids is above :data:`_TABLE_CENTROID_PX`: ``obsm["spatial"]`` is not
+        in the frame of the element the table annotates.
+    """
+    mapped, element = item.table_centroids, item.table_centroids_element
     assert mapped is not None
     ok = present & np.isfinite(mapped).all(axis=1)
     if not ok.any():
@@ -528,23 +538,14 @@ def _checked_table_centroids(item: LoaderItem, xy: np.ndarray, present: np.ndarr
     if len(rows) > _TABLE_CHECK_ROWS:
         rows = np.random.default_rng(0).choice(rows, _TABLE_CHECK_ROWS, replace=False)
     err = float(np.median(np.hypot(*(mapped[rows] - xy[rows]).T)))
-    if err <= _TABLE_CENTROID_PX:
-        return mapped, f"as coordinates of the annotated element, median {err:.2f} px from the pixel centroids"
-    if source is None or len(rows) < 3:
-        return None, f"as coordinates of the annotated element it is a median {err:.2f} px from the pixel centroids"
-    a = np.c_[source[rows], np.ones(len(rows))]
-    coef, *_ = np.linalg.lstsq(a, xy[rows], rcond=None)
-    fitted = np.c_[source, np.ones(len(source))] @ coef
-    fit_err = float(np.median(np.hypot(*(fitted[rows] - xy[rows]).T)))
-    if fit_err <= _TABLE_CENTROID_PX:
-        return fitted, (
-            f"an affine fitted on {len(rows)} cells with pixels, median {fit_err:.2f} px; as coordinates of the "
-            f"annotated element it was {err:.2f} px off"
+    if err > _TABLE_CENTROID_PX:
+        raise ValueError(
+            f"{item.uid}: the table's obsm['spatial'], mapped through the transformation of {element!r} (the element "
+            f"the table annotates), is a median {err:.2f} px from the pixel centroids of {len(rows)} cells with pixels "
+            f"(at most {_TABLE_CENTROID_PX:g} px allowed): obsm['spatial'] is not in the frame of {element!r}, so it "
+            "cannot place the cells without pixels"
         )
-    return None, (
-        f"{err:.2f} px off as coordinates of the annotated element and {fit_err:.2f} px off with a fitted affine, "
-        f"above {_TABLE_CENTROID_PX:g} px"
-    )
+    return mapped, f"through the transformation of {element!r}, median {err:.2f} px from the pixel centroids"
 
 
 def _label_sums(labels: da.Array) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:

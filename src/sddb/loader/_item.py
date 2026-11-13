@@ -41,6 +41,7 @@ class _Source:
     # annotates (its region), whose intrinsic coordinates those are taken to be
     table_centroids: np.ndarray | None = None
     region_to_cs: np.ndarray | None = None
+    region: str | None = None
 
 
 @dataclass
@@ -88,8 +89,8 @@ class LoaderItem:
     table_centroids
         ``(n_obs, 2)`` the source table's ``obsm["spatial"]`` mapped into written pixel-index coordinates by
         :class:`~sddb.loader.Rasterize`, as intrinsic coordinates of the element the table annotates; ``None``
-        without one. `table_centroids_source` keeps the unmapped values, for :class:`~sddb.loader.Centroids` to fit
-        their frame when the mapping disagrees with the cells that have pixels.
+        without one. `table_centroids_element` names that element, for :class:`~sddb.loader.Centroids`' check that
+        the mapping agrees with the cells that have pixels.
     n_centroid_fallback
         How many rows took their centroid from `shape_centroids` or `table_centroids`, set by
         :class:`~sddb.loader.Centroids`.
@@ -115,7 +116,7 @@ class LoaderItem:
     stain_reference: dict[str, Any] | None = None
     shape_centroids: np.ndarray | None = field(default=None, repr=False)
     table_centroids: np.ndarray | None = field(default=None, repr=False)
-    table_centroids_source: np.ndarray | None = field(default=None, repr=False)
+    table_centroids_element: str | None = None
     n_centroid_fallback: int = 0
     label_rule: str = ""
     source: _Source | None = field(default=None, repr=False)
@@ -248,6 +249,7 @@ class LoaderItem:
             instance_key=instance_key,
             table_centroids=table_centroids,
             region_to_cs=_affine(annotated_el, cs),
+            region=region,
         )
         if rule == "obs['label_id']" and cells_kind == "labels":
             region_el = sdata.shapes[region] if region in sdata.shapes else None
