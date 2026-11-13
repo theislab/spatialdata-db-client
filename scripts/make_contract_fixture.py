@@ -146,6 +146,8 @@ def main() -> None:
     print(json.dumps(summary, indent=1, default=str), flush=True)
     _overview(he, a, density, window, ps, out / "overview.png")
 
+    # io atera: obs index name duplicates the barcode column; fixed upstream in the fork, remove this once the env pins
+    # that commit.
     # The reader keeps obs' index ("barcode") as a column of the same name too (spatialdata-io atera.py
     # _align_index_column); spatialdata's table join (relational_query.py:259, obs.reset_index()) then raises
     # "cannot insert barcode, already exists". The column keeps the values, so the index name is dropped.
