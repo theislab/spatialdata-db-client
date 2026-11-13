@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -123,7 +124,11 @@ def _validate_dataset(group: Any, *, sample: int, seed: int) -> _Result:
     try:
         _check_dataset(group, out, sample=sample, seed=seed)
     except (KeyError, TypeError, ValueError, json.JSONDecodeError, IndexError, AttributeError, OverflowError) as e:
-        out.issues.append(f"not an annbatch table or contract unreadable: {e!r}")
+        # name where it was raised, so a bug in these checks is not mistaken for a bad dataset
+        frame = traceback.extract_tb(e.__traceback__)[-1]
+        out.issues.append(
+            f"not an annbatch table or contract unreadable: {e!r} (at {Path(frame.filename).name}:{frame.lineno})"
+        )
     return out
 
 
