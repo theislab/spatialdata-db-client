@@ -6,7 +6,7 @@ import os
 import shutil
 import threading
 import warnings
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, overload
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from anndata import AnnData
     from spatialdata import SpatialData
 
-    from sddb.adapter import TableAdapter
+    from sddb.adapter import TableAdapter, TaskAdapter
     from sddb.catalog import Catalog
     from sddb.manifest import CohortManifest, Manifest
 
@@ -395,6 +395,41 @@ class SpatialDataCohort(Sequence[Dataset]):
             gene_key=gene_key,
             spatial=spatial,
             max_workers=max_workers,
+        )
+
+    def materialize(
+        self,
+        dest: str | Path,
+        *,
+        adapters: Sequence[TaskAdapter],
+        role: Literal["he", "if"],
+        roles: Mapping[str, str] | None = None,
+        mpp_native: Mapping[str, float] | None = None,
+        obs_columns: Sequence[str] = (),
+        runner: Literal["local", "snakemake"] = "local",
+        executor: Literal["local", "slurm"] = "local",
+        workers: int = 1,
+        allow_mixed_grids: bool = False,
+    ) -> Path:
+        """Write the cohort as a loader collection for :mod:`spatialbatch` at ``dest`` and validate it.
+
+        Needs the ``loader`` extra. See ``sddb.loader.materialize`` for the steps and the parameters, and
+        ``sddb.contract`` for what the collection holds.
+        """
+        from sddb.loader import materialize
+
+        return materialize(
+            self,
+            dest,
+            adapters=adapters,
+            role=role,
+            roles=roles,
+            mpp_native=mpp_native,
+            obs_columns=obs_columns,
+            runner=runner,
+            executor=executor,
+            workers=workers,
+            allow_mixed_grids=allow_mixed_grids,
         )
 
     def to_df(self) -> pd.DataFrame:

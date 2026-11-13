@@ -18,6 +18,7 @@ from sddb.loader._adapters import (
     default_chain,
 )
 from sddb.loader._item import LoaderItem
+from sddb.loader._materialize import materialize
 
 __all__ = [
     "ADAPTERS",
@@ -28,4 +29,5 @@ __all__ = [
     "TissueMask",
     "adapter_from_record",
     "default_chain",
+    "materialize",
 ]
