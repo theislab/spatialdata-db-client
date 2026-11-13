@@ -37,7 +37,9 @@ loader = [
   "squidpy>=1.8.2",
   "dask-image",
   "scikit-image",
-  "spatialbatch",  # TODO(T144): pin to the merged SHA, "spatialbatch @ git+https://github.com/rushin682/spatialbatch@<sha>"
+  # TODO(T144): pin "spatialbatch @ git+https://github.com/rushin682/spatialbatch@<sha>" once merged, which needs
+  # [tool.hatch.metadata] allow-direct-references = true; until then CI installs it first (test.yaml, job loader)
+  "spatialbatch",
   "snakemake>=9",
   "snakemake-executor-plugin-slurm",
 ]

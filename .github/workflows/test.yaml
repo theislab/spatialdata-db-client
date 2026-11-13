@@ -39,6 +39,25 @@ jobs:
         with:
           use_oidc: true
 
+  loader:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Upgrade pip
+        run: python -m pip install -U pip
+      - name: Install spatialbatch
+        # TODO(T144): replace <sha> with the merged commit of rushin682/spatialbatch, and pin it in pyproject.toml
+        run: pip install "spatialbatch @ git+https://github.com/rushin682/spatialbatch@<sha>"
+      - name: Install
+        run: pip install -e ".[loader]" --group test
+      - name: Test
+        run: pytest -m "not network" tests/test_contract.py tests/test_loader_adapters.py tests/test_loader_materialize.py tests/test_loader_snakemake.py
+
   docs:
     runs-on: ubuntu-latest
     steps:
@@ -53,7 +72,7 @@ jobs:
 
   check:
     if: always()
-    needs: [test, docs]
+    needs: [test, loader, docs]
     runs-on: ubuntu-latest
     steps:
       - uses: re-actors/alls-green@release/v1
