@@ -172,6 +172,9 @@ class Rasterize(_Adapter):
         )
         if item.role == "he" and data.shape[0] == 4:
             data = data[:3]
+        # squidpy's channel kernels need the channels in one chunk (xarray apply_ufunc with c as a core dimension);
+        # the Atera stores chunk them one by one
+        data = data.rechunk({0: -1})
         scale = np.array([w0 / coarsest.shape[-1], h0 / coarsest.shape[-2]])
         return _CoarseLevel(
             image=xr.DataArray(data, dims=("c", "y", "x")),

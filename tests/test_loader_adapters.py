@@ -597,7 +597,9 @@ def test_tissue_mask_and_stain_fit_read_only_the_coarsest_source_level():
     src = item.source
     assert [lv.shape[-1] for lv in src.levels] == [256, 128, 64]
     guarded = [xr.DataArray(_never_computed(lv.data), dims=lv.dims, coords=lv.coords) for lv in src.levels[:2]]
-    item = dataclasses.replace(item, source=dataclasses.replace(src, levels=[*guarded, src.levels[2]]))
+    coarsest = src.levels[2]  # one chunk per channel, as the Atera stores have it
+    coarsest = xr.DataArray(coarsest.data.rechunk({0: 1}), dims=coarsest.dims, coords=coarsest.coords)
+    item = dataclasses.replace(item, source=dataclasses.replace(src, levels=[*guarded, coarsest]))
     item = Rasterize(None, tile=64).build(item)  # the written grid comes from level 0, so computing it raises
     item = TissueMask(method="otsu").build(Centroids().build(item))
     assert item.source_tissue.shape == (64, 64)
