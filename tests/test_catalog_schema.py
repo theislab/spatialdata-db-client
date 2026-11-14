@@ -41,6 +41,17 @@ def test_bad_dtype():
         cs.validate(df)
 
 
+def test_review_reasons_optional_list():
+    df = make_fixture_catalog()
+    assert "review_reasons" not in df.columns  # a catalog cut before the column still validates
+    cs.validate(df)
+    df["review_reasons"] = [["tissue", "disease"], [], None, ["panel"], ["relabel"]][: len(df)]
+    cs.validate(df)
+    df["review_reasons"] = "tissue"
+    with pytest.raises(cs.SchemaError, match="review_reasons"):
+        cs.validate(df)
+
+
 def test_numpy_dtypes_accepted():
     df = make_fixture_catalog().astype({"n_obs": "int64", "uid": object})
     cs.validate(df)

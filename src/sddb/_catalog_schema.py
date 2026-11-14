@@ -76,9 +76,11 @@ CATALOG_COLUMNS: dict[str, str] = {
     # question (disease/tissue/organism/panel/TMA/relabel/…); null otherwise. Derived by the cut from
     # the candidate's current review reasons (a frozen rule), so clearing the reason drops the marker at
     # the next cut. review_reason carries the human-readable reason text. Bare needs_review flags and
-    # provenance-only notes get no marker.
+    # provenance-only notes get no marker. review_reasons lists every current reason (review_reason is
+    # unchanged); optional, so catalogs cut before it was added still load.
     "review_status": "string",
     "review_reason": "string",
+    "review_reasons": "list[string]",
     "product": "string",
     "modality": "string",
     # All modalities present in the dataset (multimodal); scalar `modality` kept for back-compat.
