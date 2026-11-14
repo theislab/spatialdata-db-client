@@ -39,6 +39,31 @@ jobs:
         with:
           use_oidc: true
 
+  loader:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Upgrade pip
+        run: python -m pip install -U pip
+      - name: Install spatialbatch
+        # rushin682/spatialbatch#3 (obsm centres, crop at read time); move to rushin682/spatialbatch once merged
+        run: pip install "spatialbatch @ git+https://github.com/timtreis/spatialbatch@cb23d0630ee5ce4f7411545a13326bfa9f0b5cac"
+      - name: Install
+        run: pip install -e ".[loader]" --group test
+      - name: Test
+        run: pytest -m "not network" --cov --cov-report=xml tests/test_contract.py tests/test_loader_adapters.py tests/test_loader_materialize.py tests/test_loader_snakemake.py
+      - uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+
   docs:
     runs-on: ubuntu-latest
     steps:
@@ -53,7 +78,7 @@ jobs:
 
   check:
     if: always()
-    needs: [test, docs]
+    needs: [test, loader, docs]
     runs-on: ubuntu-latest
     steps:
       - uses: re-actors/alls-green@release/v1

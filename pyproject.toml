@@ -32,6 +32,17 @@ dependencies = [
 viz = [ "vitessce", "easy_vitessce", "spatialdata-plot", "anndata<0.13" ]
 mcp = [ "mcp" ]
 llm = [ ]
+loader = [
+  "pydantic>=2",
+  "squidpy>=1.8.2",
+  "dask-image",
+  "scikit-image",
+  # spatialbatch is not on PyPI; CI installs it from git first (test.yaml, job loader). Pin it here once it is released.
+  "spatialbatch",
+  "snakemake>=9",
+  "snakemake-executor-plugin-slurm",
+  "threadpoolctl",
+]
 
 [project.scripts]
 sddb-cli = "sddb.cli:app"
@@ -41,6 +52,16 @@ sddb-mcp = "sddb.mcp.server:main"
 test = [ "pytest", "coverage", "pytest-cov", "sphinx>=8.1" ]  # tests/test_docs_stats.py loads docs/_ext
 typecheck = [ "mypy", "pandas-stubs" ]
 doc = [ "scverse-doc[full]>=0.3,<0.4", "ipykernel", "ipywidgets", "nbconvert" ]
+
+[tool.uv.sources]
+# spatialbatch is not on PyPI: uv (docs job, readthedocs) resolves it from git, at the commit the loader job installs
+# (test.yaml). pip ignores this table.
+spatialbatch = { git = "https://github.com/timtreis/spatialbatch", rev = "cb23d0630ee5ce4f7411545a13326bfa9f0b5cac" }
+
+[tool.uv]
+# spatialbatch's own tool.uv.sources points annbatch at a sibling checkout (../annbatch), which uv follows for a git
+# dependency; take annbatch from PyPI instead.
+override-dependencies = [ "annbatch>=0.3.1" ]
 
 [tool.hatch.version]
 source = "vcs"

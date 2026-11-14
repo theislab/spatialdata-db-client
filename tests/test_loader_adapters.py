@@ -1,0 +1,945 @@
+"""The loader adapters: Rasterize, Centroids, TissueMask and StainNormalize on synthetic SpatialData."""
+
+from __future__ import annotations
+
+import dataclasses
+import logging
+from types import SimpleNamespace
+
+import anndata as ad
+import dask
+import dask.array as da
+import geopandas as gpd
+import numpy as np
+import pandas as pd
+import pytest
+
+# the loader extra
+pytest.importorskip("pydantic")
+pytest.importorskip("squidpy")
+pytest.importorskip("dask_image")
+import shapely
+import spatialdata as sd
+import xarray as xr
+from dask.callbacks import Callback
+from scipy import ndimage
+from spatialdata.models import Image2DModel, Labels2DModel, ShapesModel, TableModel
+from spatialdata.transformations import Affine, Identity, Scale
+from tests._contract_fixture import draw_cells
+
+from sddb.contract import AdapterRecord
+from sddb.loader import (
+    Centroids,
+    LoaderItem,
+    Rasterize,
+    StainNormalize,
+    TissueMask,
+    _adapters,
+    adapter_from_record,
+    default_chain,
+)
+
+RUIFROK_H = np.array([0.65, 0.70, 0.29])
+RUIFROK_E = np.array([0.07, 0.99, 0.11])
+TABLE_ROLES = {"image": "^images/he$", "table": "^tables/table$"}
+
+
+# -- synthetic SpatialData ---------------------------------------------------------------------------------------------
+
+
+def make_sdata(
+    image: np.ndarray,
+    *,
+    image_tf=None,
+    scale_factors=None,
+    shapes=None,
+    shapes_tf=None,
+    labels: np.ndarray | None = None,
+    labels_tf=None,
+    ids=None,
+    annotate: str = "cells",
+    obs: dict | None = None,
+    image_chunks: int | None = None,
+) -> sd.SpatialData:
+    """An in-memory SpatialData: image ``he``, optional shapes ``cells`` and labels ``cell_labels``, table ``table``.
+
+    `shapes` is a GeoDataFrame (polygons, or points with a ``radius`` column) indexed by the instance ids. The table
+    annotates `annotate` with instance key ``cell_id`` = `ids` (the shapes' index, or ``1..n`` for labels).
+    """
+    cs = {"global": image_tf if image_tf is not None else Identity()}
+    data = da.from_array(image, chunks=(image.shape[0], image_chunks or image.shape[1], image_chunks or image.shape[2]))
+    # explicit chunks: without them spatialdata merges each level of a pyramid into one chunk
+    images = {
+        "he": Image2DModel.parse(
+            data, dims=("c", "y", "x"), scale_factors=scale_factors, transformations=cs, chunks=data.chunksize
+        )
+    }
+    elements: dict = {"images": images}
+    if shapes is not None:
+        elements["shapes"] = {
+            "cells": ShapesModel.parse(shapes, transformations={"global": shapes_tf if shapes_tf else Identity()})
+        }
+    if labels is not None:
+        elements["labels"] = {
+            "cell_labels": Labels2DModel.parse(
+                labels, dims=("y", "x"), transformations={"global": labels_tf if labels_tf else Identity()}
+            )
+        }
+    if ids is None:
+        ids = list(shapes.index) if annotate == "cells" else list(range(1, int(labels.max()) + 1))
+    n = len(ids)
+    table = ad.AnnData(
+        X=np.random.default_rng(0).poisson(2.0, (n, 5)).astype(np.int32),
+        obs=pd.DataFrame(
+            {"cell_id": ids, "region": pd.Categorical([annotate] * n), **(obs or {})}, index=[f"r{i}" for i in range(n)]
+        ),
+    )
+    elements["tables"] = {
+        "table": TableModel.parse(table, region=annotate, region_key="region", instance_key="cell_id")
+    }
+    return sd.SpatialData(**elements)
+
+
+def item_of(sdata, *, role="he", mpp_native=0.25, roles=None, **kwargs) -> LoaderItem:
+    return LoaderItem.from_sdata(
+        sdata,
+        uid="uid0001",
+        study_id="Smith2023",
+        role=role,
+        roles=roles or TABLE_ROLES,
+        mpp_native=mpp_native,
+        **kwargs,
+    )
+
+
+def squares(centres, side) -> gpd.GeoDataFrame:
+    """Axis-aligned squares (one per ``(x, y)`` centre) indexed by string ids."""
+    geoms = [shapely.box(x - side / 2, y - side / 2, x + side / 2, y + side / 2) for x, y in centres]
+    return gpd.GeoDataFrame(geometry=geoms, index=[f"cell-{i}" for i in range(len(geoms))])
+
+
+def he_image(height, width, *, seed=0, disk=None, stains=(RUIFROK_H, RUIFROK_E)) -> np.ndarray:
+    """An H&E-like uint8 image (Beer-Lambert with Ruifrok vectors): tissue in `disk` ``(cy, cx, r)``, glass outside."""
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[:height, :width]
+    inside = np.ones((height, width), bool) if disk is None else np.hypot(yy - disk[0], xx - disk[1]) <= disk[2]
+    c_h = rng.uniform(0.2, 1.5, (height, width)) * inside
+    c_e = rng.uniform(0.1, 1.0, (height, width)) * inside
+    h, e = (np.asarray(s, float) / np.linalg.norm(s) for s in stains)
+    od = c_h[..., None] * h + c_e[..., None] * e
+    rgb = 250.0 * np.exp(-od) + rng.normal(0, 1.5, (height, width, 3))
+    return np.clip(np.round(rgb), 0, 255).astype(np.uint8).transpose(2, 0, 1)
+
+
+# -- Rasterize ---------------------------------------------------------------------------------------------------------
+
+
+def test_rasterize_refuses_upsampling():
+    img = np.zeros((3, 32, 32), np.uint8)
+    sdata = make_sdata(img, shapes=squares([(10, 10)], 4))
+    with pytest.raises(ValueError, match=r"0\.505.*0\.5|0\.5.*0\.505"):
+        Rasterize(0.5).build(item_of(sdata, mpp_native=0.505))
+    item = Rasterize(0.5, allow_upsample=True).build(item_of(sdata, mpp_native=0.505))
+    assert item.flags["upsampled"]
+    assert item.flags["allow_upsample"]
+    assert item.grid == "target"
+    assert item.image.shape == (3, 33, 33)
+
+
+def test_rasterize_downsample_matches_reference():
+    img = np.random.default_rng(1).integers(0, 256, (3, 64, 64), dtype=np.uint8)
+    sdata = make_sdata(img, shapes=squares([(20, 20)], 8), image_chunks=16)
+    item = Rasterize(0.5, tile=16).build(item_of(sdata, mpp_native=0.25))
+    blocks = img.reshape(3, 32, 2, 32, 2).astype(np.float64).mean(axis=(2, 4))
+    np.testing.assert_array_equal(item.image.values, np.floor(blocks + 0.5).astype(np.uint8))
+    assert isinstance(item.image.data, da.Array)
+    assert item.image.dtype == np.uint8
+    assert item.grid == "target"
+    assert item.mpp_target == 0.5
+    assert item.mpp_native == 0.25
+    assert not item.flags["upsampled"]
+    assert item.labels["cells"].shape == (32, 32)
+    assert item.records == [
+        AdapterRecord(
+            name="Rasterize",
+            version="0.1.0",
+            params={"mpp": 0.5, "allow_upsample": False, "tile": 16, "value_range": None},
+        )
+    ]
+
+
+def test_rasterize_uses_coarsest_level_not_finer_than_target():
+    native = 0.25
+    shapes = [(64, 64), (32, 32), (16, 16)]  # scale0, scale1 (0.5 um), scale2 (1.0 um)
+    assert _adapters._pick_level(shapes, native, 0.6) == 1
+    assert _adapters._pick_level(shapes, native, 0.5) == 1
+    assert _adapters._pick_level(shapes, native, 0.49) == 0
+    assert _adapters._pick_level(shapes, native, 2.0) == 2
+
+
+@pytest.mark.parametrize("scale", [1.0, 2.0])
+def test_rasterize_bakes_rotation(scale):
+    img = np.random.default_rng(2).integers(0, 256, (3, 40, 60), dtype=np.uint8)
+    height, width = img.shape[1:]
+    # x_cs = s * y, y_cs = s * (W - x): a 90 degree rotation (plus scale), like the Atera H&E onto its global frame
+    tf = Affine(
+        np.array([[0, scale, 0], [-scale, 0, scale * width], [0, 0, 1]]), input_axes=("x", "y"), output_axes=("x", "y")
+    )
+    sdata = make_sdata(img, image_tf=tf, shapes=squares([(10, 10)], 4), image_chunks=16)
+    mpp_native = 0.5
+    item = Rasterize(mpp_native if scale != 1 else None, tile=16).build(item_of(sdata, mpp_native=mpp_native))
+    np.testing.assert_array_equal(item.image.values, np.rot90(img, axes=(1, 2)))
+    assert item.grid == ("target" if scale != 1 else "native")
+
+
+def test_rasterize_without_mpp_native_keeps_native_grid():
+    img = np.zeros((3, 20, 30), np.uint8)
+    sdata = make_sdata(img, shapes=squares([(10, 10)], 4))
+    item = Rasterize(0.5).build(item_of(sdata, mpp_native=None))
+    assert item.grid == "native"
+    assert item.mpp_target is None
+    assert item.image.shape == (3, 20, 30)
+
+
+def test_polygons_rasterized_once_with_instance_ids(monkeypatch):
+    rng = np.random.default_rng(3)
+    centres = [(x + rng.uniform(-1, 1), y + rng.uniform(-1, 1)) for y in range(6, 64, 13) for x in range(6, 64, 13)]
+    geoms = [shapely.Point(c).buffer(4.3, quad_segs=3).simplify(0.01) for c in centres]  # hexagon-ish polygons
+    cells = gpd.GeoDataFrame(geometry=geoms, index=[f"cell-{i}" for i in range(len(geoms))])
+    img = np.zeros((3, 64, 64), np.uint8)
+    sdata = make_sdata(img, shapes=cells.iloc[::-1])  # table rows in the shapes' order, reversed vs. drawing order
+
+    calls = []
+    draw = _adapters._draw_tile
+    monkeypatch.setattr(_adapters, "_draw_tile", lambda *a, **k: calls.append(1) or draw(*a, **k))
+    item = Rasterize(None, tile=16).build(item_of(sdata))
+    labels = item.labels["cells"].values
+    assert len(calls) == 16  # one draw per 16 x 16 tile, all cells at once
+    assert labels.dtype == np.uint32
+
+    # the reference: each pixel centre takes the label id of the polygon containing it
+    ids = dict(zip(item.table.obs["cell_id"], item.table.obs["label_id"], strict=True))
+    yy, xx = np.mgrid[:64, :64] + 0.5
+    expected = np.zeros((64, 64), np.uint32)
+    for name, geom in zip(cells.index, cells.geometry, strict=True):
+        expected[shapely.contains_xy(geom, xx, yy)] = ids[name]
+    np.testing.assert_array_equal(labels, expected)
+    assert set(np.unique(labels)) - {0} == set(item.table.obs["label_id"])
+
+
+def test_circles_filled():
+    centre, radius = np.array([[20.3, 30.7]]), 6.0
+    circles = gpd.GeoDataFrame({"radius": [radius]}, geometry=[shapely.Point(centre[0])], index=["c0"])
+    img = np.zeros((3, 128, 96), np.uint8)
+    sdata = make_sdata(img, shapes=circles, shapes_tf=Scale([2.0, 2.0], axes=("x", "y")))
+    labels = Rasterize(None, tile=32).build(item_of(sdata)).labels["cells"].values
+    yy, xx = np.mgrid[:128, :96] + 0.5
+    dist = np.hypot(xx - 2 * centre[0, 0], yy - 2 * centre[0, 1])
+    r = 2 * radius
+    assert (labels[dist < r - 0.5] == 1).all()  # filled, not a ring
+    assert (labels[dist > r + 0.5] == 0).all()
+    assert abs((labels == 1).sum() / (np.pi * r**2) - 1) < 0.03
+
+
+def test_existing_labels_resampled_nearest():
+    labels = draw_cells(30, 80, 100)
+    img = np.zeros((3, 80, 100), np.uint8)
+    sdata = make_sdata(img, labels=labels, annotate="cell_labels")
+    item = Rasterize(0.5, tile=16).build(
+        item_of(sdata, roles={**TABLE_ROLES, "labels": "^labels/cell_labels$"}, mpp_native=0.25)
+    )
+    out = item.labels["cells"]
+    assert isinstance(out.data, da.Array)
+    assert out.dtype == labels.dtype
+    # order 0 at factor 2: written pixel j samples source position 2j + 0.5, i.e. pixel 2j or 2j + 1, never a blend
+    sub = out.values
+    assert set(np.unique(sub)) <= set(np.unique(labels))
+    assert ((sub == labels[::2, ::2]) | (sub == labels[1::2, 1::2])).mean() > 0.97
+
+
+def test_existing_labels_need_a_row_mapping():
+    labels = draw_cells(4, 40, 40)
+
+    def shapes():
+        out = squares([(10, 10), (30, 10), (10, 30), (30, 30)], 6)
+        out.index = [123456789, 223456789, 323456789, 423456789]  # packed integer cell ids, not the label values
+        return out
+
+    sdata = make_sdata(np.zeros((3, 40, 40), np.uint8), shapes=shapes(), labels=labels)
+    roles = {**TABLE_ROLES, "labels": "^labels/cell_labels$"}
+    with pytest.raises(ValueError, match="label_column"):
+        item_of(sdata, roles=roles)
+    # the Atera layout: obs["label_id"] holds each row's value in the labels raster, checked at the shapes' centroids
+    sdata = make_sdata(np.zeros((3, 40, 40), np.uint8), shapes=shapes(), labels=labels, obs={"label_id": [1, 2, 3, 4]})
+    item = item_of(sdata, roles=roles)
+    assert item.label_rule == "obs['label_id']"
+    assert item.table.obs["label_id"].tolist() == [1, 2, 3, 4]
+    # a label_id column that does not match the labels is refused
+    sdata = make_sdata(np.zeros((3, 40, 40), np.uint8), shapes=shapes(), labels=labels, obs={"label_id": [4, 3, 2, 1]})
+    with pytest.raises(ValueError, match=r"0% of 4 sampled rows.*label_column"):
+        item_of(sdata, roles=roles)
+    # the Xenium layout (cells_as_circles=True): obs["cell_labels"] holds the values, checked the same way
+    obs = {"cell_labels": [1, 2, 3, 4]}
+    item = item_of(make_sdata(np.zeros((3, 40, 40), np.uint8), shapes=shapes(), labels=labels, obs=obs), roles=roles)
+    assert item.label_rule == "obs['cell_labels']"
+    assert item.table.obs["label_id"].tolist() == [1, 2, 3, 4]
+    obs = {"cell_labels": [4, 3, 2, 1]}
+    with pytest.raises(ValueError, match=r"0% of 4 sampled rows.*label_column"):
+        item_of(make_sdata(np.zeros((3, 40, 40), np.uint8), shapes=shapes(), labels=labels, obs=obs), roles=roles)
+
+
+def test_label_id_check_reads_a_window_without_shapes():
+    from sddb.loader._item import _check_label_column
+
+    labels = draw_cells(30, 90, 100)
+    source = SimpleNamespace(cells=xr.DataArray(da.from_array(labels, chunks=32), dims=("y", "x")))
+    ids = np.arange(1, 31)
+    _check_label_column(source, pd.Series(ids), ids, None, None, "cell_labels")  # every window value is an id
+    with pytest.raises(ValueError, match="central window"):
+        _check_label_column(source, pd.Series(ids), ids + 100, None, None, "cell_labels")
+
+
+def test_label_id_check_refuses_duplicate_shape_index():
+    from sddb.loader._item import _check_label_column
+
+    labels = draw_cells(4, 40, 40)
+    source = SimpleNamespace(cells=xr.DataArray(da.from_array(labels), dims=("y", "x")), cells_to_cs=np.eye(3))
+    shapes = squares([(10, 10), (30, 10), (10, 30), (30, 30)], 6)
+    shapes.index = [7, 7, 8, 9]
+    ids = np.arange(1, 5)
+    with pytest.raises(ValueError, match="duplicated index"):
+        _check_label_column(source, pd.Series([7, 7, 8, 9]), ids, shapes, np.eye(3), "cell_labels")
+
+
+def test_shapes_index_mismatch_raises():
+    shapes = squares([(8, 8), (24, 24)], 6)
+    shapes.index = [1, 2]
+    # ids of the same dtype that match no shape: spatialdata 0.9.0 refuses a str/int mismatch when the SpatialData
+    # is built (_core/spatialdata.py:173 -> validate_table_in_spatialdata, TypeError at :222)
+    sdata = make_sdata(np.zeros((3, 32, 32), np.uint8), shapes=shapes, ids=[3, 4])
+    with pytest.raises(ValueError, match="no shape matches"):
+        Rasterize(None).build(item_of(sdata))
+
+
+# -- Centroids ---------------------------------------------------------------------------------------------------------
+
+
+def test_centroids_equal_scipy_center_of_mass():
+    labels = draw_cells(30, 90, 100)
+    img = np.zeros((3, 90, 100), np.uint8)
+    order = np.random.default_rng(4).permutation(30) + 1  # table rows in a different order than the label values
+    sdata = make_sdata(img, labels=labels, annotate="cell_labels", ids=order.tolist())
+    item = Rasterize(None, tile=32).build(item_of(sdata, roles={**TABLE_ROLES, "labels": "^labels/cell_labels$"}))
+    item = Centroids().build(item)
+    com = np.asarray(ndimage.center_of_mass(np.ones_like(labels), labels, order))[:, ::-1]
+    np.testing.assert_allclose(item.table.obsm["spatial"], com, atol=1e-9)
+    assert item.table.obsm["spatial"].dtype == np.float64
+    assert item.table.obs["label_id"].tolist() == order.tolist()
+    assert item.records[-1] == AdapterRecord(name="Centroids", version="0.1.0", params={})
+
+
+def test_centroids_tiny_cell_kept_with_polygon_centroid(caplog):
+    cells = squares([(8, 8), (24, 8), (8, 24)], 6)
+    tiny = gpd.GeoDataFrame(geometry=[shapely.box(24.6, 24.6, 24.8, 24.8)], index=["tiny"])  # covers no pixel centre
+    sdata = make_sdata(np.zeros((3, 32, 32), np.uint8), shapes=pd.concat([cells, tiny]))
+    item = Rasterize(None, tile=16).build(item_of(sdata))
+    with caplog.at_level(logging.WARNING, logger="sddb.loader"):
+        item = Centroids().build(item)
+    assert item.table.n_obs == 4
+    assert item.n_centroid_fallback == 1
+    row = item.table.obs["cell_id"].tolist().index("tiny")
+    assert not (np.asarray(item.labels["cells"]) == item.table.obs["label_id"].iloc[row]).any()
+    # intrinsic (24.7, 24.7) on a grid whose pixel j has its centre at intrinsic j + 0.5
+    np.testing.assert_allclose(item.table.obsm["spatial"][row], [24.2, 24.2], atol=1e-9)
+    assert np.isfinite(item.table.obsm["spatial"]).all()
+    assert "1 of 4 rows have no pixel" in caplog.text
+
+
+def _label_item(obsm=None):
+    """Four disc cells as labels, cell 4 erased after Rasterize so that it has no pixel; ``obsm`` as given."""
+    labels = draw_cells(4, 40, 40)
+    sdata = make_sdata(np.zeros((3, 40, 40), np.uint8), labels=labels, annotate="cell_labels", ids=[1, 2, 3, 4])
+    com = np.asarray(ndimage.center_of_mass(np.ones_like(labels), labels, [1, 2, 3, 4]))[:, ::-1]
+    if obsm is not None:
+        sdata.tables["table"].obsm["spatial"] = obsm(com)
+    item = Rasterize(None, tile=16).build(item_of(sdata, roles={**TABLE_ROLES, "labels": "^labels/cell_labels$"}))
+    assert item.shape_centroids is None
+    erased = item.labels["cells"].where(item.labels["cells"] != 4, 0)
+    return dataclasses.replace(item, labels={**item.labels, "cells": erased}), com
+
+
+def test_centroids_label_cell_takes_its_native_centre_of_mass(caplog):
+    # obsm in microns, as spatialdata-io's Xenium table: never used for a labels cell
+    item, com = _label_item(lambda com: (com + 0.5) * 0.2125)
+    assert item.table_centroids is None
+    with caplog.at_level(logging.WARNING, logger="sddb.loader"):
+        out = Centroids().build(item)
+    assert out.table.n_obs == 4
+    assert out.n_centroid_fallback == 1
+    np.testing.assert_allclose(out.table.obsm["spatial"][3], com[3], atol=1e-9)
+    assert "centre of mass in the native labels for 1" in caplog.text
+
+
+def test_centroids_xenium_like_sub_pixel_cell_kept():
+    # labels in pixels at 0.2125 um/px (identity), obsm in microns, written at 0.5 um/px: order-0 resampling reads
+    # source index round((j + 0.5) * 0.5 / 0.2125 - 0.5) = 1, 3, 5, 8, ... so the one-pixel cell at (2, 2) vanishes
+    labels = np.zeros((80, 80), np.uint32)
+    labels[30:50, 30:50] = 1
+    labels[2, 2] = 2
+    sdata = make_sdata(np.zeros((3, 80, 80), np.uint8), labels=labels, annotate="cell_labels", ids=[1, 2])
+    com = np.asarray(ndimage.center_of_mass(np.ones_like(labels), labels, [1, 2]))[:, ::-1]
+    sdata.tables["table"].obsm["spatial"] = (com + 0.5) * 0.2125
+    roles = {**TABLE_ROLES, "labels": "^labels/cell_labels$"}
+    item = Rasterize(0.5, tile=16).build(item_of(sdata, mpp_native=0.2125, roles=roles))
+    assert not (np.asarray(item.labels["cells"]) == 2).any()
+    out = Centroids().build(item)
+    assert out.table.n_obs == 2
+    assert out.n_centroid_fallback == 1
+    step = 0.5 / 0.2125  # source pixels per written pixel
+    np.testing.assert_allclose(out.table.obsm["spatial"][1], (com[1] + 0.5) / step - 0.5, atol=1e-9)
+
+
+def test_centroids_raise_without_a_native_pixel():
+    item, _ = _label_item()
+    native = item.native_cells.where(item.native_cells != 4, 0)
+    item = dataclasses.replace(item, native_cells=native)
+    with pytest.raises(ValueError, match=r"none in the source labels at native resolution.*label_id \[4\]"):
+        Centroids().build(item)
+
+
+def _shape_item(obsm=None):
+    """Two squares and a tiny cell that covers no pixel centre, with its polygon centroid taken away; ``obsm`` given."""
+    centres = [(8, 8), (24, 8), (24.7, 24.7)]
+    tiny = gpd.GeoDataFrame(geometry=[shapely.box(24.6, 24.6, 24.8, 24.8)], index=["tiny"])
+    sdata = make_sdata(np.zeros((3, 32, 32), np.uint8), shapes=pd.concat([squares(centres[:2], 6), tiny]))
+    if obsm is not None:
+        sdata.tables["table"].obsm["spatial"] = obsm(np.array(centres))
+    item = Rasterize(None, tile=16).build(item_of(sdata))
+    assert item.native_cells is None
+    return dataclasses.replace(item, shape_centroids=None)
+
+
+def test_centroids_shape_cell_takes_its_table_centroid():
+    out = Centroids().build(_shape_item(lambda xy: xy))  # obsm in the shapes' intrinsic coordinates
+    assert out.n_centroid_fallback == 1
+    np.testing.assert_allclose(out.table.obsm["spatial"][2], [24.2, 24.2], atol=1e-9)
+
+
+def test_centroids_shape_cell_table_centroid_in_another_frame_raises():
+    with pytest.raises(ValueError, match=r"'cells'.*median \d+\.\d+ px.*not in the frame of 'cells'"):
+        Centroids().build(_shape_item(lambda xy: xy * 0.2125))
+
+
+def test_centroids_keep_and_flag_a_cell_beyond_the_grid():
+    # a tiny cell beyond the image: the written grid covers the image's footprint, so its polygon centroid is outside
+    tiny = gpd.GeoDataFrame(geometry=[shapely.box(40.6, 40.6, 40.8, 40.8)], index=["tiny"])
+    sdata = make_sdata(np.zeros((3, 32, 32), np.uint8), shapes=pd.concat([squares([(8, 8)], 6), tiny]))
+    out = Centroids().build(Rasterize(None, tile=16).build(item_of(sdata)))
+    assert out.table.obs["outside_image"].tolist() == [False, True]
+    assert out.n_outside_image == 1
+    assert out.n_centroid_fallback == 1
+    np.testing.assert_allclose(out.table.obsm["spatial"][1], [40.2, 40.2], atol=1e-9)  # its true position, kept
+
+
+def test_centroids_flag_a_cell_over_the_fill_corner_of_a_rotated_image():
+    theta = np.deg2rad(20)
+    rot = np.array([[np.cos(theta), -np.sin(theta), 0], [np.sin(theta), np.cos(theta), 0], [0, 0, 1]])
+    corners = (rot @ np.array([[0, 64, 64, 0], [0, 0, 64, 64], [1, 1, 1, 1]]))[:2].T
+    lo = corners.min(axis=0)
+    corner_cell = lo + 5  # inside the bounding box (the written grid), off the rotated image
+    assert not shapely.Polygon(corners).intersects(shapely.Point(*corner_cell))
+    centre = corners.mean(axis=0)
+    sdata = make_sdata(
+        np.zeros((3, 64, 64), np.uint8),
+        image_tf=Affine(rot, input_axes=("x", "y"), output_axes=("x", "y")),
+        shapes=squares([tuple(centre), tuple(corner_cell)], 4),
+    )
+    item = Rasterize(None, tile=32).build(item_of(sdata))
+    np.testing.assert_allclose(item.image_footprint, corners - lo - 0.5, atol=1e-6)  # pixel j's centre is at j
+    out = Centroids().build(item)
+    assert out.table.obs["outside_image"].tolist() == [False, True]
+    assert out.n_outside_image == 1
+    assert out.n_centroid_fallback == 0  # both cells have pixels: the flag is about the image, not the grid
+
+
+def test_centroids_raise_without_pixels_polygon_or_table_centroid():
+    with pytest.raises(ValueError, match="no pixel in labels.*no polygon centroid.*no usable table centroid"):
+        Centroids().build(_shape_item())
+
+
+# -- TissueMask --------------------------------------------------------------------------------------------------------
+
+
+def test_tissue_mask_flags_cells_outside():
+    img = he_image(128, 128, disk=(64, 64, 40))
+    inside = [(64, 64), (50, 70), (80, 60)]
+    outside = [(10, 10), (118, 10), (10, 118), (118, 118)]
+    sdata = make_sdata(img, shapes=squares(inside + outside, 5), image_chunks=32)
+    item = Rasterize(None, tile=32).build(item_of(sdata))
+    # otsu: a 32 x 32 overview is too small for weka's 1% corner boxes (see test_tissue_mask_default_finds_pale_tissue)
+    item = TissueMask(method="otsu", auto_max_pixels=1024).build(Centroids().build(item))
+    tissue = item.labels["tissue"]
+    assert isinstance(tissue.data, da.Array)
+    assert tissue.shape == (128, 128)
+    assert tissue.dtype == np.uint8
+    assert item.table.obs["in_tissue"].dtype == bool
+    assert item.table.obs["in_tissue"].tolist() == [True] * 3 + [False] * 4
+    assert item.records[-1].name == "TissueMask"
+    params = {"method": "otsu", "corner_size_pct": 0.05, "corners_are_background": "auto", "auto_max_pixels": 1024}
+    assert item.records[-1].params == params
+
+
+def _pale_tissue(size=512, seed=0):
+    """Pale H&E-like tissue (grey ~224 on glass ~240, 3% dark nuclei): a disk plus a band over the top-right corner."""
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[:size, :size] / size
+    tissue = (np.hypot(yy - 0.59, xx - 0.55) <= 0.35) | ((yy < 0.27) & (xx > 0.7))
+    nuclei = tissue & (rng.random((size, size)) < 0.03)
+    c_h = rng.uniform(0.02, 0.10, (size, size)) * tissue + 1.2 * nuclei
+    c_e = rng.uniform(0.04, 0.14, (size, size)) * tissue
+    h, e = (np.asarray(s, float) / np.linalg.norm(s) for s in (RUIFROK_H, RUIFROK_E))
+    rgb = 240.0 * np.exp(-(c_h[..., None] * h + c_e[..., None] * e)) + rng.normal(0, 3, (size, size, 3))
+    return np.clip(np.round(rgb), 0, 255).astype(np.uint8).transpose(2, 0, 1), tissue
+
+
+def test_tissue_mask_default_finds_pale_tissue():
+    """The default (weka, seed 0, glass corners chosen per image) masks pale tissue that squidpy's otsu misses."""
+    from sddb.loader._adapters import _glass_corners
+
+    img, truth = _pale_tissue()
+    assert _glass_corners(img, 0.05) == (True, False, True, True)  # the tissue band covers the top-right corner
+    cells = [(282, 302), (20, 492), (492, 20)]  # (x, y): on the disk, on glass (bottom-left), on the band
+    sdata = make_sdata(img, shapes=squares(cells, 5), image_chunks=256)
+    item = Centroids().build(Rasterize(None, tile=256).build(item_of(sdata)))
+    out = TissueMask().build(item)
+    mask = np.asarray(out.labels["tissue"]) > 0
+    assert (mask & truth).sum() / (mask | truth).sum() > 0.9
+    assert out.table.obs["in_tissue"].tolist() == [True, False, True]
+    params = {"method": "weka", "corner_size_pct": 0.05, "corners_are_background": "auto", "method_params": {"rng": 0}}
+    assert out.records[-1].params == params
+    np.testing.assert_array_equal(np.asarray(TissueMask().build(item).labels["tissue"]), mask)  # seeded: same mask
+    # squidpy's default: otsu keeps only the nuclei, and its area filter then drops them
+    assert (np.asarray(TissueMask(method="otsu").build(item).labels["tissue"]) > 0).mean() < 0.05
+
+
+def test_tissue_mask_needs_centroids():
+    sdata = make_sdata(he_image(32, 32), shapes=squares([(16, 16)], 5))
+    with pytest.raises(ValueError, match="Centroids"):
+        TissueMask().build(Rasterize(None).build(item_of(sdata)))
+
+
+# -- StainNormalize ----------------------------------------------------------------------------------------------------
+
+
+def _he_item(seed, *, tile=32, size=128, stains=(RUIFROK_H, RUIFROK_E)):
+    img = he_image(size, size, seed=seed, disk=(size / 2, size / 2, size * 0.35), stains=stains)
+    sdata = make_sdata(img, shapes=squares([(size / 2, size / 2), (10, 10)], 5), image_chunks=tile)
+    item = Rasterize(None, tile=tile).build(item_of(sdata))
+    return TissueMask(method="otsu", auto_max_pixels=1024).build(Centroids().build(item))
+
+
+def test_stain_pooled_fit_one_reference(monkeypatch):
+    import squidpy.experimental.im as sqim
+
+    calls = []
+    fit = sqim.fit_stain_reference
+    monkeypatch.setattr(sqim, "fit_stain_reference", lambda *a, **k: calls.append(k) or fit(*a, **k))
+
+    items = [_he_item(0), _he_item(1)]
+    step = StainNormalize()
+    reference = step.fit(items)
+    assert len(calls) == 1
+    assert len(calls[0]["image_key"]) == 2
+    assert step.reference is reference
+
+    out = [step.build(item) for item in items]
+    for item in out:
+        assert isinstance(item.image.data, da.Array)
+        assert item.image.dtype == np.uint8
+        assert item.image.shape == (3, 128, 128)
+        assert set(item.stain_reference) == {"method", "stain_matrix", "white_point", "max_concentrations"}
+        assert np.asarray(item.stain_reference["stain_matrix"]).shape == (3, 3)
+    assert out[0].stain_reference == out[1].stain_reference
+    assert out[0].records[-1] == out[1].records[-1]
+    np.testing.assert_allclose(out[0].stain_reference["stain_matrix"], reference.stain_matrix)
+
+
+def test_stain_normalisation_changes_pixels_only_when_the_staining_differs():
+    # guards against a silent no-op: a reference fitted on the image itself leaves it unchanged, a reference fitted on
+    # a differently stained image moves it
+    item = _he_item(0)
+    tissue = np.asarray(item.labels["tissue"]) > 0
+    before = np.asarray(item.image).astype(int)
+
+    own = StainNormalize()
+    own.fit([item])
+    same = np.asarray(own.build(item).image).astype(int)
+    assert np.abs(same - before)[:, tissue].mean() < 1
+
+    other = StainNormalize()
+    other.fit([_he_item(1, stains=([0.45, 0.80, 0.40], [0.20, 0.90, 0.38]))])
+    moved = np.asarray(StainNormalize(reference=other.reference).build(item).image).astype(int)
+    assert np.abs(moved - before)[:, tissue].mean() > 5
+
+
+def _never_computed(data: da.Array) -> da.Array:
+    def boom(block):
+        raise AssertionError("a full-resolution block was computed")
+
+    return data.map_blocks(boom, dtype=data.dtype)
+
+
+def test_tissue_mask_and_stain_fit_read_only_the_coarsest_source_level():
+    """squidpy runs on the source's coarsest level: no block of a finer level or of the written grid is computed."""
+    img = he_image(256, 256, seed=0, disk=(128, 128, 90))
+    sdata = make_sdata(img, shapes=squares([(128, 128), (10, 10)], 5), scale_factors=[2, 2], image_chunks=64)
+    item = item_of(sdata)
+    src = item.source
+    assert [lv.shape[-1] for lv in src.levels] == [256, 128, 64]
+    guarded = [xr.DataArray(_never_computed(lv.data), dims=lv.dims, coords=lv.coords) for lv in src.levels[:2]]
+    coarsest = src.levels[2]  # one chunk per channel, as the Atera stores have it
+    coarsest = xr.DataArray(coarsest.data.rechunk({0: 1}), dims=coarsest.dims, coords=coarsest.coords)
+    item = dataclasses.replace(item, source=dataclasses.replace(src, levels=[*guarded, coarsest]))
+    item = Rasterize(None, tile=64).build(item)  # the written grid comes from level 0, so computing it raises
+    item = TissueMask(method="otsu").build(Centroids().build(item))
+    assert item.source_tissue.shape == (64, 64)
+    assert 0.3 < item.source_tissue.mean() < 0.6  # the disk of radius 90 px covers 39% of the image
+    step = StainNormalize()
+    step.fit([item])
+    assert step.fit_inputs == {item.uid: {"level": 2, "level_shape": [64, 64]}}
+    assert step.to_record().params["fit_inputs"] == step.fit_inputs
+    assert StainNormalize.from_record(step.to_record()).to_record() == step.to_record()
+    with pytest.raises(AssertionError, match="full-resolution"):  # build normalises the written grid, so it reads it
+        np.asarray(step.build(item).image)
+
+
+def test_tissue_mask_on_the_source_level_maps_onto_the_written_grid():
+    """The mask squidpy finds on the coarsest level lands on the written grid where the tissue is."""
+    img = he_image(256, 256, seed=0, disk=(128, 128, 90))
+    sdata = make_sdata(img, shapes=squares([(128, 128), (10, 10)], 5), scale_factors=[2, 2], image_chunks=64)
+    item = TissueMask(method="otsu").build(Centroids().build(Rasterize(None, tile=64).build(item_of(sdata))))
+    mask = np.asarray(item.labels["tissue"]) > 0
+    yy, xx = np.mgrid[:256, :256]
+    truth = (yy - 128) ** 2 + (xx - 128) ** 2 < 90**2
+    assert (mask & truth).sum() / (mask | truth).sum() > 0.9
+    assert item.table.obs["in_tissue"].tolist() == [True, False]
+
+
+def test_stain_refuses_if():
+    img = np.random.default_rng(5).integers(0, 2**16, (2, 32, 32), dtype=np.uint16)
+    sdata = make_sdata(img, shapes=squares([(16, 16)], 5))
+    item = Rasterize(None).build(item_of(sdata, role="if"))
+    assert item.image.dtype == np.uint16
+    assert item.channels == ["0", "1"]
+    with pytest.raises(ValueError, match="H&E"):
+        StainNormalize().fit([item])
+    reference = StainNormalize().fit([_he_item(0)])
+    with pytest.raises(ValueError, match="H&E"):
+        StainNormalize(reference=reference).build(item)
+
+
+def test_stain_build_without_reference_raises():
+    with pytest.raises(ValueError, match="fit"):
+        StainNormalize().build(_he_item(0))
+
+
+# -- records, dtype, protocol ------------------------------------------------------------------------------------------
+
+
+def test_adapter_record_roundtrip():
+    reference = StainNormalize().fit([_he_item(0)])
+    for step in [
+        Rasterize(0.5, allow_upsample=True, tile=256),
+        Rasterize(0.5, value_range=(0, 255)),
+        Rasterize(None),
+        Centroids(),
+        TissueMask(method="otsu", auto_max_pixels=1000),
+        StainNormalize(reference=reference),
+    ]:
+        rec = step.to_record()
+        back = type(step).from_record(rec)
+        assert back.to_record() == rec
+        assert adapter_from_record(rec).to_record() == rec
+        assert AdapterRecord.model_validate_json(rec.model_dump_json()) == rec  # params are plain JSON
+    back = StainNormalize.from_record(StainNormalize(reference=reference).to_record())
+    np.testing.assert_allclose(back.reference.stain_matrix, reference.stain_matrix)
+    with pytest.raises(ValueError, match="Centroids"):
+        Rasterize.from_record(Centroids().to_record())
+
+
+def test_adapters_satisfy_task_adapter_protocol():
+    from sddb.adapter import TaskAdapter
+
+    for step in default_chain(0.5):
+        assert isinstance(step, TaskAdapter)
+    assert [type(s).__name__ for s in default_chain(0.5)] == ["Rasterize", "Centroids", "TissueMask", "StainNormalize"]
+
+
+def _rasterized(img, role="he", **kwargs):
+    sdata = make_sdata(img, shapes=squares([(8, 8)], 4))
+    return Rasterize(None, **kwargs).build(item_of(sdata, role=role))
+
+
+def test_dtype_float_he_needs_value_range():
+    img = np.random.default_rng(6).uniform(0, 255, (3, 16, 16)).astype(np.float32)
+    with pytest.raises(ValueError, match=r"\[0\.\d*, 25\d.*value_range"):
+        _rasterized(img)
+    item = _rasterized(img, value_range=(0, 255))
+    np.testing.assert_array_equal(item.image.values, np.floor(img.astype(np.float64) + 0.5).astype(np.uint8))
+    assert "value_range" in item.dtype_rule
+
+
+def test_dtype_float_in_unit_range_scales():
+    img = np.random.default_rng(6).uniform(0, 1, (3, 16, 16))
+    item = _rasterized(img)
+    np.testing.assert_array_equal(item.image.values, np.floor(img * 255 + 0.5).astype(np.uint8))
+    assert "[0, 1]" in item.dtype_rule
+    assert "judged on full resolution" in item.dtype_rule  # a single-level image
+
+
+def test_dtype_rule_says_coarsest_level_on_a_pyramid():
+    img = np.random.default_rng(6).integers(0, 256, (3, 32, 32)).astype(np.uint16)
+    sdata = make_sdata(img, shapes=squares([(8, 8)], 4), scale_factors=[2])
+    item = Rasterize(None).build(item_of(sdata))
+    assert "judged on the coarsest pyramid level" in item.dtype_rule
+    assert "clipped to uint8" in item.dtype_rule
+    np.testing.assert_array_equal(item.image.values, img)
+
+
+def test_dtype_int32_if_keeps_values():
+    img = np.random.default_rng(6).integers(0, 40001, (2, 16, 16)).astype(np.int32)
+    item = _rasterized(img, role="if")
+    assert item.image.dtype == np.uint16
+    np.testing.assert_array_equal(item.image.values, img)
+    assert "values kept" in item.dtype_rule
+
+
+def test_dtype_uint16_he_within_uint8_casts():
+    img = np.random.default_rng(6).integers(0, 256, (3, 16, 16)).astype(np.uint16)
+    item = _rasterized(img)
+    assert item.image.dtype == np.uint8
+    np.testing.assert_array_equal(item.image.values, img)
+
+
+def test_dtype_full_range_uint16_he_raises():
+    img = np.random.default_rng(6).integers(0, 2**16, (3, 16, 16)).astype(np.uint16)
+    with pytest.raises(ValueError, match="value_range"):
+        _rasterized(img)
+    item = _rasterized(img, value_range=(0, 65535))
+    np.testing.assert_array_equal(item.image.values, np.floor(img / 257 + 0.5).astype(np.uint8))
+
+
+# -- the dask guard ----------------------------------------------------------------------------------------------------
+
+
+class _NoWholeImage(Callback):
+    """Fails if any dask task returns an array with at least `max_px` pixels in its last two dimensions."""
+
+    def __init__(self, max_px: int) -> None:
+        super().__init__()
+        self.max_px = max_px
+        self.largest = 0
+
+    def _posttask(self, key, result, dsk, state, worker_id):
+        if isinstance(result, np.ndarray) and result.ndim >= 2:
+            px = result.shape[-1] * result.shape[-2]
+            self.largest = max(self.largest, px)
+            assert px < self.max_px, f"task {key} computed {result.shape}, a whole image"
+
+
+def _atera_shaped(tile):
+    """A rotated, scaled H&E onto `global` (the Atera layout), cell labels on `global` and `label_id` in obs."""
+    s, h0, w0 = 1.25, 400, 480  # H&E 0.25 um/px onto a 0.2 um global grid
+    tf = Affine(np.array([[0, s, 0], [-s, 0, s * w0], [0, 0, 1]]), input_axes=("x", "y"), output_axes=("x", "y"))
+    img = he_image(h0, w0, disk=(200, 240, 170))
+    labels = draw_cells(150, int(s * w0), int(s * h0))
+    n = int(labels.max())
+    com = ndimage.center_of_mass(np.ones_like(labels), labels, np.arange(1, n + 1))
+    shapes = squares([(x, y) for y, x in com], 1)  # the boundaries locate the rows for the label_id check
+    shapes.index = np.arange(10**8, 10**8 + n)
+    return make_sdata(
+        img,
+        image_tf=tf,
+        scale_factors=[2, 2, 2],  # squidpy reads the coarsest level, 50 x 60
+        shapes=shapes,
+        labels=labels,
+        image_chunks=tile,
+        obs={"label_id": np.arange(1, n + 1)},
+    )
+
+
+def test_chain_never_computes_whole_image():
+    tile = 64
+    sdata = _atera_shaped(tile)
+    roles = {**TABLE_ROLES, "labels": "^labels/cell_labels$"}
+    items = [item_of(sdata, roles=roles, mpp_native=0.25)]
+    rasterize, centroids, _, stain = default_chain(0.5)
+    rasterize.tile = tile
+    tissue = TissueMask(method="otsu")  # the 50 x 60 coarsest level is too small for weka's corners
+    written = (240, 200)  # the global footprint 600 x 500 at 2.5 global units per written pixel
+    guard = _NoWholeImage(max_px=written[0] * written[1] // 2)
+    with dask.config.set(scheduler="sync"), guard:
+        items = [tissue.build(centroids.build(rasterize.build(item))) for item in items]
+        stain.fit(items)
+        item = stain.build(items[0])
+        image = np.empty(item.image.shape, item.image.dtype)
+        cells = np.empty(item.labels["cells"].shape, item.labels["cells"].dtype)
+        da.store([item.image.data, item.labels["cells"].data], [image, cells], lock=False)  # block by block
+    assert item.image.shape == (3, *written)
+    assert cells.shape == written
+    assert all(isinstance(a.data, da.Array) for a in (item.image, item.labels["cells"], item.labels["tissue"]))
+    assert 0 < guard.largest < guard.max_px
+
+    # centroids lie in their own label (R2) and inside the image
+    xy = item.table.obsm["spatial"]
+    px = np.floor(xy + 0.5).astype(int)
+    assert ((px >= 0) & (px < [written[1], written[0]])).all()
+    assert (cells[px[:, 1], px[:, 0]] == item.table.obs["label_id"].to_numpy()).mean() >= 0.99
+
+    # the guard does trip on a whole-image compute
+    with (
+        dask.config.set(scheduler="sync"),
+        pytest.raises(AssertionError, match="whole image"),
+        _NoWholeImage(guard.max_px),
+    ):
+        item.image.data.compute()
+
+
+# -- registration: image and cells on different affines ----------------------------------------------------------------
+
+SHEAR = np.array([[1.10, 0.25, 30.0], [-0.05, 0.85, 12.0], [0, 0, 1]])  # image: sheared and anisotropic
+LABELS_TF = np.array([[0.80, -0.15, 85.0], [0.10, 0.95, 20.0], [0, 0, 1]])  # another non-similarity affine
+SHAPES_TF = np.array([[0.90, 0.20, 60.0], [-0.10, 1.05, 30.0], [0, 0, 1]])
+H0, W0 = 160, 200
+_CORNERS = (SHEAR @ np.array([[0, W0, W0, 0], [0, 0, H0, H0], [1, 1, 1, 1]]))[:2]
+X0, Y0 = _CORNERS.min(axis=1)
+X1, Y1 = _CORNERS.max(axis=1)
+
+
+def _tf(m):
+    return Affine(m, input_axes=("x", "y"), output_axes=("x", "y"))
+
+
+def _paint(value_at_cs):
+    """A float H&E image in [0, 1] through the SHEAR affine, computed at each pixel centre's cs position.
+
+    Channel 0 is f(cell) = (id mod 251 + 1) / 255, constant per cell. Channels 1 and 2 are linear ramps in cs x and
+    y over the footprint, which bilinear resampling reproduces exactly, so they locate the image to a fraction of a
+    pixel.
+    """
+    yy, xx = np.mgrid[:H0, :W0] + 0.5
+    cs = SHEAR @ np.stack([xx.ravel(), yy.ravel(), np.ones(xx.size)])
+    cell = value_at_cs(cs[0], cs[1]) % 251 + 1
+    channels = [cell / 255, (cs[0] - X0) / (X1 - X0), (cs[1] - Y0) / (Y1 - Y0)]
+    return np.stack([c.reshape(H0, W0) for c in channels])
+
+
+def _grid_cs(item, ratio):
+    """The cs position (x, y) of each written pixel centre: origin at the footprint's corner, one step per pixel."""
+    step = np.sqrt(abs(np.linalg.det(SHEAR[:2, :2]))) * ratio
+    h, w = item.labels["cells"].shape
+    yy, xx = np.mgrid[:h, :w] + 0.5
+    return X0 + step * xx, Y0 + step * yy
+
+
+def _share(a, b, mask):
+    return float(np.mean(a[mask] == b[mask]))
+
+
+def _check_registration(item, value_at, ratio):
+    lab = item.labels["cells"].values.astype(np.int64)
+    img = item.image.values.astype(np.float64)
+    x, y = _grid_cs(item, ratio)
+    border = np.zeros(lab.shape, bool)
+    border[2:-2, 2:-2] = True
+
+    # labels against the forward model (the cell under each written pixel centre): no erosion, every pixel counts
+    expected = value_at(x.ravel(), y.ravel()).reshape(lab.shape)
+    fg = border & ((lab > 0) | (expected > 0))
+    assert fg.sum() > 300
+    assert _share(lab, expected, fg) >= 0.99
+    for shift in [(1, 0), (0, 1), (-1, 0), (0, -1)]:  # negative control: a 1 px offset is seen
+        assert _share(np.roll(lab, shift, axis=(0, 1)), expected, fg) < 0.99
+
+    # the image ramps against the forward model, inside the footprint (2 cs units in from its edge)
+    inside = border & shapely.contains_xy(shapely.Polygon(_CORNERS.T).buffer(-2), x, y)
+    ramp_x, ramp_y = 255 * (x - X0) / (X1 - X0), 255 * (y - Y0) / (Y1 - Y0)
+    for ch, ramp in ((1, ramp_x), (2, ramp_y)):
+        err = (img[ch] - ramp)[inside]
+        assert np.abs(err).max() < 1  # two roundings: the uint8 source and the uint8 output
+        assert abs(err.mean()) < 0.05  # no sub-pixel bias: half a pixel would be about 0.5
+    assert np.abs(np.roll(img[1], 1, axis=1) - ramp_x)[inside].mean() > 0.6  # negative control, x
+    assert np.abs(np.roll(img[2], 1, axis=0) - ramp_y)[inside].mean() > 0.6  # negative control, y
+
+    # image and labels together: f(written labels) on foreground pixels eroded by 1 px
+    core = border & (lab > 0)
+    for dy in range(-1, 2):
+        for dx in range(-1, 2):
+            core &= np.roll(lab, (dy, dx), axis=(0, 1)) == lab
+    assert _share(img[0], lab % 251 + 1, core) >= 0.99
+
+
+@pytest.mark.parametrize("ratio", [1.0, 1.6])
+def test_registration_labels_path(ratio):
+    labels = draw_cells(20, 100, 160)
+    inv = np.linalg.inv(LABELS_TF)
+
+    def value_at(x, y):
+        lx, ly = (inv @ np.stack([x, y, np.ones_like(x)]))[:2]
+        ix, iy = np.floor(lx).astype(int), np.floor(ly).astype(int)
+        ok = (ix >= 0) & (ix < 160) & (iy >= 0) & (iy < 100)
+        return np.where(ok, labels[np.clip(iy, 0, 99), np.clip(ix, 0, 159)], 0)
+
+    sdata = make_sdata(
+        _paint(value_at),
+        image_tf=_tf(SHEAR),
+        labels=labels,
+        labels_tf=_tf(LABELS_TF),
+        annotate="cell_labels",
+        image_chunks=48,
+    )
+    roles = {**TABLE_ROLES, "labels": "^labels/cell_labels$"}
+    item = Rasterize(0.25 * ratio, tile=48).build(item_of(sdata, roles=roles, mpp_native=0.25))
+    _check_registration(item, value_at, ratio)
+
+
+@pytest.mark.parametrize("ratio", [1.0, 1.6])
+def test_registration_shapes_path(ratio):
+    centres = [(x, y) for y in range(15, 90, 30) for x in range(15, 150, 30)]
+    geoms = [shapely.Point(c).buffer(10, quad_segs=3) for c in centres]
+    cells = gpd.GeoDataFrame(geometry=geoms, index=[f"cell-{i}" for i in range(len(geoms))])
+    inv = np.linalg.inv(SHAPES_TF)
+
+    def value_at(x, y):
+        lx, ly = (inv @ np.stack([x, y, np.ones_like(x)]))[:2]
+        out = np.zeros(x.shape, np.int64)
+        for i, g in enumerate(geoms):
+            out[shapely.contains_xy(g, lx, ly)] = i + 1  # label id = row position + 1 (string ids)
+        return out
+
+    sdata = make_sdata(_paint(value_at), image_tf=_tf(SHEAR), shapes=cells, shapes_tf=_tf(SHAPES_TF), image_chunks=48)
+    item = Rasterize(0.25 * ratio, tile=48).build(item_of(sdata, mpp_native=0.25))
+    assert item.label_rule == "row position + 1"
+    _check_registration(item, value_at, ratio)
+
+
+def test_registration_cells_inside_image_footprint():
+    """The test geometry is valid: every cell lies inside the image's footprint, so no cell is cut by glass."""
+    footprint = shapely.Polygon(_CORNERS.T)
+    labels_box = shapely.Polygon((LABELS_TF @ np.array([[0, 160, 160, 0], [0, 0, 100, 100], [1, 1, 1, 1]]))[:2].T)
+    shapes_box = shapely.Polygon((SHAPES_TF @ np.array([[5, 145, 145, 5], [5, 5, 85, 85], [1, 1, 1, 1]]))[:2].T)
+    assert footprint.buffer(-3).contains(labels_box)
+    assert footprint.buffer(-3).contains(shapes_box)
+
+
+@pytest.mark.parametrize(("role", "glass"), [("he", 255), ("if", 0)])
+def test_outside_footprint_is_glass(role, glass):
+    img = np.full((3, 40, 40), 100, np.uint8 if role == "he" else np.uint16)
+    tf = _tf(
+        np.array([[np.cos(np.pi / 4), -np.sin(np.pi / 4), 0], [np.sin(np.pi / 4), np.cos(np.pi / 4), 0], [0, 0, 1]])
+    )
+    item = Rasterize(None).build(item_of(make_sdata(img, image_tf=tf, shapes=squares([(0, 28)], 4)), role=role))
+    out = item.image.values
+    h, w = out.shape[1:]
+    assert (out[:, 0, 0] == glass).all()  # a corner of the bounding box, outside the rotated footprint
+    assert (out[:, h // 2, w // 2] == 100).all()

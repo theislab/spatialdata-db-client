@@ -121,6 +121,12 @@ class Dataset:
         cohort = SpatialDataCohort(self._row.to_frame().T, source=self._source)
         return cohort.to_list(elements=elements, dest=dest, workers=1)[0]
 
+    def _local_store(self) -> Path:
+        """The local path of the whole store, fetched into the cache like :meth:`to_sdata` if remote, not read."""
+        from sddb.cohort import SpatialDataCohort
+
+        return SpatialDataCohort(self._row.to_frame().T, source=self._source)._local_stores(None, None, 1)[0]
+
     def elements(self) -> dict[str, dict[str, Any]]:
         """Return element shapes/dtypes without loading data."""
         return remote.elements(self.zarr_url)

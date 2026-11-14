@@ -1,7 +1,7 @@
 """Task-adapter interfaces: the contracts a downstream task repo implements.
 
-The client defines only these Protocols. Building/materializing a task view from a cohort lives
-downstream of the cohort, not in the client.
+The client defines these Protocols. Materializing a cohort into a loader collection (:mod:`sddb.contract`) also
+lives in the client.
 """
 
 from __future__ import annotations
