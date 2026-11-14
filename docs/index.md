@@ -41,7 +41,7 @@ uv pip install spatialdata-db
 
 ::::
 
-`--pre` is needed while the client has only pre-releases, because pip installs only stable versions without it. For the newest code on the `main` branch, install `"spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client"` instead.
+`--pre` lets pip install pre-releases such as the current alpha. For the newest code on the `main` branch, install `"spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client"` instead.
 
 The client needs Python 3.12 or newer.
 

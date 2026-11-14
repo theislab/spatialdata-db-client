@@ -10,7 +10,7 @@ Lean read client for the spatialdata-db spatial-omics collection: query the cata
 pip install --pre spatialdata-db
 ```
 
-The client needs Python 3.12 or newer and is imported as `sddb`. `--pre` is needed while only pre-releases are published, because pip installs only stable versions without it. Extras: `spatialdata-db[viz]` for interactive Vitessce views in notebooks, `spatialdata-db[mcp]` for the `sddb-mcp` server for AI agents.
+The client needs Python 3.12 or newer and is imported as `sddb`. `--pre` lets pip install pre-releases such as the current alpha. Extras: `spatialdata-db[viz]` for interactive Vitessce views in notebooks, `spatialdata-db[mcp]` for the `sddb-mcp` server for AI agents.
 
 ## Quickstart
 

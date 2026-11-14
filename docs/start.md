@@ -15,7 +15,7 @@ or, with uv:
 uv pip install spatialdata-db
 ```
 
-`--pre` is needed while the client has only pre-releases, because pip installs only stable versions without it. For the newest code on the `main` branch, install `"spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client"` instead. The package needs Python 3.12 or newer. Its PyPI name is `spatialdata-db`, and the name `sddb` on PyPI belongs to an unrelated package.
+`--pre` lets pip install pre-releases such as the current alpha. For the newest code on the `main` branch, install `"spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client"` instead. The package needs Python 3.12 or newer. Its PyPI name is `spatialdata-db`, and the name `sddb` on PyPI belongs to an unrelated package.
 
 The client keeps its cache in the user cache directory of the platform, in a folder called `sddb`. Set `SDDB_CACHE_DIR` to put it somewhere else, for example on a larger disk. The first call to `Catalog()` downloads the catalog (under 10 MB) from a GitHub release. Later calls check for a newer catalog and download it again only when one has been published.
 
