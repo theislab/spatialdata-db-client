@@ -156,8 +156,16 @@ def bench_torch(collection: Path, workers: list[int], max_batches: int, device: 
     }
     for w in workers:
         t0 = time.perf_counter()
+        # drop_last: annbatch refuses several workers without it (samplers/_chunk_sampler.py _validate_worker_mode);
+        # set for every worker count so the settings compare
         loader = Loader(
-            images=["he"], labels=["cells"], crop_px=CROP_PX, batch_size=BATCH_SIZE, shuffle=True, to="torch"
+            images=["he"],
+            labels=["cells"],
+            crop_px=CROP_PX,
+            batch_size=BATCH_SIZE,
+            shuffle=True,
+            drop_last=True,
+            to="torch",
         ).use_collection(SpatialDatasetCollection(collection))
         setup = time.perf_counter() - t0
         dl = torch.utils.data.DataLoader(
