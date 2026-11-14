@@ -1,149 +1,212 @@
 # Training crops from whole Atera H&E slides
 
-This page writes four whole Atera H&E slides as one loader collection on a Slurm cluster and then measures how
-fast the spatialbatch `Loader` reads training crops from it. The collection follows the loader contract
-({mod}`sddb.contract`): every slide is resampled to 0.5 µm per pixel, every cell has a label id and a centroid, the
-tissue is masked and the H&E stains are normalised to one reference fitted on all slides. The run needs a shared
-filesystem, a Slurm cluster and the `loader` extra.
+This page takes the six 10x Atera slides of catalog release 2026-11-12, writes them as one loader collection on a
+Slurm cluster, and measures how fast the spatialbatch `Loader` reads training crops from it, on CPU and into a
+GPU. The collection follows the loader contract ({mod}`sddb.contract`). Every slide is resampled to 0.5 µm per
+pixel, every cell keeps its label id and gets a centroid, the tissue is masked, and the H&E stains are normalised
+to one reference fitted on all slides. The run needs a shared filesystem, a Slurm cluster and the `loader` extra.
 
 ## Slides
 
-The four slides are the 10x Atera v1 WTA bundles that have an H&E image and its alignment.
+The cohort is every record of the release with technology `10x_atera`, and each one has an H&E image
+(`images/he_image`), cell labels (`labels/cell_labels`) and a table (`tables/table`).
 
-| uid | tissue | sample | cells | H&E scale 0 (px) | µm per H&E px |
+```python
+import sddb
+
+catalog = sddb.Catalog(version="2026-11-12")
+cohort = catalog.query(technology="10x_atera")  # 6 records
+mpp = dict(zip(cohort.to_df()["uid"], cohort.to_df()["mpp"]))
+```
+
+| dataset | slide | cells | features | µm per pixel | store |
 |---|---|---|---|---|---|
-| sddb_2hj2ztx47z | colorectal cancer | fresh frozen | 446,777 | 46,690 x 26,286 | 0.2739 |
-| sddb_a722jfj3pq | breast cancer | fresh frozen | 485,985 | 52,963 x 33,455 | 0.2739 |
-| sddb_fmjq2bpd2q | hippocampus, non-diseased | fresh frozen | 91,431 | 45,694 x 34,152 | 0.2739 |
-| sddb_l5esryipaj | kidney, non-diseased | FFPE | 399,120 | 42,169 x 23,628 | 0.2739 |
+| 0 | Fresh Frozen Human Colorectal Cancer | 446,777 | 24,677 | 0.2739 | 74.0 GB |
+| 1 | Preview Data: FFPE Human Cervical Cancer | 717,576 | 18,028 | 0.2741 | 43.6 GB |
+| 2 | Fresh Frozen Human Breast Cancer | 485,985 | 24,677 | 0.2739 | 87.8 GB |
+| 3 | Preview Data: FFPE Human Breast Cancer | 170,057 | 18,028 | 0.2741 | 27.0 GB |
+| 4 | Fresh Frozen Human Brain | 91,431 | 24,677 | 0.2739 | 39.7 GB |
+| 5 | FFPE Human Kidney | 399,120 | 24,674 | 0.2739 | 34.0 GB |
 
-The microns per H&E pixel come from each bundle. First, `experiment.spatial` gives the microns per pixel of the
-`global` coordinate system (0.21249222 for all four bundles). Second, the H&E's affine onto `global` gives the
-`global` pixels per H&E pixel, as `sqrt(|det A|)` of its 2 x 2 part. Their product is `mpp_native`. All four slides
-are finer than 0.5 µm per pixel, so `Rasterize` resamples them down from scale 0 and nothing is upsampled.
+In total 2,310,946 cells and 306 GB of stores. The dataset numbers are the order of the collection.
+
+The microns per H&E pixel are the catalog's `mpp` column. For the four Atera v1 slides they equal the values that
+the first version of this page derived from each bundle (the `experiment.spatial` pixel size times the scale of the
+H&E's affine onto `global`). All six slides are finer than 0.5 µm per pixel, so `Rasterize` resamples them down and
+nothing is upsampled.
+
+The four Atera v1 tables annotate `cell_labels`, so each row's label id is its instance id. The two WTA Preview
+slides were read with spatialdata-io's xenium reader, whose table annotates `cell_circles` and keeps each row's
+value in `cell_labels` in `obs["cell_labels"]`. {meth}`~sddb.loader.LoaderItem.from_sdata` reads that column and
+checks it against the labels on a sample of rows. The Preview tables have 18,028 Gene Expression features and float32
+counts. The Atera v1 tables have 24,674 or 24,677 features, Gene Expression plus control probes and codewords, with
+int32 counts.
 
 ## Commands
 
-Each step is one Slurm job; the scripts are in `scripts/` of the client repository.
+Both steps run as Slurm jobs, and the scripts are in `scripts/` of the client repository. `SDDB_CACHE_DIR` must be
+on the shared filesystem: `materialize` copies each member's whole store from the release into
+`$SDDB_CACHE_DIR/stores/<uid>.zarr` once, and the Slurm jobs open it from there.
 
 ```bash
-# 1. one SpatialData store per slide: the aligned H&E, the cell boundaries and the table (about 4 min each)
-python scripts/atera_loader_cohort.py store <bundle>/work <uid> <out>/stores
+export SDDB_CACHE_DIR=<shared dir>/cache
 
-# 2. the controller: opens the stores, writes the workflow and runs snakemake, which submits one job per rule
-python scripts/atera_loader_cohort.py materialize <out>/stores <out>/atera-he.zarr --workers 1 \
-    --slurm-json '{"runtime": 360, "mem_mb": 56000, "slurm_partition": "cpu_p", "qos": "cpu_normal",
+# 1. the controller: copies the stores, writes the workflow and runs snakemake, which submits one job per rule
+python scripts/atera_loader_cohort.py materialize <out>/atera-he.zarr --version 2026-11-12 --workers 1 \
+    --slurm-json '{"runtime": 360, "mem_mb": 80000, "slurm_partition": "cpu_p", "qos": "cpu_normal",
                    "fit_stain": {"mem_mb": 24000, "runtime": 720}}'
 
-# 3. checks: validate, cells in tissue, the change made by stain normalisation, a figure of the tissue masks
-python scripts/atera_loader_cohort.py check <out>/stores <out>/atera-he.zarr <out>/check
+# 2. checks: validate, compare each dataset with its catalog record, draw the tissue masks
+python scripts/atera_loader_cohort.py check <out>/atera-he.zarr <out>/check
 
-# 4. throughput of the loader on one CPU node, and a figure of one batch
+# 3. throughput on one CPU node, and a torch DataLoader sweep on one GPU node
 python scripts/bench_loader_atera.py <out>/atera-he.zarr <out>/bench --epochs 2
+python scripts/bench_loader_atera.py <out>/atera-he.zarr <out>/bench_gpu --torch-workers 0,2,4,8 --max-batches 400
 ```
 
 The `materialize` step calls
 
 ```python
-materialize(
-    members, dest,
-    adapters=[Rasterize(0.5), Centroids(), TissueMask(method="weka"), StainNormalize()],
-    role="he", roles={"image": "^images/he_image$", "table": "^tables/table$"}, mpp_native=mpp,
+cohort.materialize(
+    dest,
+    adapters=default_chain(0.5),
+    role="he",
+    roles={"image": "^images/he_image$", "table": "^tables/table$", "labels": "^labels/cell_labels$"},
+    mpp_native=mpp,
     runner="snakemake", executor="slurm", workers=1, slurm=slurm,
 )
 ```
 
-These are the resources of the run that completed. A member job asks for 56,000 MB and one runs at a time
-(`workers=1`). The first run asked for 32,000 MB with two workers, and both member jobs were killed for running out of memory while they wrote the table. Two member jobs at 56,000 MB would ask
-for more than the 68 GB this run was allowed on the shared cluster, so the members ran one after another.
-`fit_stain` asked for 24,000 MB and used 6.8 GiB.
+The controller ran for 4 h 15 min in a 16 GB job. Snakemake submitted one `fit_stain` job (24 GB requested) and
+then the six members one at a time (`workers=1`, 80 GB requested each), and a final `validate` job:
 
-The chain is {func}`~sddb.loader.default_chain` with squidpy's `weka` tissue detection instead of the default
-`otsu`. On the brain slide `otsu` keeps only the nuclei, because the tissue is nearly as pale as the glass, and its
-area filter then drops them all, so the stain fit fails with "no tissue pixels". `weka` gives a non-empty mask on
-all four slides, but on the brain slide it also covers bands of glass (see the checks below).
+| job | wall time | peak memory |
+|---|---|---|
+| `fit_stain` (all six slides) | 31 min 42 s | 4.3 GB |
+| dataset 3, FFPE breast Preview | 11 min 7 s | 5.8 GB |
+| dataset 5, kidney | 19 min 32 s | 8.5 GB |
+| dataset 0, colorectal | 26 min 36 s | 16.0 GB |
+| dataset 2, FF breast | 34 min 38 s | 17.6 GB |
+| dataset 1, cervical Preview | 14 min 40 s | 10.2 GB |
+| dataset 4, brain | 26 min 43 s | 4.7 GB |
+| `validate` | 2 min 54 s | 2.2 GB |
 
-## Slurm run
+The colorectal job waited 71 minutes in the Slurm queue before it started, which accounts for most of the gap between
+the sum of the jobs (2 h 48 min) and the controller's time. No member needed more than 18 GB, so 24 GB per member
+would do. Most of `fit_stain`'s time is the resampling and the centroids of all six slides; the tissue detection
+and the stain fit themselves take seconds (see below). The collection is 17.7 GB.
 
-The controller ran as a Slurm job of its own (4 GiB requested, 2.05 GiB used), because it opens every store before it starts snakemake, and
-snakemake's Slurm executor submitted one job per rule from there. Each rule job has one CPU.
+## Cells outside the H&E image
 
-| rule | jobs | wall time | peak memory (sacct MaxRSS) |
+On the four Atera v1 slides the morphology image, and with it the cell labels, reaches past the H&E, so some cells
+lie outside the H&E image. The written grid is the bounding box of the H&E's footprint, and every H&E is rotated a
+little against the morphology image (0.1° to 0.4° for the Atera v1 slides and about 0.56° for the Preview slides, from
+the H&E's affine in each store), so the grid's corners are fill. Every cell keeps its true centroid in
+`obsm["spatial"]`, also when that lies outside the grid. `obs["outside_image"]` is True for each cell whose centroid
+is not on the H&E's footprint, which is the quadrilateral of the H&E's scale-0 extent mapped onto the grid with the
+affine that `Rasterize` resamples the image with. A cell over a fill corner of the grid is flagged too, and so is a
+cell beyond the grid. The contract counts the flagged cells as `n_outside_image`, `validate` accepts a centroid
+outside the grid only for a flagged cell, and these cells have `in_tissue` False. The spatialbatch loader pads the
+part of a crop that leaves the image, so a crop of such a cell is partly or fully fill.
+
+| dataset | slide | cells outside the H&E | of them beyond the grid |
 |---|---|---|---|
-| `fit_stain` (Rasterize, Centroids and TissueMask on all four slides, then the pooled stain fit) | 1 | 48 min | 6.8 GiB |
-| `dataset_<uid>` (the whole chain on one slide, then the write) | 4 | 15 to 26 min | 9.5 to 40.0 GiB |
-| `validate` | 1 | 2 min | 0.4 GiB |
+| 0 | colorectal | 3 | 3 |
+| 2 | FF breast | 3 | 3 |
+| 4 | brain | 1 | 1 |
+| 5 | kidney | 15 | 10 |
 
-The member jobs need the most memory, and it grows with the number of nonzeros in the slide's table. The breast
-table has 1.48e9 nonzeros and its job peaked at 40.0 GiB. The run state lives beside the collection in
-`atera-he.zarr.sddb/`. A rerun skips the slides that are done, and it keeps the fitted stain reference
-(`stain.json`) when the chain and the members are the same as in the run that fitted it.
+The two Preview slides have none. A cell beyond the grid has no pixel in `labels/cells`, so its centroid comes from
+the source; `n_centroid_fallback` equals the count beyond the grid on every slide. The other five kidney cells lie
+over a fill corner of the grid and keep their pixel centroid.
 
-The collection is 13.2 GB on disk (13,231,857,664 bytes by `du -s --block-size=1 atera-he.zarr` on the cluster),
-with 1,423,292 cells (see below) and 18,049 genes keyed by Ensembl id.
+## Tissue mask
 
-Some cells are smaller than a pixel at 0.5 µm per pixel, so they have no pixel in the cell labels. On these slides
-that is 21 cells: 3 colorectal, 5 breast, 3 brain and 10 kidney. The counts come from the member job logs of this
-run (`atera-he.zarr.sddb/logs/dataset_<uid>.log`, e.g. "sddb_a722jfj3pq: dropped 5 of 485985 rows whose cell has no
-pixel in labels['cells'] (smaller than a pixel of the written grid, or outside the image)"). The run used an earlier
-version of `Centroids` that dropped these rows, so the collection measured on this page has the 21 cells fewer
-(1,423,292 instead of 1,423,313) and no `n_centroid_fallback`.
+{class}`~sddb.loader.TissueMask` runs squidpy's tissue detection
+({func}`~squidpy.experimental.im.detect_tissue`) on the coarsest level of each slide's H&E pyramid, the level
+squidpy's `scale="auto"` reads. For all six slides that is level 4, between 2287 × 2242 and 3310 × 2090 pixels.
+The mask squidpy finds there is resampled onto the 0.5 µm grid with nearest neighbour and the same affine as the
+image, and is 0 outside the H&E. The step reads only that level, so on the prototype slide (the FFPE breast
+Preview) it took 39 s, of which 14 s are the detection. Its default, which {func}`~sddb.loader.default_chain` uses,
+is squidpy's `weka` method, a random forest trained on the corners of the level as glass and on the pixels least
+like them as tissue. Three settings differ from squidpy's defaults:
 
-`Centroids` now keeps a cell without a pixel and takes the centroid of its polygon as its position, and the contract
-records how many cells did so per dataset as `n_centroid_fallback`. A cell whose polygon centroid lies outside the
-written grid is not kept: the member job raises with "<uid>: <n> rows with no pixel in labels['cells'] have their
-fallback centroid outside the written grid [0, w) x [0, h), e.g. [x, y]". The old log line above does not say which
-of the 21 cells were outside the image, so whether a new run on these slides keeps all 21 or raises has not been
-checked.
+- `method_params={"rng": 0}`, so that a rerun gives the same mask. squidpy's default seeds the forest from the
+  operating system. The detection also runs with one BLAS/OpenMP thread: with more threads the same level gave a
+  mask that differed in a few pixels.
+- `corner_size_pct=0.05`, corner boxes of 5% of the height and width. With squidpy's 1%, the mask of the brain
+  slide had a fringe of glass along its right and top edges.
+- `corners_are_background="auto"`. A corner counts as glass when the mean grey value of its box is closer to that
+  of the brightest corner box than to the median grey value of the level. The tissue of the cervical Preview slide
+  covers its top-right corner, and the rule leaves that corner out; on the other five slides all four corners are
+  glass.
 
-The run also kept only the 18,049 Gene Expression features. The source tables have 24,677 features for the
-colorectal, breast and brain slides and 24,674 for the kidney slide (`"table"` in `stores/<uid>.json` of this run).
-`materialize` now writes the union of the members' features and keeps every source feature, with
-`var["feature_types"]` from the source. This run predates that change, so the size of the union on these slides has
-not been measured.
+squidpy's default `otsu` gives an empty mask on the brain slide: its tissue is almost as pale as the glass, so
+`otsu` keeps only the nuclei, and the area filter then drops them. The first version of this page used `weka` with
+squidpy's other defaults, and on the brain slide that mask covered bands of glass (88% of the image).
+
+{class}`~sddb.loader.StainNormalize` fits one Macenko reference with
+{func}`~squidpy.experimental.im.fit_stain_reference` on the same level of all six slides, with the masks found
+there; the fit took 0.8 s on one slide. It then normalises each written image with
+{meth}`~squidpy.experimental.im.StainFit.transform`, which takes the slide's own stain statistics from that level and
+leaves the pixels outside the mask unchanged.
+
+```{image} ../_static/loader/atera-tissue-masks.png
+:alt: The six H&E slides with the outline of their tissue mask and the share of the image that is tissue.
+```
 
 ## Checks
 
-`sddb.contract.validate` returns no issues for the collection.
+`check` runs {func}`~sddb.contract.validate` on the collection (no issues) and compares each dataset with its
+catalog record:
 
-Almost every cell lies on the tissue mask, which is expected, because cells are only found on tissue. The share
-of the image that is tissue is the more useful check, and the figure shows the mask outlines.
+| dataset | cells = catalog | features measured / filled | centroid from the source | in tissue (cells) | tissue (image) | stain change |
+|---|---|---|---|---|---|---|
+| 0 colorectal | yes | 24,677 / 2 | 3 | 99.32% | 57.4% | 2.36 |
+| 1 cervical Preview | yes | 18,028 / 6,651 | 0 | 100.00% | 80.0% | 2.81 |
+| 2 FF breast | yes | 24,677 / 2 | 3 | 99.50% | 50.4% | 1.26 |
+| 3 FFPE breast Preview | yes | 18,028 / 6,651 | 0 | 99.97% | 71.9% | 3.11 |
+| 4 brain | yes | 24,677 / 2 | 1 | 99.97% | 70.2% | 5.14 |
+| 5 kidney | yes | 24,674 / 5 | 10 | 99.91% | 77.1% | 3.76 |
 
-| uid | cells | in tissue | tissue share of the image | mean change by stain normalisation (tissue pixels, 0 to 255) |
-|---|---|---|---|---|
-| sddb_2hj2ztx47z | 446,774 | 99.9% | 59% | 1.9 |
-| sddb_a722jfj3pq | 485,980 | 98.7% | 50% | 1.6 |
-| sddb_fmjq2bpd2q | 91,428 | 100% | 88% | 4.5 |
-| sddb_l5esryipaj | 399,110 | 100% | 79% | 3.7 |
-
-The mask follows the tissue outline on the colorectal, breast and kidney slides. On the brain slide it also covers
-bands of glass around the section, so its tissue share is too high. Stain normalisation changes every slide, by 1.6
-to 4.5 grey levels on average over the tissue pixels, measured against the same slide resampled without
-normalisation. The reference is fitted on all four slides together. The change is small, which suggests that the
-slides are stained alike, but we have not checked that.
-
-```{image} ../_static/loader/atera-tissue-masks.png
-:alt: The four H&E slides at 0.5 µm per pixel, downsampled, with the tissue mask outlined.
-```
+The var index is the union of the six slides, 24,679 features. A feature a slide did not measure is 0 in its `X` and
+False in `var["present"]`: the Preview slides lack 6,651 features of the Atera v1 panel (its control probes and
+codewords among them), and the Atera v1 slides lack two or five features of the union. Nearly every cell lies on its mask,
+so `in_tissue` is close to 1; the share of the image that is tissue is the more useful check, and the figure shows
+the mask outlines. The stain change is the mean absolute change of a tissue pixel (0-255) made by the
+normalisation.
 
 ## Loader throughput
 
-The benchmark iterates `Loader(images=["he"], labels=["cells"], crop_px=224, batch_size=256, shuffle=True)` over
-`SpatialDatasetCollection(atera-he.zarr)` for two full epochs. It ran as one Slurm job with 16 cores and 32 GB on
-`cpusrv96`, a node with two Intel Xeon Gold 6142M CPUs (64 hardware threads, 376 GB), reading the collection from
-lustre. Each batch holds the H&E crops (256 x 3 x 224 x 224, uint8), the cell label crops (256 x 224 x 224,
-uint32) and X (256 x 18,049, CSR).
+The CPU benchmark iterates `Loader(images=["he"], labels=["cells"], crop_px=224, batch_size=256, shuffle=True)`
+over `SpatialDatasetCollection(atera-he.zarr)` for two full epochs. It ran as one Slurm job with 16 cores and 32 GB
+on a node with two Intel Xeon Gold 6136 CPUs, reading the collection from lustre. Each batch holds the H&E crops
+(256 x 3 x 224 x 224, uint8), the cell label crops (256 x 224 x 224, uint32) and X (256 x 24,679, CSR).
 
 | pass | cells | time | cells per second | MB per second | first batch |
 |---|---|---|---|---|---|
-| 1 (cold) | 1,423,292 | 1,231 s | 1,156 | 430 | 1.09 s |
-| 2 (warm) | 1,423,292 | 1,271 s | 1,120 | 416 | 0.32 s |
+| 1 (cold) | 2,310,946 | 1,752 s | 1,319 | 494 | 0.68 s |
+| 2 (warm) | 2,310,946 | 1,757 s | 1,315 | 493 | 0.48 s |
 
-MB per second counts the bytes of the arrays the loader returns (529 GB per epoch, mostly the label crops), so it is
-the rate of decoded data, not the rate read from disk. Opening the collection took 42 s. The second pass is no
-faster than the first, so the page cache does not help here, and the loader is probably limited by decoding and
-cropping rather than by lustre, which we have not profiled. A shorter run on a Xeon Gold 6248R node (40 batches)
-gave 1,330 cells per second.
+MB per second counts the bytes of the arrays the loader returns (866 GB per epoch, mostly the label crops), so it is
+the rate of decoded data, not the rate read from disk. Opening the collection took 67 s. The second pass is no
+faster than the first, so the page cache does not help here; we have not profiled whether decoding, cropping or
+lustre limits it.
+
+The GPU benchmark wraps the same loader (with `to="torch"` and `drop_last=True`, which annbatch requires for more
+than one worker) in a torch `DataLoader(batch_size=None)` and moves every batch to the GPU, 400 batches (102,400
+cells) per setting. It ran as one Slurm job with 16 cores of an Intel Xeon Platinum 8480+ node and one NVIDIA H100
+80GB (torch 2.15.0, CUDA 13.2). X arrives as a sparse CSR tensor.
+
+| DataLoader workers | time | cells per second | MB per second | first batch |
+|---|---|---|---|---|
+| 0 | 54.1 s | 1,893 | 710 | 0.74 s |
+| 2 | 39.4 s | 2,602 | 976 | 0.59 s |
+| 4 | 26.4 s | 3,876 | 1,453 | 1.11 s |
+| 8 | 22.1 s | 4,639 | 1,738 | 0.95 s |
+
+Eight workers read 2.4 times as fast as the loader in the main process. The H100 job's node differs from the CPU
+job's, so the rows with 0 workers of the two tables are not a CPU/GPU comparison.
 
 ```{image} ../_static/loader/atera-batch.png
 :alt: Sixteen 224 px crops of one shuffled batch, H&E with the cell outlines.
