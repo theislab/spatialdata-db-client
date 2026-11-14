@@ -108,13 +108,11 @@ class LoaderItem:
         image its corners are fill. :class:`~sddb.loader.Centroids` flags cells whose centroid is not on it.
     n_outside_image
         How many rows have ``obs["outside_image"]`` True, set by :class:`~sddb.loader.Centroids`.
-    image_source
-        The source image's multiscale levels and the affine :class:`~sddb.loader.Rasterize` resampled them with, set by
-        it, so that :meth:`StainNormalize.fit <sddb.loader.StainNormalize.fit>` can read a coarse level instead of the
-        written image.
-    tissue_overview
-        The tissue mask on :class:`~sddb.loader.TissueMask`'s overview and the overview's factor ``f`` (an overview
-        pixel covers ``f x f`` written pixels), set by it.
+    source_coarse
+        The source image's coarsest level in the role's dtype, its index and its map from the written grid, set by
+        :class:`~sddb.loader.Rasterize`. squidpy's tissue detection and stain statistics run on it.
+    source_tissue
+        The tissue mask on `source_coarse`, set by :class:`~sddb.loader.TissueMask`.
     label_rule
         Where ``obs["label_id"]`` came from (see :meth:`from_sdata`).
     """
@@ -144,8 +142,8 @@ class LoaderItem:
     image_footprint: np.ndarray | None = field(default=None, repr=False)
     n_outside_image: int = 0
     label_rule: str = ""
-    image_source: Any = field(default=None, repr=False)
-    tissue_overview: tuple[np.ndarray, int] | None = field(default=None, repr=False)
+    source_coarse: Any = field(default=None, repr=False)
+    source_tissue: np.ndarray | None = field(default=None, repr=False)
     source: _Source | None = field(default=None, repr=False)
 
     @classmethod

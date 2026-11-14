@@ -41,6 +41,7 @@ loader = [
   "spatialbatch",
   "snakemake>=9",
   "snakemake-executor-plugin-slurm",
+  "threadpoolctl",
 ]
 
 [project.scripts]

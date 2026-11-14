@@ -68,7 +68,12 @@ def make_sdata(
     """
     cs = {"global": image_tf if image_tf is not None else Identity()}
     data = da.from_array(image, chunks=(image.shape[0], image_chunks or image.shape[1], image_chunks or image.shape[2]))
-    images = {"he": Image2DModel.parse(data, dims=("c", "y", "x"), scale_factors=scale_factors, transformations=cs)}
+    # explicit chunks: without them spatialdata merges each level of a pyramid into one chunk
+    images = {
+        "he": Image2DModel.parse(
+            data, dims=("c", "y", "x"), scale_factors=scale_factors, transformations=cs, chunks=data.chunksize
+        )
+    }
     elements: dict = {"images": images}
     if shapes is not None:
         elements["shapes"] = {
@@ -541,7 +546,7 @@ def test_stain_pooled_fit_one_reference(monkeypatch):
     monkeypatch.setattr(sqim, "fit_stain_reference", lambda *a, **k: calls.append(k) or fit(*a, **k))
 
     items = [_he_item(0), _he_item(1)]
-    step = StainNormalize(fit_pixels=1024)
+    step = StainNormalize()
     reference = step.fit(items)
     assert len(calls) == 1
     assert len(calls[0]["image_key"]) == 2
@@ -566,12 +571,12 @@ def test_stain_normalisation_changes_pixels_only_when_the_staining_differs():
     tissue = np.asarray(item.labels["tissue"]) > 0
     before = np.asarray(item.image).astype(int)
 
-    own = StainNormalize(fit_pixels=1024)
+    own = StainNormalize()
     own.fit([item])
     same = np.asarray(own.build(item).image).astype(int)
     assert np.abs(same - before)[:, tissue].mean() < 1
 
-    other = StainNormalize(fit_pixels=1024)
+    other = StainNormalize()
     other.fit([_he_item(1, stains=([0.45, 0.80, 0.40], [0.20, 0.90, 0.38]))])
     moved = np.asarray(StainNormalize(reference=other.reference).build(item).image).astype(int)
     assert np.abs(moved - before)[:, tissue].mean() > 5
@@ -584,39 +589,38 @@ def _never_computed(data: da.Array) -> da.Array:
     return data.map_blocks(boom, dtype=data.dtype)
 
 
-def test_stain_fit_reads_a_coarse_source_level_only():
-    """fit() reads the coarsest source level with >= fit_pixels pixels, never scale 0 or the written image."""
-    import squidpy.experimental.im as sqim
-
+def test_tissue_mask_and_stain_fit_read_only_the_coarsest_source_level():
+    """squidpy runs on the source's coarsest level: no block of a finer level or of the written grid is computed."""
     img = he_image(256, 256, seed=0, disk=(128, 128, 90))
     sdata = make_sdata(img, shapes=squares([(128, 128), (10, 10)], 5), scale_factors=[2, 2], image_chunks=64)
-    item = Rasterize(None, tile=64).build(item_of(sdata))
-    item = TissueMask(method="otsu", auto_max_pixels=1024).build(Centroids().build(item))
-    # the old path: a pyramid of the written image down to <= fit_pixels
-    old = StainNormalize(fit_pixels=1024)
-    image, tissue = old._elements(item)
-    before = sqim.fit_stain_reference(
-        sd.SpatialData(images={"i": image}, labels={"t": tissue}), image_key=["i"], scale="auto", tissue_mask_key=["t"]
-    )
-
-    src = item.image_source
+    item = item_of(sdata)
+    src = item.source
     assert [lv.shape[-1] for lv in src.levels] == [256, 128, 64]
-    levels = [xr.DataArray(_never_computed(lv.data), dims=lv.dims, coords=lv.coords) for lv in src.levels[:2]]
-    guarded = dataclasses.replace(
-        item,
-        image=xr.DataArray(_never_computed(item.image.data), dims=item.image.dims, coords=item.image.coords),
-        image_source=dataclasses.replace(src, levels=[*levels, src.levels[2]]),
-    )
-    step = StainNormalize(fit_pixels=1024)
-    reference = step.fit([guarded])
-    # 256 x 256 written pixels, g = 8: a 32 x 32 grid, read from the 64 x 64 level (the coarsest with >= 1024 pixels)
-    assert step.fit_inputs == {
-        item.uid: {"factor": 8, "pixels": 1024, "level": 2, "level_shape": [64, 64], "averaged": 2}
-    }
+    guarded = [xr.DataArray(_never_computed(lv.data), dims=lv.dims, coords=lv.coords) for lv in src.levels[:2]]
+    item = dataclasses.replace(item, source=dataclasses.replace(src, levels=[*guarded, src.levels[2]]))
+    item = Rasterize(None, tile=64).build(item)  # the written grid comes from level 0, so computing it raises
+    item = TissueMask(method="otsu").build(Centroids().build(item))
+    assert item.source_tissue.shape == (64, 64)
+    assert 0.3 < item.source_tissue.mean() < 0.6  # the disk of radius 90 px covers 39% of the image
+    step = StainNormalize()
+    step.fit([item])
+    assert step.fit_inputs == {item.uid: {"level": 2, "level_shape": [64, 64]}}
     assert step.to_record().params["fit_inputs"] == step.fit_inputs
     assert StainNormalize.from_record(step.to_record()).to_record() == step.to_record()
-    np.testing.assert_allclose(reference.stain_matrix, before.stain_matrix, atol=0.05)
-    np.testing.assert_allclose(reference.max_concentrations, before.max_concentrations, rtol=0.1)
+    with pytest.raises(AssertionError, match="full-resolution"):  # build normalises the written grid, so it reads it
+        np.asarray(step.build(item).image)
+
+
+def test_tissue_mask_on_the_source_level_maps_onto_the_written_grid():
+    """The mask squidpy finds on the coarsest level lands on the written grid where the tissue is."""
+    img = he_image(256, 256, seed=0, disk=(128, 128, 90))
+    sdata = make_sdata(img, shapes=squares([(128, 128), (10, 10)], 5), scale_factors=[2, 2], image_chunks=64)
+    item = TissueMask(method="otsu").build(Centroids().build(Rasterize(None, tile=64).build(item_of(sdata))))
+    mask = np.asarray(item.labels["tissue"]) > 0
+    yy, xx = np.mgrid[:256, :256]
+    truth = (yy - 128) ** 2 + (xx - 128) ** 2 < 90**2
+    assert (mask & truth).sum() / (mask | truth).sum() > 0.9
+    assert item.table.obs["in_tissue"].tolist() == [True, False]
 
 
 def test_stain_refuses_if():
@@ -627,7 +631,7 @@ def test_stain_refuses_if():
     assert item.channels == ["0", "1"]
     with pytest.raises(ValueError, match="H&E"):
         StainNormalize().fit([item])
-    reference = StainNormalize(fit_pixels=1024).fit([_he_item(0)])
+    reference = StainNormalize().fit([_he_item(0)])
     with pytest.raises(ValueError, match="H&E"):
         StainNormalize(reference=reference).build(item)
 
@@ -641,14 +645,13 @@ def test_stain_build_without_reference_raises():
 
 
 def test_adapter_record_roundtrip():
-    reference = StainNormalize(fit_pixels=1024).fit([_he_item(0)])
+    reference = StainNormalize().fit([_he_item(0)])
     for step in [
         Rasterize(0.5, allow_upsample=True, tile=256),
         Rasterize(0.5, value_range=(0, 255)),
         Rasterize(None),
         Centroids(),
         TissueMask(method="otsu", auto_max_pixels=1000),
-        StainNormalize(fit_pixels=4096),
         StainNormalize(reference=reference),
     ]:
         rec = step.to_record()
@@ -753,7 +756,13 @@ def _atera_shaped(tile):
     shapes = squares([(x, y) for y, x in com], 1)  # the boundaries locate the rows for the label_id check
     shapes.index = np.arange(10**8, 10**8 + n)
     return make_sdata(
-        img, image_tf=tf, shapes=shapes, labels=labels, image_chunks=tile, obs={"label_id": np.arange(1, n + 1)}
+        img,
+        image_tf=tf,
+        scale_factors=[2, 2, 2],  # squidpy reads the coarsest level, 50 x 60
+        shapes=shapes,
+        labels=labels,
+        image_chunks=tile,
+        obs={"label_id": np.arange(1, n + 1)},
     )
 
 
@@ -763,8 +772,8 @@ def test_chain_never_computes_whole_image():
     roles = {**TABLE_ROLES, "labels": "^labels/cell_labels$"}
     items = [item_of(sdata, roles=roles, mpp_native=0.25)]
     rasterize, centroids, _, stain = default_chain(0.5)
-    rasterize.tile, stain.fit_pixels = tile, 1024
-    tissue = TissueMask(method="otsu", auto_max_pixels=1024)  # a 32 x 32 overview is too small for weka's corners
+    rasterize.tile = tile
+    tissue = TissueMask(method="otsu")  # the 50 x 60 coarsest level is too small for weka's corners
     written = (240, 200)  # the global footprint 600 x 500 at 2.5 global units per written pixel
     guard = _NoWholeImage(max_px=written[0] * written[1] // 2)
     with dask.config.set(scheduler="sync"), guard:
@@ -932,11 +941,3 @@ def test_outside_footprint_is_glass(role, glass):
     h, w = out.shape[1:]
     assert (out[:, 0, 0] == glass).all()  # a corner of the bounding box, outside the rotated footprint
     assert (out[:, h // 2, w // 2] == 100).all()
-
-
-def test_overview_is_float32_and_lazy():
-    image = xr.DataArray(da.zeros((3, 64, 64), dtype=np.uint8, chunks=(3, 16, 16)), dims=("c", "y", "x"))
-    small = _adapters._overview(image, 4)
-    assert isinstance(small.data, da.Array)
-    assert small.dtype == np.float32
-    assert small.shape == (3, 16, 16)
