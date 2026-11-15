@@ -692,6 +692,133 @@ def test_null_catalog_mpp_keeps_the_native_grid(catalog_cohort, tmp_path):
     assert [_contract(dest, k).mpp_source for k in ("dataset_0", "dataset_1")] == [None, None]
 
 
+# -- Visium: the mpp is the array-pitch fit of the store's own spots -----------------------------------------------
+
+VISIUM_MPP = 8.0  # µm per pixel of the synthetic Visium image: one array_col step (50 µm) is 6.25 px
+VISIUM_ROLES = {"image": "^images/he$", "table": "^tables/table$"}
+
+
+def _visium_spots(mpp=VISIUM_MPP, *, jitter=0.0, odd=False, seed=0):
+    """Spots on a Visium v1/v2 array: ``array_col`` and ``array_row`` of a spot have the same parity, 100 µm apart."""
+    rng = np.random.default_rng(seed)
+    step = 50.0 / mpp  # px per array_col step
+    cols, rows = zip(*[(c, r) for r in range(7) for c in range(r % 2, 13, 2)], strict=True)
+    cols, rows = np.asarray(cols), np.asarray(rows)
+    if odd:
+        cols = cols + (rows == 3)  # one row off the array's parity
+    x = 8 + cols * step + rng.normal(0, jitter, cols.size)
+    y = 8 + rows * step * np.sqrt(3) + rng.normal(0, jitter, cols.size)
+    circles = gpd.GeoDataFrame(
+        {"radius": 27.5 / mpp}, geometry=[shapely.Point(p) for p in zip(x, y, strict=True)], index=np.arange(cols.size)
+    )
+    return circles, {"array_col": cols, "array_row": rows}
+
+
+def write_visium_member(tmp_path, uid, *, image_tf=None, **spots):
+    """A Visium-like store: H&E image ``he``, spot circles ``cells`` and a table with the spots' array positions."""
+    from spatialdata.transformations import Identity
+
+    circles, array = _visium_spots(**spots)
+    sdata = make_sdata(he_image(SIZE, SIZE, seed=0), shapes=circles, image_tf=image_tf or Identity(), obs=array)
+    var = pd.DataFrame(
+        {"gene_ids": list(GENES.values())[:4], "feature_types": ["Gene Expression"] * 4}, index=list(GENES)[:4]
+    )
+    old = sdata.tables["table"]
+    counts = np.random.default_rng(0).poisson(2.0, (old.n_obs, len(var))).astype(np.int32)
+    del sdata.tables["table"]
+    sdata.tables["table"] = TableModel.parse(
+        ad.AnnData(X=counts, obs=old.obs.copy(), var=var), region="cells", region_key="region", instance_key="cell_id"
+    )
+    path = tmp_path / f"{uid}.zarr"
+    sdata.write(path)
+    return path
+
+
+class _LaterCohort(FakeCohort):
+    _source = SimpleNamespace(release="2026-12-01")
+
+
+def test_visium_mpp_is_the_pitch_fit_not_the_stale_catalog(tmp_path):
+    # catalog 2026-11-12 and before: 55 / spot_diameter_fullres, 1.18 times too small
+    member = FakeMember("uidV", write_visium_member(tmp_path, "uidV"), technology="10x_visium", hne_image=True)
+    member.mpp = VISIUM_MPP / 1.1818
+    dest = materialize(
+        FakeCohort([member]), tmp_path / "c.zarr", adapters=[Rasterize(8.0), Centroids()], roles=VISIUM_ROLES
+    )
+    contract = _contract(dest, "dataset_0")
+    assert contract.mpp_native == pytest.approx(VISIUM_MPP, rel=1e-9)
+    assert contract.mpp_source == "store_pitch_fit"
+    assert validate(dest) == []
+
+
+def test_visium_catalog_mpp_off_the_fit_raises_after_the_stale_releases(tmp_path):
+    path = write_visium_member(tmp_path, "uidV")
+    member = FakeMember("uidV", path, technology="10x_visium", hne_image=True, mpp=VISIUM_MPP / 1.1818)
+    with pytest.raises(ValueError, match=r"uidV: the catalog's mpp .* differs from the pitch fit .* by more than 0.02"):
+        materialize(
+            _LaterCohort([member]), tmp_path / "c.zarr", adapters=[Rasterize(8.0), Centroids()], roles=VISIUM_ROLES
+        )
+    member.mpp = VISIUM_MPP * 1.01  # within PITCH_RTOL: the fit is still the value
+    dest = materialize(
+        _LaterCohort([member]), tmp_path / "d.zarr", adapters=[Rasterize(8.0), Centroids()], roles=VISIUM_ROLES
+    )
+    assert _contract(dest, "dataset_0").mpp_native == pytest.approx(VISIUM_MPP, rel=1e-9)
+
+
+def test_pitch_fit_on_a_downscaled_image():
+    from spatialdata.transformations import Scale
+
+    # a hires-like image: one image pixel is 2 units of the spots' frame
+    circles, array = _visium_spots()
+    sdata = make_sdata(
+        he_image(SIZE // 2, SIZE // 2), shapes=circles, image_tf=Scale([2.0, 2.0], axes=("x", "y")), obs=array
+    )
+    assert _defaults.pitch_mpp(sdata, "he") == pytest.approx(2 * VISIUM_MPP, rel=1e-9)
+    # the circles' radius does not enter: spatialdata-io wrote spot_diameter_fullres / 2 before
+    sdata.shapes["cells"]["radius"] = 50.0
+    assert _defaults.pitch_mpp(sdata, "he") == pytest.approx(2 * VISIUM_MPP, rel=1e-9)
+
+
+@pytest.mark.parametrize(
+    ("spots", "match"),
+    [({"odd": True}, "not on a Visium v1/v2 array"), ({"jitter": 2.0}, r"median .* µm, more than 5 µm")],
+)
+def test_pitch_fit_refuses_spots_off_the_array(spots, match):
+    circles, array = _visium_spots(**spots)
+    sdata = make_sdata(he_image(SIZE, SIZE), shapes=circles, obs=array)
+    with pytest.raises(ValueError, match=match):
+        _defaults.pitch_mpp(sdata, "he")
+
+
+def test_visium_without_array_positions_never_takes_the_stale_catalog(caplog):
+    circles, _ = _visium_spots()
+    sdata = make_sdata(he_image(SIZE, SIZE), shapes=circles)
+    member = SimpleNamespace(uid="uidV", technology="10x_visium", mpp=VISIUM_MPP / 1.1818)
+    assert _defaults.resolve_mpp(member, sdata, "he", given={}, release="2026-11-12") == (None, None)
+    assert "known stale" in caplog.text
+    assert _defaults.resolve_mpp(member, sdata, "he", given={}, release="2026-12-01") == (
+        VISIUM_MPP / 1.1818,
+        "catalog_unchecked",
+    )
+    assert _defaults.resolve_mpp(member, sdata, "he", given={"uidV": 7.0}, release="2026-11-12") == (7.0, "given")
+
+
+@pytest.mark.parametrize(
+    ("technology", "release", "stale"),
+    [
+        ("10x_visium", "2026-11-12", True),
+        ("10x_visium", "2026-10-01", True),
+        ("10x_visium", "2026-11-13", False),
+        ("10x_visium", "unknown", True),
+        ("10x_visium", None, True),
+        ("10x_visium_hd", "2026-11-12", False),
+        ("10x_atera", "2026-11-12", False),
+    ],
+)
+def test_catalog_is_stale(technology, release, stale):
+    assert _defaults.catalog_is_stale(technology, release) is stale
+
+
 @pytest.mark.parametrize(
     ("change", "match"),
     [

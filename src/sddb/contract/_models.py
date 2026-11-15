@@ -71,7 +71,8 @@ class DatasetContract(BaseModel):
     mpp_source
         Where `mpp_native` came from: ``"given"`` (passed to materialize), ``"catalog_checked_store"`` (the catalog's
         ``mpp``, which agrees with the pixel size the store records), ``"catalog_unchecked"`` (the catalog's, from a
-        store that records none). ``None`` when `mpp_native` is unknown, or for a dataset written before the field.
+        store that records none), ``"store_pitch_fit"`` (fitted on the Visium array pitch of the store's own spots,
+        not the catalog's). ``None`` when `mpp_native` is unknown, or for a dataset written before the field.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -96,7 +97,7 @@ class DatasetContract(BaseModel):
     n_features_present: StrictInt = Field(default=0, ge=0)
     n_features_filled: StrictInt = Field(default=0, ge=0)
     totals: bool = False
-    mpp_source: Literal["given", "catalog_checked_store", "catalog_unchecked"] | None = None
+    mpp_source: Literal["given", "catalog_checked_store", "catalog_unchecked", "store_pitch_fit"] | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:

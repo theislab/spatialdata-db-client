@@ -154,11 +154,18 @@ def materialize(
         spatialdata-io reader writes (``sddb.loader._defaults.ROLES``; so far 10x Atera with ``"he"``); members of
         several technologies, or one without defaults, need them passed.
     mpp_native
-        Microns per scale-0 image pixel by uid, overriding the catalog. A member without an entry takes its catalog
-        ``mpp``; ``None`` (given, or a null catalog value) means unknown, and the member keeps its native grid. A
-        catalog value is checked against the one the store records, where it records one (``sdata.attrs
-        ["pixel_size"]`` times the image's scale onto ``global``, as spatialdata-io's Atera reader writes), and a
-        relative difference above 1e-6 raises. A value given here is not checked.
+        Microns per scale-0 image pixel by uid, overriding the defaults; ``None`` means unknown, and the member keeps
+        its native grid. A value given here is not checked. A member without an entry (see
+        ``sddb.loader._defaults.resolve_mpp``):
+
+        - ``10x_visium``: the fit of its spots' pixel centres on their array positions (100 µm between neighbours
+          of a row), never the catalog ``mpp``, which up to release 2026-11-12 is 1.18 to 1.27 times too small. In
+          later releases a catalog value more than 2% off the fit raises;
+        - otherwise its catalog ``mpp``, checked against the one the store records where it records one
+          (``sdata.attrs["pixel_size"]`` times the image's scale onto ``global``, as spatialdata-io's Atera reader
+          writes): a relative difference above 1e-6 raises. A null catalog value means unknown.
+
+        The contract's ``mpp_source`` says which applied.
     obs_columns
         Catalog columns copied into every dataset's ``obs``, as categoricals.
     runner
@@ -258,8 +265,7 @@ def _prepare(
     if roles is None:
         roles = _defaults.default_roles(members, role)
     rasterize = _rasterize_step(adapters)
-    given = set(mpp_native or {})
-    mpps = {**dict(mpp_native or {}), **_defaults.default_mpp(members, mpp_native)}
+    given = dict(mpp_native or {})
     if missing := sorted({c for m in members for c in obs_columns if not hasattr(m, c)}):
         raise ValueError(f"obs_columns {missing} are not catalog columns")
     keys = {uid: f"dataset_{i}" for i, uid in enumerate(uids)}
@@ -275,8 +281,26 @@ def _prepare(
     written = [keys[u] for u in uids if u in done]
     _check_chain(adapters, root, written)
 
-    for uid in sorted(set(mpps) - set(uids)):
+    for uid in sorted(set(given) - set(uids)):
         logger.warning(f"mpp_native has {uid!r}, which is not a member of the cohort")
+    todo = [m for m in members if str(m.uid) not in done]
+    release = _release(cohort) if todo else None
+    # the mpp of a member written before is the one its contract records; the others' is resolved on their store
+    mpps: dict[str, float | None] = {}
+    sources: dict[str, str | None] = {}
+    for uid in done:
+        contract = _contract(root[keys[uid]])
+        mpps[uid], sources[uid] = contract.mpp_native, contract.mpp_source
+    opened: dict[str, Any] = {}
+    paths: dict[str, str | None] = {}
+    for m in todo:
+        uid = str(m.uid)
+        store = m._local_store() if callable(getattr(m, "_local_store", None)) else None
+        sdata = _read_store(store) if store is not None else m.to_sdata()
+        paths[uid] = None if sdata.path is None else str(Path(sdata.path).absolute())
+        image = resolve([f"images/{name}" for name in sdata.images], {"image": roles["image"]})["image"]
+        mpps[uid], sources[uid] = _defaults.resolve_mpp(m, sdata, image.split("/", 1)[1], given=given, release=release)
+        opened[uid] = sdata
     grids = {
         uid: _contract(root[keys[uid]]).grid if uid in done else _grid(rasterize.mpp, mpps.get(uid)) for uid in uids
     }
@@ -290,19 +314,11 @@ def _prepare(
         if uid not in done and rasterize.mpp is not None:
             logger.warning(f"{uid}: no mpp_native, so it keeps its native grid")
 
-    todo = [m for m in members if str(m.uid) not in done]
     items: dict[str, LoaderItem] = {}
-    paths: dict[str, str | None] = {}
-    sources: dict[str, str | None] = {}
     for m in todo:
         uid = str(m.uid)
-        store = m._local_store() if callable(getattr(m, "_local_store", None)) else None
-        sdata = _read_store(store) if store is not None else m.to_sdata()
-        paths[uid] = None if sdata.path is None else str(Path(sdata.path).absolute())
-        image = resolve([f"images/{name}" for name in sdata.images], {"image": roles["image"]})["image"]
-        sources[uid] = _defaults.check_mpp(uid, mpps.get(uid), sdata, image.split("/", 1)[1], given=uid in given)
         items[uid] = LoaderItem.from_sdata(
-            sdata, uid=uid, study_id=str(m.study_id), role=role, roles=roles, mpp_native=mpps.get(uid)
+            opened[uid], uid=uid, study_id=str(m.study_id), role=role, roles=roles, mpp_native=mpps.get(uid)
         )
     shared, columns = _shared_features(items, root, written) if items else ([], {c: [] for c in _VAR_COLUMNS})
     items = {uid: _rekey(item, shared, columns) for uid, item in items.items()}
@@ -311,7 +327,7 @@ def _prepare(
         "dest": str(dest),
         "role": role,
         "roles": dict(roles),
-        "release": _release(cohort) if todo else None,
+        "release": release,
         "allow_mixed_grids": allow_mixed_grids,
         "obs_columns": list(obs_columns),
         "genes": shared,
