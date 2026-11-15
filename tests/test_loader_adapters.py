@@ -680,29 +680,47 @@ def _rasterized(img, role="he", **kwargs):
     return Rasterize(None, **kwargs).build(item_of(sdata, role=role))
 
 
-def test_dtype_float_he_needs_value_range():
-    img = np.random.default_rng(6).uniform(0, 255, (3, 16, 16)).astype(np.float32)
-    with pytest.raises(ValueError, match=r"\[0\.\d*, 25\d.*value_range"):
-        _rasterized(img)
-    item = _rasterized(img, value_range=(0, 255))
-    np.testing.assert_array_equal(item.image.values, np.floor(img.astype(np.float64) + 0.5).astype(np.uint8))
+@pytest.mark.parametrize(
+    ("img", "found"),
+    [
+        (np.zeros((4, 16, 16), np.uint8), "4 channels of uint8"),  # an IF slide with hne_image, RGBA-shaped
+        (np.zeros((3, 16, 16), np.uint16), "3 channels of uint16"),  # 3-channel IF (CytAssist, HD)
+        (np.zeros((1, 16, 16), np.uint8), "1 channels of uint8"),
+        (np.zeros((3, 16, 16), np.float32), "3 channels of float32"),
+    ],
+)
+def test_he_role_needs_three_channels_of_uint8(img, found):
+    sdata = make_sdata(img, shapes=squares([(8, 8)], 4))
+    with pytest.raises(
+        ValueError, match=rf"uid0001: role 'he' needs a 3-channel \(RGB\) uint8 image, but 'he' has {found}"
+    ):
+        item_of(sdata)
+    item_of(sdata, role="if")  # the same image is accepted as IF
+
+
+def test_dtype_float_if_needs_value_range():
+    img = np.random.default_rng(6).uniform(2, 60000, (2, 16, 16)).astype(np.float32)
+    with pytest.raises(ValueError, match="value_range"):
+        _rasterized(img, role="if")
+    item = _rasterized(img, role="if", value_range=(0, 65535))
+    np.testing.assert_array_equal(item.image.values, np.floor(img.astype(np.float64) + 0.5).astype(np.uint16))
     assert "value_range" in item.dtype_rule
 
 
 def test_dtype_float_in_unit_range_scales():
-    img = np.random.default_rng(6).uniform(0, 1, (3, 16, 16))
-    item = _rasterized(img)
-    np.testing.assert_array_equal(item.image.values, np.floor(img * 255 + 0.5).astype(np.uint8))
+    img = np.random.default_rng(6).uniform(0, 1, (2, 16, 16))
+    item = _rasterized(img, role="if")
+    np.testing.assert_array_equal(item.image.values, np.floor(img * 65535 + 0.5).astype(np.uint16))
     assert "[0, 1]" in item.dtype_rule
     assert "judged on full resolution" in item.dtype_rule  # a single-level image
 
 
 def test_dtype_rule_says_coarsest_level_on_a_pyramid():
-    img = np.random.default_rng(6).integers(0, 256, (3, 32, 32)).astype(np.uint16)
+    img = np.random.default_rng(6).integers(0, 65536, (2, 32, 32)).astype(np.int32)
     sdata = make_sdata(img, shapes=squares([(8, 8)], 4), scale_factors=[2])
-    item = Rasterize(None).build(item_of(sdata))
+    item = Rasterize(None).build(item_of(sdata, role="if"))
     assert "judged on the coarsest pyramid level" in item.dtype_rule
-    assert "clipped to uint8" in item.dtype_rule
+    assert "clipped to uint16" in item.dtype_rule
     np.testing.assert_array_equal(item.image.values, img)
 
 
@@ -714,19 +732,13 @@ def test_dtype_int32_if_keeps_values():
     assert "values kept" in item.dtype_rule
 
 
-def test_dtype_uint16_he_within_uint8_casts():
-    img = np.random.default_rng(6).integers(0, 256, (3, 16, 16)).astype(np.uint16)
-    item = _rasterized(img)
-    assert item.image.dtype == np.uint8
-    np.testing.assert_array_equal(item.image.values, img)
-
-
-def test_dtype_full_range_uint16_he_raises():
-    img = np.random.default_rng(6).integers(0, 2**16, (3, 16, 16)).astype(np.uint16)
+def test_dtype_out_of_range_if_raises():
+    img = np.random.default_rng(6).integers(0, 2**20, (2, 16, 16)).astype(np.int32)
     with pytest.raises(ValueError, match="value_range"):
-        _rasterized(img)
-    item = _rasterized(img, value_range=(0, 65535))
-    np.testing.assert_array_equal(item.image.values, np.floor(img / 257 + 0.5).astype(np.uint8))
+        _rasterized(img, role="if")
+    item = _rasterized(img, role="if", value_range=(0, 2**20))
+    k = 65535 / 2**20
+    np.testing.assert_array_equal(item.image.values, np.floor(np.clip(img * k, 0, 65535) + 0.5).astype(np.uint16))
 
 
 # -- the dask guard ----------------------------------------------------------------------------------------------------

@@ -93,8 +93,9 @@ class Rasterize(_Adapter):
     ``"native"`` grid, ``native_to_written = 1``).
 
     The image is resampled (order 1) from the coarsest multiscale level whose mpp is still at most `mpp`, and
-    converted to the role's dtype (H&E uint8, IF uint16) by a rule recorded in ``item.dtype_rule`` (see
-    `value_range`). Outside the image's footprint the written image is glass (255) for H&E and 0 for IF. Existing labels
+    converted to the role's dtype by a rule recorded in ``item.dtype_rule`` (see `value_range`). An H&E source is
+    already 3-channel uint8 (:meth:`LoaderItem.from_sdata` refuses anything else), so only an IF source is converted
+    to uint16. Outside the image's footprint the written image is glass (255) for H&E and 0 for IF. Existing labels
     are resampled with order 0; otherwise the shapes the table annotates are rasterised once, filled, with each
     row's ``obs["label_id"]``, one tile of ``tile x tile`` pixels at a time.
 
@@ -170,8 +171,6 @@ class Rasterize(_Adapter):
         data, _ = _to_role_dtype(
             _dask(coarsest), item.role, _dask(coarsest), self.value_range, item.uid, single=len(src.levels) == 1
         )
-        if item.role == "he" and data.shape[0] == 4:
-            data = data[:3]
         # squidpy's channel kernels need the channels in one chunk (xarray apply_ufunc with c as a core dimension);
         # the Atera stores chunk them one by one
         data = data.rechunk({0: -1})
@@ -209,12 +208,6 @@ class Rasterize(_Adapter):
         data, dtype_rule = _to_role_dtype(
             _dask(lv), item.role, _dask(src.levels[-1]), self.value_range, item.uid, single=len(src.levels) == 1
         )
-        if item.role == "he":
-            if data.shape[0] == 4:
-                data = data[:3]
-                dtype_rule = "; ".join(filter(None, [dtype_rule, "rgba -> rgb: alpha dropped"]))
-            elif data.shape[0] != 3:
-                raise ValueError(f"an H&E image needs 3 (RGB) or 4 (RGBA) channels; {item.uid} has {data.shape[0]}")
         c = data.shape[0]
         m, off = grid.index_map(a, level_scale)
         image = affine_transform(

@@ -59,7 +59,7 @@ class LoaderItem:
     uid, study_id
         The catalog member.
     role
-        ``"he"`` or ``"if"``.
+        ``"he"`` or ``"if"``. An ``"he"`` image is 3-channel (RGB) uint8.
     table
         The cells, one row per cell of the annotated element. ``obs["label_id"]`` holds each row's value in
         ``labels["cells"]`` (see :meth:`from_sdata`); :class:`~sddb.loader.Centroids` adds ``obsm["spatial"]``.
@@ -198,8 +198,9 @@ class LoaderItem:
         ------
         ValueError
             If a role is unknown or names the wrong kind of element, the table does not annotate exactly one
-            labels or shapes element, the image and the cells share no coordinate system, or the label ids cannot
-            be inferred or are invalid.
+            labels or shapes element, the image and the cells share no coordinate system, the label ids cannot
+            be inferred or are invalid, or `role` is ``"he"`` and the image is not 3 channels of uint8 (an IF slide
+            the catalog marks with ``hne_image``, for example).
         """
         import anndata as ad
         from spatialdata.models import get_table_keys
@@ -264,6 +265,8 @@ class LoaderItem:
             table_centroids = np.asarray(source_table.obsm["spatial"], dtype=np.float64)[:, :2]
         annotated_el = sdata.labels[region] if region in sdata.labels else sdata.shapes[region]
         levels = _levels(image_el)
+        if role == "he":
+            _check_he(levels[0], uid, names["image"])
         channels = [str(c) for c in levels[0].coords["c"].values] if role == "if" else None
         cells = _levels(cells_el)[0] if cells_kind == "labels" else cells_el
         source = _Source(
@@ -293,6 +296,17 @@ class LoaderItem:
             channels=channels,
             label_rule=rule,
             source=source,
+        )
+
+
+def _check_he(image: xr.DataArray, uid: str, name: str) -> None:
+    """Raise unless `image` is an H&E: 3 channels (RGB) of uint8. Reads only its metadata."""
+    n, dtype = image.sizes.get("c", 1), np.dtype(image.dtype)
+    if n != 3 or dtype != np.uint8:
+        raise ValueError(
+            f"{uid}: role 'he' needs a 3-channel (RGB) uint8 image, but {name!r} has {n} channels of {dtype}. A "
+            "fluorescence image is not an H&E, even where the catalog's hne_image says so: pass role='if', or "
+            "roles={'image': ...} naming the member's H&E image"
         )
 
 
