@@ -79,6 +79,19 @@ CATALOG_COLUMNS: dict[str, str] = {
     # provenance-only notes get no marker.
     "review_status": "string",
     "review_reason": "string",
+    # the same reasons as a list (empty when none): one reason can itself contain "; " (hub #535)
+    "review_reasons": "list[string]",
+    # each reason's user-facing class description (curation tools/review_reason_classes.tsv), same order; optional
+    "review_classes": "list[string]",
+    # 10x run metrics from the deposit's summary (Atera / Xenium; hub publish/atera_metadata.py
+    # EXTRA_CATALOG_COLUMNS, in releases since catalog-2026-11-12); null for other technologies
+    "n_cells": "Int64",
+    "median_transcripts_per_cell": "Float64",
+    "median_genes_per_cell": "Float64",
+    "decoded_transcripts": "Int64",
+    "imaged_area": "Float64",  # imaged region area in µm²
+    "onboard_version": "string",
+    "panel": "string",
     "product": "string",
     "modality": "string",
     # All modalities present in the dataset (multimodal); scalar `modality` kept for back-compat.

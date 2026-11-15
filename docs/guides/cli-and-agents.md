@@ -20,7 +20,7 @@ not pass validation (in the current catalog every dataset passes, so this change
 gene index.
 
 ```
-$ sddb-cli query --organism human --technology Visium --tissue lung --min-obs 5000
+$ sddb-cli query --catalog https://github.com/theislab/spatialdata-db-client/releases/download/catalog-2026-10-28/catalog.parquet --organism human --technology Visium --tissue lung --min-obs 5000
 # catalog 2026-10-28 · 6087 datasets
 uid                   technology  organism  tissue  n_obs
 PntNMJy70YLUP8eq0000  Visium      human     lung    6195
@@ -111,7 +111,7 @@ Datasets: [`EVTMdgu8thDMETSm0000`](https://spatialdata-db-web.pages.dev/datasets
 Write BibTeX for the studies behind the datasets that match the facets or search.
 
 ```
-$ sddb-cli cite -o refs.bib --organism mouse --tissue brain --technology Visium
+$ sddb-cli cite --catalog https://github.com/theislab/spatialdata-db-client/releases/download/catalog-2026-10-28/catalog.parquet -o refs.bib --organism mouse --tissue brain --technology Visium
 wrote 276 citations (252 fallback; entries that share a DOI merged) -> refs.bib
 ```
 
@@ -167,8 +167,8 @@ If `sddb-mcp` is not on the `PATH` of the app, use its absolute path as `command
 |---|---|
 | `query` | Filter datasets by facets (including `source`, `preservation_method`, `hne_image`, `if_image` and `redistributable`), ranges (`min_obs`, `min_features`), gene (`expressing`, `min_fraction`) and free-text `search`. |
 | `describe` | Catalog row and element shapes for one dataset `uid`. |
-| `genes` | Datasets expressing one or more genes (`mode` `all` or `any`), optionally filtered by organism, tissue, disease or assay. Bronze datasets are included by default. |
-| `features` | Datasets measuring one or more features of any modality (genes, protein targets, metabolites; labels or ids; `mode` `all` or `any`), optionally filtered by `modality`, `feature_type`, organism, tissue, disease or assay. Each row lists the typed feature hits. Bronze datasets are included by default. |
+| `genes` | Datasets expressing one or more genes (`mode` `all` or `any`), optionally filtered by organism, tissue, disease or assay. By default every dataset is searched whatever its validation status (`include_bronze=false`: `validation_status == "pass"` only); tier is not filtered. |
+| `features` | Datasets measuring one or more features of any modality (genes, protein targets, metabolites; labels or ids; `mode` `all` or `any`), optionally filtered by `modality`, `feature_type`, organism, tissue, disease or assay. Each row lists the typed feature hits. By default every dataset is searched whatever its validation status (`include_bronze=false`: `validation_status == "pass"` only); tier is not filtered. |
 | `facets` | List the facet columns, or the distinct values of one field. |
 | `cite` | BibTeX for the studies of a filtered cohort. |
 | `download` | Plan a download (per-store and total sizes) or, with `download=true`, fetch the cohort into the server download directory. |
