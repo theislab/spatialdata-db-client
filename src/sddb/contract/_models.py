@@ -62,6 +62,16 @@ class DatasetContract(BaseModel):
     n_features_present, n_features_filled
         How many features of the collection's var this dataset's source measured (``var["present"]`` True), and how
         many it did not, which are 0 in ``X``. Optional: 0 when the key is absent.
+    totals
+        Whether the dataset carries the totals that materialize computes: ``obs["total_counts"]``, each cell's sum
+        of ``X`` over the ``"Gene Expression"`` features, and ``var["mean_counts"]`` and ``var["var_counts"]``, each
+        feature's mean and variance (``n - 1`` degrees of freedom) over the dataset's cells. The validator checks them
+        only then: an ``obs["total_counts"]`` of a dataset without the flag is the source's own. Optional: False when
+        the key is absent.
+    mpp_source
+        Where `mpp_native` came from: ``"given"`` (passed to materialize), ``"catalog_checked_store"`` (the catalog's
+        ``mpp``, which agrees with the pixel size the store records), ``"catalog_unchecked"`` (the catalog's, from a
+        store that records none). ``None`` when `mpp_native` is unknown, or for a dataset written before the field.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -85,6 +95,8 @@ class DatasetContract(BaseModel):
     n_outside_image: StrictInt = Field(default=0, ge=0)
     n_features_present: StrictInt = Field(default=0, ge=0)
     n_features_filled: StrictInt = Field(default=0, ge=0)
+    totals: bool = False
+    mpp_source: Literal["given", "catalog_checked_store", "catalog_unchecked"] | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
@@ -96,6 +108,8 @@ class DatasetContract(BaseModel):
             raise ValueError("upsampled requires allow_upsample")
         if self.role == "if" and not self.channels:
             raise ValueError("role 'if' requires channels")
+        if self.mpp_source is not None and self.mpp_native is None:
+            raise ValueError("mpp_source is set but mpp_native is unknown")
         return self
 
     def to_uns(self) -> dict[str, Any]:

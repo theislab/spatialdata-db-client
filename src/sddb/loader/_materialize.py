@@ -110,7 +110,12 @@ def materialize(
     3. after the step that makes ``labels["cells"]`` (:class:`Rasterize`), the labels are written once to
        ``<dest>.sddb/scratch`` and reread from there, so that the later steps and the final write do not draw the
        cells again. They are deleted once the member is validated and marked done;
-    4. the dataset is written with :func:`spatialbatch.write_collection_dataset` with ``uns["sddb_contract"]`` and
+    4. ``obs["total_counts"]``, each cell's sum over the ``"Gene Expression"`` features (``var["feature_types"]`` of
+       the collection's var, see 1.), and ``var["mean_counts"]`` and ``var["var_counts"]``, each feature's mean and
+       variance (``n - 1`` degrees of freedom) over the dataset's cells, are computed in one reduction over ``X``
+       (block by block for a dask ``X``: one more read of the source). A source ``obs["total_counts"]`` is kept as
+       ``obs["total_counts_source"]``;
+    5. the dataset is written with :func:`spatialbatch.write_collection_dataset` with ``uns["sddb_contract"]`` and
        ``uns["spatial"][uid]`` into a store of its own in ``<dest>.sddb/scratch``, checked with
        :func:`~sddb.contract.validate_dataset` and moved into `dest`. Then ``<dest>.sddb/done/<uid>`` is written, and
        a rerun skips the members that have it.
@@ -128,8 +133,8 @@ def materialize(
 
     Memory: a member with a local store (a :class:`~sddb.Dataset`) is opened with its tables' ``X`` as dask arrays
     (``_read_store``), as the snakemake jobs open it, so that the controller holds only obs and var of the members
-    not yet written. ``X`` is computed once, by :func:`spatialbatch.write_collection_dataset` after it sorts the rows,
-    so a member's write holds one ``X`` in memory. Images and labels stay lazy (dask) and are written block by block.
+    not yet written. ``X`` is held in memory once, by :func:`spatialbatch.write_collection_dataset` after it sorts the
+    rows, so a member's write holds one ``X`` in memory; the totals of step 4 hold one block at a time. Images and labels stay lazy (dask) and are written block by block.
 
     Parameters
     ----------
@@ -288,13 +293,14 @@ def _prepare(
     todo = [m for m in members if str(m.uid) not in done]
     items: dict[str, LoaderItem] = {}
     paths: dict[str, str | None] = {}
+    sources: dict[str, str | None] = {}
     for m in todo:
         uid = str(m.uid)
         store = m._local_store() if callable(getattr(m, "_local_store", None)) else None
         sdata = _read_store(store) if store is not None else m.to_sdata()
         paths[uid] = None if sdata.path is None else str(Path(sdata.path).absolute())
         image = resolve([f"images/{name}" for name in sdata.images], {"image": roles["image"]})["image"]
-        _defaults.check_mpp(uid, mpps.get(uid), sdata, image.split("/", 1)[1], given=uid in given)
+        sources[uid] = _defaults.check_mpp(uid, mpps.get(uid), sdata, image.split("/", 1)[1], given=uid in given)
         items[uid] = LoaderItem.from_sdata(
             sdata, uid=uid, study_id=str(m.study_id), role=role, roles=roles, mpp_native=mpps.get(uid)
         )
@@ -318,6 +324,7 @@ def _prepare(
                 "key": keys[str(m.uid)],
                 "study_id": str(m.study_id),
                 "mpp_native": mpps.get(str(m.uid)),
+                "mpp_source": sources.get(str(m.uid)),
                 "obs": {c: _plain_value(getattr(m, c), c) for c in obs_columns},
                 "path": paths.get(str(m.uid)),
             }
@@ -814,6 +821,8 @@ def _write(group: Any, key: str, item: LoaderItem, plan: Mapping[str, Any]) -> N
         n_outside_image=item.n_outside_image,
         n_features_present=int(present.sum()),
         n_features_filled=int((~present).sum()),
+        mpp_source=plan["members"][item.uid].get("mpp_source"),
+        totals=True,
     )
     target = item.grid == "target"
     entry = SpatialEntry.model_validate(
@@ -841,11 +850,16 @@ def _write(group: Any, key: str, item: LoaderItem, plan: Mapping[str, Any]) -> N
     obs["study_id"] = item.study_id
     for col, value in plan["members"][item.uid]["obs"].items():
         obs[col] = pd.Categorical([value] * len(obs))
-    # X is shared, not copied: a dask X (from _read_store) is computed once by spatialbatch, after it sorts the rows
+    ge = item.table.var["feature_types"].to_numpy(dtype=str) == _GENE_EXPRESSION
+    var = item.table.var.copy()
+    if "total_counts" in obs.columns:  # the source's own (a reader's, e.g. over all features): kept under a new name
+        obs = obs.rename(columns={"total_counts": "total_counts_source"})
+    obs["total_counts"], var["mean_counts"], var["var_counts"] = _totals(item.table.X, ge)
+    # X is shared, not copied: a dask X (from _read_store) is computed by spatialbatch after it sorts the rows
     table = ad.AnnData(
         X=item.table.X,
         obs=obs,
-        var=item.table.var,
+        var=var,
         obsm=dict(item.table.obsm),
         uns={"sddb_contract": contract.to_uns(), "spatial": {item.uid: entry.model_dump()}},
     )
@@ -856,6 +870,34 @@ def _write(group: Any, key: str, item: LoaderItem, plan: Mapping[str, Any]) -> N
         images={item.role: _dask(item.image)},
         labels={name: _dask(labels) for name, labels in item.labels.items()},
     )
+
+
+def _totals(X: Any, ge: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Each row's total over the `ge` columns, and each column's mean and variance over the rows (float64).
+
+    The variance has one degree of freedom (``n - 1``), as scanpy's ``Aggregate.mean_var`` (``dof=1``). A dask `X` is
+    reduced block by block in one compute, one read of the source.
+    """
+    import dask
+
+    def reduce(block: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        block = sp.csr_matrix(block) if sp.issparse(block) else np.asarray(block)
+        values = block.astype(np.float64)
+        rows = np.asarray(values[:, ge].sum(axis=1)).ravel()
+        squares = values.multiply(values) if sp.issparse(values) else values * values
+        return rows, np.asarray(values.sum(axis=0)).ravel(), np.asarray(squares.sum(axis=0)).ravel()
+
+    if isinstance(X, da.Array):
+        parts = dask.compute(*(dask.delayed(reduce)(b) for b in X.rechunk({1: -1}).to_delayed().ravel()))
+    else:
+        parts = [reduce(X)]
+    n = int(X.shape[0])
+    rows = np.concatenate([p[0] for p in parts]) if parts else np.zeros(0)
+    total = np.sum([p[1] for p in parts], axis=0) if parts else np.zeros(X.shape[1])
+    squares = np.sum([p[2] for p in parts], axis=0) if parts else np.zeros(X.shape[1])
+    mean = total / n if n else np.zeros(X.shape[1])
+    var = np.clip((squares - total * mean) / (n - 1), 0, None) if n > 1 else np.zeros(X.shape[1])
+    return rows, mean, var
 
 
 def _dask(array: xr.DataArray) -> da.Array:

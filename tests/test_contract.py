@@ -418,3 +418,60 @@ def test_flagged_centroid_outside_the_grid_validates(tmp_path):
 def test_bad_outside_image_count(tmp_path, value):
     issues = _issues(tmp_path, n_datasets=1, overrides={0: {"contract": {"n_outside_image": value}}})
     assert any("n_outside_image" in i for i in issues)
+
+
+TOTALS = {"totals": True}
+
+
+def _add_totals(path, *, change=None, drop=()):
+    """Write the optional totals into dataset_0 of `path`, computed from its X, with `change` applied to them."""
+    from anndata.io import read_elem, write_elem
+
+    group = zarr.open_group(path / "dataset_0", mode="a", use_consolidated=False)
+    X = read_elem(group["X"])
+    X = np.asarray(X.todense() if hasattr(X, "todense") else X, dtype=np.float64)
+    values = {
+        "total_counts": X.sum(axis=1),
+        "mean_counts": X.mean(axis=0),
+        "var_counts": X.var(axis=0, ddof=1),
+    }
+    for name, f in (change or {}).items():
+        values[name] = f(values[name])
+    for name, value in values.items():
+        if name in drop:
+            continue
+        frame = group["obs" if name == "total_counts" else "var"]
+        write_elem(frame, name, value)
+        frame.attrs["column-order"] = [*frame.attrs.get("column-order", []), name]
+    zarr.consolidate_metadata(path)
+    return path
+
+
+def test_totals_are_optional_and_checked_where_the_contract_has_them(tmp_path):
+    assert validate(_add_totals(write_collection(tmp_path / "a.zarr", n_datasets=1, contract=TOTALS))) == []
+    assert validate(write_collection(tmp_path / "b.zarr", n_datasets=1)) == []  # without them, as before
+    # a source's own total_counts (here over all features, wrong by the rule) is not checked without the flag
+    path = _add_totals(write_collection(tmp_path / "c.zarr", n_datasets=1), change={"total_counts": lambda t: t + 1})
+    assert validate(path) == []
+    # the flag without the columns
+    issues = validate(write_collection(tmp_path / "d.zarr", n_datasets=1, contract=TOTALS))
+    assert len(issues) == 1
+    assert "the contract has totals, but there is no obs['total_counts'], no var['mean_counts']" in issues[0]
+
+
+@pytest.mark.parametrize(
+    ("change", "drop", "match"),
+    [
+        ({"total_counts": lambda t: t + np.r_[1, -1, np.zeros(len(t) - 2)]}, (), "differs from the sum of X"),
+        ({"total_counts": lambda t: -t}, (), "obs['total_counts'] has values that are not finite or are negative"),
+        ({}, ("var_counts",), "the contract has totals, but there is no var['var_counts']"),
+        ({"var_counts": lambda v: v * np.nan}, (), "var['var_counts'] has values that are not finite"),
+        ({"mean_counts": lambda m: m * 2}, (), "times n_obs is"),
+    ],
+    ids=["total-off", "negative", "half-pair", "nan", "mean-off"],
+)
+def test_bad_totals(tmp_path, change, drop, match):
+    path = write_collection(tmp_path / "c.zarr", n_datasets=1, contract=TOTALS)
+    issues = validate(_add_totals(path, change=change, drop=drop))
+    assert len(issues) == 1, issues
+    assert match in issues[0]

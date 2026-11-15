@@ -176,6 +176,7 @@ def _check_dataset(group: Any, out: _Result, *, sample: int, seed: int) -> None:
     out.issues += _check_counts(group, rows)
     issues, out.var = _check_var(group, contract, rows)
     out.issues += issues
+    out.issues += _check_totals(group, contract, rows, n_obs)
 
 
 def _read(node: Any) -> Any:
@@ -528,6 +529,75 @@ def _check_var(group: Any, contract: DatasetContract, rows: np.ndarray) -> tuple
                 f"X has {n_nonzero} values != 0 in the sampled rows for features var['present'] says are filled"
             )
     return issues, index
+
+
+def _check_totals(group: Any, contract: DatasetContract, rows: np.ndarray, n_obs: int) -> list[str]:
+    """The totals of a dataset whose contract has ``totals``: ``obs["total_counts"]``, ``var["mean_counts"]``, ``var_counts``.
+
+    All three must be there. A dataset without the flag is not checked: a ``total_counts`` there is the source's own
+    (a reader's, often over all features).
+
+    ``total_counts`` must be finite, non-negative and, on the sampled rows, the sum of ``X`` over the ``"Gene
+    Expression"`` features (all features without ``var["feature_types"]``). The two var columns come together, finite
+    and non-negative, 0 for a feature ``var["present"]`` says is filled, and with ``total_counts`` the mean over the
+    Gene Expression features times ``n_obs`` is the sum of ``total_counts`` (relative tolerance 1e-6).
+    """
+    if not contract.totals:
+        return []
+    obs, var = group["obs"], group["var"]
+    obs_columns = list(obs.attrs.get("column-order", []))
+    var_columns = list(var.attrs.get("column-order", []))
+    if missing := [f"obs[{c!r}]" for c in ("total_counts",) if c not in obs_columns] + [
+        f"var[{c!r}]" for c in ("mean_counts", "var_counts") if c not in var_columns
+    ]:
+        return [f"the contract has totals, but there is no {', no '.join(missing)}"]
+    n_vars = len(_read(var[var.attrs["_index"]]))
+    ge = np.ones(n_vars, bool)
+    if "feature_types" in var_columns:
+        ge = np.asarray(_read(var["feature_types"])).astype(str) == _GENE_EXPRESSION
+    issues: list[str] = []
+    total = None
+    if "total_counts" in obs_columns:
+        total = np.asarray(_read(obs["total_counts"]))
+        if not np.issubdtype(total.dtype, np.number) or total.shape != (n_obs,):
+            return [f"obs['total_counts'] has dtype {total.dtype} and shape {total.shape}, needs numbers ({n_obs},)"]
+        total = total.astype(np.float64)
+        if not np.isfinite(total).all() or (total < 0).any():
+            return ["obs['total_counts'] has values that are not finite or are negative"]
+        if len(rows):
+            X = group["X"]
+            sub: Any = (
+                sparse_dataset(X)[rows]
+                if isinstance(X, zarr.Group)
+                else X.get_orthogonal_selection((rows, slice(None)))
+            )
+            expected = np.asarray(sub[:, np.flatnonzero(ge)].sum(axis=1), dtype=np.float64).ravel()
+            if bad := int((~np.isclose(total[rows], expected, rtol=1e-9, atol=1e-6)).sum()):
+                issues.append(
+                    f"obs['total_counts'] differs from the sum of X over the {_GENE_EXPRESSION} features in {bad} of "
+                    f"{len(rows)} sampled rows"
+                )
+    mean, variance = (np.asarray(_read(var[c])) for c in ("mean_counts", "var_counts"))
+    for name, values in (("mean_counts", mean), ("var_counts", variance)):
+        if not np.issubdtype(values.dtype, np.floating) or values.shape != (n_vars,):
+            return [
+                *issues,
+                f"var[{name!r}] has dtype {values.dtype} and shape {values.shape}, needs float ({n_vars},)",
+            ]
+        if not np.isfinite(values).all() or (values < 0).any():
+            return [*issues, f"var[{name!r}] has values that are not finite or are negative"]
+    if "present" in var_columns:
+        filled = ~np.asarray(_read(var["present"])).astype(bool)
+        if (mean[filled] != 0).any() or (variance[filled] != 0).any():
+            issues.append(
+                "var['mean_counts'] or var['var_counts'] is not 0 for features var['present'] says are filled"
+            )
+    if total is not None and not math.isclose(mean[ge].sum() * n_obs, total.sum(), rel_tol=1e-6, abs_tol=1e-6):
+        issues.append(
+            f"var['mean_counts'] over the {_GENE_EXPRESSION} features times n_obs is {mean[ge].sum() * n_obs:g}, the "
+            f"sum of obs['total_counts'] is {total.sum():g}"
+        )
+    return issues
 
 
 def _check_gene_key(contract: DatasetContract, present: np.ndarray, no_id: np.ndarray, ids: np.ndarray) -> list[str]:

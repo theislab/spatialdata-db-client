@@ -630,6 +630,7 @@ def test_defaults_from_the_catalog(catalog_cohort, tmp_path):
     for key in ("dataset_0", "dataset_1"):
         contract = _contract(dest, key)
         assert (contract.role, contract.grid, contract.mpp_native, contract.mpp_target) == ("he", "target", 0.25, 0.5)
+        assert contract.mpp_source == "catalog_checked_store"
     plan, _ = _materialize._prepare(
         catalog_cohort,
         tmp_path / "d.zarr",
@@ -660,6 +661,7 @@ def test_explicit_kwargs_override_the_catalog(catalog_cohort, tmp_path):
         catalog_cohort, tmp_path / "c.zarr", adapters=[Rasterize(0.5), Centroids()], mpp_native={"uidB": 0.25}
     )
     assert _contract(dest, "dataset_1").mpp_native == 0.25
+    assert [_contract(dest, k).mpp_source for k in ("dataset_0", "dataset_1")] == ["catalog_checked_store", "given"]
     # None for a uid means unknown: that member keeps its native grid
     dest = materialize(
         catalog_cohort,
@@ -669,6 +671,7 @@ def test_explicit_kwargs_override_the_catalog(catalog_cohort, tmp_path):
         allow_mixed_grids=True,
     )
     assert [_contract(dest, k).grid for k in ("dataset_0", "dataset_1")] == ["native", "target"]
+    assert [_contract(dest, k).mpp_source for k in ("dataset_0", "dataset_1")] == [None, "given"]
 
 
 def test_store_without_pixel_size_takes_the_catalog_mpp(tmp_path, monkeypatch):
@@ -677,6 +680,8 @@ def test_store_without_pixel_size_takes_the_catalog_mpp(tmp_path, monkeypatch):
     member = FakeMember("uidA", path, technology="fake_tech", hne_image=True, mpp=0.25)
     dest = materialize(FakeCohort([member]), tmp_path / "c.zarr", adapters=[Rasterize(0.5), Centroids()])
     assert _contract(dest, "dataset_0").mpp_native == 0.25
+    assert _contract(dest, "dataset_0").mpp_source == "catalog_unchecked"  # recorded per dataset, not only logged
+    assert validate(dest) == []
 
 
 def test_null_catalog_mpp_keeps_the_native_grid(catalog_cohort, tmp_path):
@@ -684,6 +689,7 @@ def test_null_catalog_mpp_keeps_the_native_grid(catalog_cohort, tmp_path):
         m.mpp = None
     dest = materialize(catalog_cohort, tmp_path / "c.zarr", adapters=[Rasterize(0.5), Centroids()])
     assert [_contract(dest, k).grid for k in ("dataset_0", "dataset_1")] == ["native", "native"]
+    assert [_contract(dest, k).mpp_source for k in ("dataset_0", "dataset_1")] == [None, None]
 
 
 @pytest.mark.parametrize(
@@ -714,4 +720,80 @@ def test_atera_defaults_match_the_reader():
         "image": "^images/he_image$",
         "table": "^tables/table$",
         "labels": "^labels/cell_labels$",
+    }
+
+
+# -- totals: obs["total_counts"], var["mean_counts"] and var["var_counts"] -------------------------------------------
+
+
+@pytest.mark.parametrize("lazy", [True, False], ids=["dask-X", "in-memory-X"])
+def test_totals_are_written_and_validate(cohort, tmp_path, monkeypatch, lazy):
+    members, _ = cohort
+    if not lazy:  # members opened whole (to_sdata), as a remote member is
+        for m in members:
+            monkeypatch.setattr(m, "_local_store", None)
+    dest = materialize(
+        members,
+        tmp_path / "c.zarr",
+        adapters=[Rasterize(0.5), Centroids()],
+        role="he",
+        roles=ROLES,
+        mpp_native={"uidA": 0.25, "uidB": 0.25},
+    )
+    assert validate(dest) == []
+    for key in ("dataset_0", "dataset_1"):
+        table = _table(dest, key)
+        X = np.asarray(table.X.todense() if hasattr(table.X, "todense") else table.X, dtype=np.float64)
+        ge = (table.var["feature_types"] == "Gene Expression").to_numpy()
+        np.testing.assert_array_equal(table.obs["total_counts"].to_numpy(), X[:, ge].sum(axis=1))
+        np.testing.assert_allclose(table.var["mean_counts"].to_numpy(), X.mean(axis=0), rtol=1e-12)
+        np.testing.assert_allclose(table.var["var_counts"].to_numpy(), X.var(axis=0, ddof=1), rtol=1e-12, atol=1e-12)
+        filled = ~table.var["present"].to_numpy()
+        assert (table.var.loc[filled, ["mean_counts", "var_counts"]].to_numpy() == 0).all()
+
+
+def test_source_total_counts_is_kept_under_a_new_name(tmp_path):
+    path, *_ = write_member(tmp_path, "uidA", seed=0)
+    sdata = sd.read_zarr(path)
+    sdata.tables["table"].obs["total_counts"] = 7.0
+    path2 = tmp_path / "with_totals.zarr"
+    sdata.write(path2)
+    dest = materialize(
+        FakeCohort([FakeMember("uidA", path2)]),
+        tmp_path / "c.zarr",
+        adapters=[Rasterize(0.5), Centroids()],
+        role="he",
+        roles=ROLES,
+        mpp_native={"uidA": 0.25},
+    )
+    obs = _table(dest, "dataset_0").obs
+    assert (obs["total_counts_source"] == 7.0).all()
+    assert validate(dest) == []
+
+
+def test_mpp_source_needs_an_mpp():
+    from sddb.contract import DatasetContract
+
+    base = _contract_dict()
+    assert DatasetContract.model_validate({**base, "mpp_source": "catalog_unchecked"}).mpp_source == "catalog_unchecked"
+    with pytest.raises(ValueError, match="mpp_source is set but mpp_native is unknown"):
+        DatasetContract.model_validate({**base, "grid": "native", "mpp_native": None, "mpp_source": "given"})
+    with pytest.raises(ValueError, match="mpp_source"):
+        DatasetContract.model_validate({**base, "mpp_source": "guessed"})
+
+
+def _contract_dict():
+    return {
+        "version": "0.1.0",
+        "uid": "u",
+        "study_id": "s",
+        "catalog_release": "r",
+        "role": "he",
+        "grid": "target",
+        "mpp_target": 0.5,
+        "mpp_native": 0.25,
+        "upsampled": False,
+        "allow_upsample": False,
+        "allow_mixed_grids": False,
+        "adapters": [],
     }

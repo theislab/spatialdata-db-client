@@ -84,19 +84,24 @@ def store_mpp(sdata: Any, image: str) -> float | None:
     return float(pixel_size) * math.sqrt(abs(float(np.linalg.det(a[:2, :2]))))
 
 
-def check_mpp(uid: str, catalog: float | None, sdata: Any, image: str, *, given: bool) -> None:
-    """Raise if the mpp taken from the catalog differs from the store's own by more than :data:`MPP_RTOL`.
+def check_mpp(uid: str, mpp: float | None, sdata: Any, image: str, *, given: bool) -> str | None:
+    """Where `mpp` came from, as the contract's ``mpp_source`` records it; raise if the catalog's disagrees with the store.
 
-    A value the caller passed (`given`) is not checked: it is an override.
+    Returns ``"given"`` for a value the caller passed (an override: not checked), ``"catalog_checked_store"`` for a
+    catalog value that agrees with the one the store records (:func:`store_mpp`) to :data:`MPP_RTOL`,
+    ``"catalog_unchecked"`` for a catalog value of a store that records none, and ``None`` when the mpp is unknown.
     """
-    if given or catalog is None:
-        return
+    if mpp is None:
+        return None
+    if given:
+        return "given"
     own = store_mpp(sdata, image)
     if own is None:
-        logger.info(f"{uid}: mpp_native {catalog} from the catalog; the store records no pixel size to check it")
-        return
-    if not math.isclose(own, catalog, rel_tol=MPP_RTOL):
+        logger.info(f"{uid}: mpp_native {mpp} from the catalog; the store records no pixel size to check it")
+        return "catalog_unchecked"
+    if not math.isclose(own, mpp, rel_tol=MPP_RTOL):
         raise ValueError(
-            f"{uid}: the catalog's mpp {catalog} differs from the store's own {own} (pixel_size x the image's scale "
+            f"{uid}: the catalog's mpp {mpp} differs from the store's own {own} (pixel_size x the image's scale "
             f"onto global) by more than {MPP_RTOL:g}; pass mpp_native={{{uid!r}: ...}} with the right value"
         )
+    return "catalog_checked_store"

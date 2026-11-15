@@ -9,7 +9,10 @@ cohort member, each written by :func:`spatialbatch.write_collection_dataset`. Pe
   no pixel there (smaller than a pixel of the written grid), whose centre comes from the source (see
   :class:`DatasetContract`);
 - ``obs["uid"]`` and ``obs["study_id"]`` of the source member, and ``obs["label_id"]``, the integer value of the
-  row's cell in ``labels/cells``;
+  row's cell in ``labels/cells``. With ``totals`` in the contract: ``obs["total_counts"]``, each cell's sum of ``X``
+  over the ``"Gene Expression"`` features, and ``var["mean_counts"]`` and ``var["var_counts"]``, each feature's mean
+  and variance (``n - 1`` degrees of freedom) over the dataset's cells, 0 for a filled feature. A dataset without the
+  flag conforms without them, and its ``obs["total_counts"]``, if any, is not checked;
 - ``X`` integer counts (an integer dtype, or a float dtype with integral values) over one var index, the same in
   every dataset: the union of the members' features. ``var["feature_types"]`` comes from the source, and the
   ``"Gene Expression"`` rows are Ensembl ids (``^ENS``). ``var["present"]`` says which features this dataset's
