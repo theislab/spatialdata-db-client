@@ -30,6 +30,7 @@ from sddb.loader import (
     Rasterize,
     StainNormalize,
     TissueMask,
+    _defaults,
     _materialize,
     default_chain,
     materialize,
@@ -44,8 +45,9 @@ GENES = {f"GENE{i}": f"ENSG{i:011d}" for i in range(1, 6)}
 class FakeMember:
     """The part of :class:`sddb.Dataset` that ``materialize`` uses: uid, study_id, catalog columns, ``to_sdata``."""
 
-    def __init__(self, uid, path, tissue="breast"):
+    def __init__(self, uid, path, tissue="breast", **columns):
         self.uid, self.study_id, self.tissue, self._path = uid, f"study_{uid}", tissue, path
+        self.__dict__.update(columns)  # further catalog columns, e.g. technology, hne_image, mpp
 
     def to_sdata(self):
         return sd.read_zarr(self._path)
@@ -58,10 +60,11 @@ class FakeCohort(list):
     _source = SimpleNamespace(release="2026-11-01")
 
 
-def write_member(tmp_path, uid, *, seed, extra_gene=False, tiny=False, labels=False, dup_id=False):
+def write_member(tmp_path, uid, *, seed, extra_gene=False, tiny=False, labels=False, dup_id=False, pixel_size=None):
     """A member store: H&E tissue disc, square cells, a table keyed by symbol with Ensembl ids and controls.
 
-    `dup_id` adds a Gene Expression row ``GENE1B`` with GENE1's Ensembl id.
+    `dup_id` adds a Gene Expression row ``GENE1B`` with GENE1's Ensembl id. `pixel_size` is recorded in the store's
+    attrs as spatialdata-io's Atera reader does (microns per ``global`` unit; the image is the identity onto it).
     """
     img = he_image(SIZE, SIZE, seed=seed, disk=(SIZE / 2, SIZE / 2, SIZE * 0.4))
     xy = [(x, y) for x in range(20, 80, 12) for y in range(20, 80, 12)]
@@ -95,6 +98,8 @@ def write_member(tmp_path, uid, *, seed, extra_gene=False, tiny=False, labels=Fa
     if labels:
         table.obsm["spatial"] = com
     sdata.tables["table"] = TableModel.parse(table, region=region, region_key="region", instance_key="cell_id")
+    if pixel_size is not None:
+        sdata.attrs["pixel_size"] = pixel_size
     path = tmp_path / f"{uid}.zarr"
     sdata.write(path)
     return path, img, counts, var
@@ -605,3 +610,108 @@ def test_every_gene_expression_row_is_kept(tmp_path):
         dense = np.asarray(table.X.todense() if hasattr(table.X, "todense") else table.X)
         for name, source in ((f"{one}-1", "GENE1B"), ("NOENSEMBL", "NOENSEMBL"), (one, "GENE1")):
             np.testing.assert_array_equal(dense[:, union.index(name)], counts[rows, var.index.get_loc(source)])
+
+
+# -- defaults from the catalog: role, roles, mpp_native --------------------------------------------------------------
+
+
+@pytest.fixture
+def catalog_cohort(tmp_path, monkeypatch):
+    """Two members of a technology with default roles, H&E, catalog mpp 0.25, stores recording pixel_size 0.25."""
+    monkeypatch.setitem(_defaults.ROLES, ("fake_tech", "he"), ROLES)
+    columns = {"technology": "fake_tech", "hne_image": np.True_, "if_image": False, "mpp": 0.25}
+    paths = {uid: write_member(tmp_path, uid, seed=i, pixel_size=0.25)[0] for i, uid in enumerate(("uidA", "uidB"))}
+    return FakeCohort([FakeMember(uid, path, **columns) for uid, path in paths.items()])
+
+
+def test_defaults_from_the_catalog(catalog_cohort, tmp_path):
+    dest = materialize(catalog_cohort, tmp_path / "c.zarr", adapters=[Rasterize(0.5), Centroids()])
+    assert validate(dest) == []
+    for key in ("dataset_0", "dataset_1"):
+        contract = _contract(dest, key)
+        assert (contract.role, contract.grid, contract.mpp_native, contract.mpp_target) == ("he", "target", 0.25, 0.5)
+    plan, _ = _materialize._prepare(
+        catalog_cohort,
+        tmp_path / "d.zarr",
+        adapters=[Rasterize(0.5), Centroids()],
+        role=None,
+        roles=None,
+        mpp_native=None,
+        obs_columns=(),
+        allow_mixed_grids=False,
+    )
+    assert (plan["role"], plan["roles"]) == ("he", ROLES)
+    assert {uid: m["mpp_native"] for uid, m in plan["members"].items()} == {"uidA": 0.25, "uidB": 0.25}
+
+
+def test_catalog_mpp_that_disagrees_with_the_store_raises(catalog_cohort, tmp_path):
+    catalog_cohort[1].mpp = 0.25 * (1 + 1e-5)
+    with pytest.raises(ValueError, match=r"uidB: the catalog's mpp .* differs from the store's own 0.25"):
+        materialize(catalog_cohort, tmp_path / "c.zarr", adapters=[Rasterize(0.5), Centroids()])
+    # within the tolerance it is taken as is
+    catalog_cohort[1].mpp = 0.25 * (1 + 1e-7)
+    materialize(catalog_cohort, tmp_path / "d.zarr", adapters=[Rasterize(0.5), Centroids()])
+    assert _contract(tmp_path / "d.zarr", "dataset_1").mpp_native == 0.25 * (1 + 1e-7)
+
+
+def test_explicit_kwargs_override_the_catalog(catalog_cohort, tmp_path):
+    catalog_cohort[1].mpp = 0.3  # wrong in the catalog: a given value is not checked against the store
+    dest = materialize(
+        catalog_cohort, tmp_path / "c.zarr", adapters=[Rasterize(0.5), Centroids()], mpp_native={"uidB": 0.25}
+    )
+    assert _contract(dest, "dataset_1").mpp_native == 0.25
+    # None for a uid means unknown: that member keeps its native grid
+    dest = materialize(
+        catalog_cohort,
+        tmp_path / "d.zarr",
+        adapters=[Rasterize(0.5), Centroids()],
+        mpp_native={"uidA": None, "uidB": 0.25},
+        allow_mixed_grids=True,
+    )
+    assert [_contract(dest, k).grid for k in ("dataset_0", "dataset_1")] == ["native", "target"]
+
+
+def test_store_without_pixel_size_takes_the_catalog_mpp(tmp_path, monkeypatch):
+    monkeypatch.setitem(_defaults.ROLES, ("fake_tech", "he"), ROLES)
+    path = write_member(tmp_path, "uidA", seed=0)[0]
+    member = FakeMember("uidA", path, technology="fake_tech", hne_image=True, mpp=0.25)
+    dest = materialize(FakeCohort([member]), tmp_path / "c.zarr", adapters=[Rasterize(0.5), Centroids()])
+    assert _contract(dest, "dataset_0").mpp_native == 0.25
+
+
+def test_null_catalog_mpp_keeps_the_native_grid(catalog_cohort, tmp_path):
+    for m in catalog_cohort:
+        m.mpp = None
+    dest = materialize(catalog_cohort, tmp_path / "c.zarr", adapters=[Rasterize(0.5), Centroids()])
+    assert [_contract(dest, k).grid for k in ("dataset_0", "dataset_1")] == ["native", "native"]
+
+
+@pytest.mark.parametrize(
+    ("change", "match"),
+    [
+        ({"hne_image": None, "if_image": None}, "pass role"),
+        ({"technology": "other_tech"}, "pass roles: the members have several technologies"),
+    ],
+)
+def test_defaults_that_cannot_be_inferred_ask_for_the_kwarg(catalog_cohort, tmp_path, change, match):
+    catalog_cohort[0].__dict__.update(change)
+    with pytest.raises(ValueError, match=match):
+        materialize(catalog_cohort, tmp_path / "c.zarr", adapters=[Rasterize(0.5), Centroids()])
+
+
+def test_technology_without_default_roles_asks_for_roles(catalog_cohort, tmp_path):
+    for m in catalog_cohort:
+        m.technology = "other_tech"
+    with pytest.raises(ValueError, match="pass roles: no default roles for technology 'other_tech'"):
+        materialize(catalog_cohort, tmp_path / "c.zarr", adapters=[Rasterize(0.5), Centroids()])
+    # explicit roles stand in
+    dest = materialize(catalog_cohort, tmp_path / "d.zarr", adapters=[Rasterize(0.5), Centroids()], roles=ROLES)
+    assert validate(dest) == []
+
+
+def test_atera_defaults_match_the_reader():
+    assert _defaults.ROLES[("10x_atera", "he")] == {
+        "image": "^images/he_image$",
+        "table": "^tables/table$",
+        "labels": "^labels/cell_labels$",
+    }

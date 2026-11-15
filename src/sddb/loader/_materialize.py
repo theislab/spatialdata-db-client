@@ -34,9 +34,11 @@ from sddb.contract import (
     assert_valid,
     validate_dataset,
 )
+from sddb.loader import _defaults
 from sddb.loader._adapters import GENE_KEY as _GENE_KEY
 from sddb.loader._adapters import MATERIALIZE_RECORDS, Rasterize, StainNormalize
 from sddb.loader._item import LoaderItem
+from sddb.roles import resolve
 
 if TYPE_CHECKING:
     from sddb.adapter import TaskAdapter
@@ -72,9 +74,9 @@ def materialize(
     dest: str | Path,
     *,
     adapters: Sequence[TaskAdapter],
-    role: Literal["he", "if"],
+    role: Literal["he", "if"] | None = None,
     roles: Mapping[str, str] | None = None,
-    mpp_native: Mapping[str, float] | None = None,
+    mpp_native: Mapping[str, float | None] | None = None,
     obs_columns: Sequence[str] = (),
     runner: Literal["local", "snakemake"] = "local",
     executor: Literal["local", "slurm"] = "local",
@@ -139,12 +141,19 @@ def materialize(
         The chain, e.g. :func:`~sddb.loader.default_chain`. It must hold one :class:`Rasterize` and, after it,
         :class:`~sddb.loader.Centroids`.
     role
-        The image role of the collection, ``"he"`` or ``"if"``.
+        The image role of the collection, ``"he"`` or ``"if"``. By default ``"he"`` if every member has an H&E image
+        (catalog ``hne_image``), else ``"if"`` if every member has an IF image (``if_image``).
     roles
         Regexes for the image, the table and optionally existing labels of every member (see
-        :meth:`LoaderItem.from_sdata`). Required until the catalog records each member's image roles.
+        :meth:`LoaderItem.from_sdata`). By default those of the members' technology and `role`, the element names its
+        spatialdata-io reader writes (``sddb.loader._defaults.ROLES``; so far 10x Atera with ``"he"``); members of
+        several technologies, or one without defaults, need them passed.
     mpp_native
-        Microns per scale-0 image pixel by uid. A member without an entry keeps its native grid.
+        Microns per scale-0 image pixel by uid, overriding the catalog. A member without an entry takes its catalog
+        ``mpp``; ``None`` (given, or a null catalog value) means unknown, and the member keeps its native grid. A
+        catalog value is checked against the one the store records, where it records one (``sdata.attrs
+        ["pixel_size"]`` times the image's scale onto ``global``, as spatialdata-io's Atera reader writes), and a
+        relative difference above 1e-6 raises. A value given here is not checked.
     obs_columns
         Catalog columns copied into every dataset's ``obs``, as categoricals.
     runner
@@ -220,9 +229,9 @@ def _prepare(
     dest: str | Path,
     *,
     adapters: Sequence[Any],
-    role: Literal["he", "if"],
+    role: Literal["he", "if"] | None,
     roles: Mapping[str, str] | None,
-    mpp_native: Mapping[str, float] | None,
+    mpp_native: Mapping[str, float | None] | None,
     obs_columns: Sequence[str],
     allow_mixed_grids: bool,
 ) -> tuple[dict[str, Any], dict[str, LoaderItem]]:
@@ -233,17 +242,19 @@ def _prepare(
     jobs in ``config.yaml``, so that jobs running in parallel agree. The items are the members not done, opened and
     re-keyed to the shared var.
     """
-    if role not in ("he", "if"):
-        raise ValueError(f"role must be 'he' or 'if', not {role!r}")
-    if roles is None:
-        raise ValueError("pass roles (the image and the table of each member): the catalog has no image-role field yet")
-    rasterize = _rasterize_step(adapters)
-    mpps = dict(mpp_native or {})
-
     members = sorted(cohort, key=lambda m: str(m.uid))
     uids = [str(m.uid) for m in members]
     if len(set(uids)) != len(uids):
         raise ValueError(f"the cohort repeats uids: {sorted({u for u in uids if uids.count(u) > 1})}")
+    if role is None:
+        role = _defaults.default_role(members)
+    if role not in ("he", "if"):
+        raise ValueError(f"role must be 'he' or 'if', not {role!r}")
+    if roles is None:
+        roles = _defaults.default_roles(members, role)
+    rasterize = _rasterize_step(adapters)
+    given = set(mpp_native or {})
+    mpps = {**dict(mpp_native or {}), **_defaults.default_mpp(members, mpp_native)}
     if missing := sorted({c for m in members for c in obs_columns if not hasattr(m, c)}):
         raise ValueError(f"obs_columns {missing} are not catalog columns")
     keys = {uid: f"dataset_{i}" for i, uid in enumerate(uids)}
@@ -282,6 +293,8 @@ def _prepare(
         store = m._local_store() if callable(getattr(m, "_local_store", None)) else None
         sdata = _read_store(store) if store is not None else m.to_sdata()
         paths[uid] = None if sdata.path is None else str(Path(sdata.path).absolute())
+        image = resolve([f"images/{name}" for name in sdata.images], {"image": roles["image"]})["image"]
+        _defaults.check_mpp(uid, mpps.get(uid), sdata, image.split("/", 1)[1], given=uid in given)
         items[uid] = LoaderItem.from_sdata(
             sdata, uid=uid, study_id=str(m.study_id), role=role, roles=roles, mpp_native=mpps.get(uid)
         )

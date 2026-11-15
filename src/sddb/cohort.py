@@ -402,9 +402,9 @@ class SpatialDataCohort(Sequence[Dataset]):
         dest: str | Path,
         *,
         adapters: Sequence[TaskAdapter],
-        role: Literal["he", "if"],
+        role: Literal["he", "if"] | None = None,
         roles: Mapping[str, str] | None = None,
-        mpp_native: Mapping[str, float] | None = None,
+        mpp_native: Mapping[str, float | None] | None = None,
         obs_columns: Sequence[str] = (),
         runner: Literal["local", "snakemake"] = "local",
         executor: Literal["local", "slurm"] = "local",
@@ -414,8 +414,10 @@ class SpatialDataCohort(Sequence[Dataset]):
     ) -> Path:
         """Write the cohort as a loader collection for :mod:`spatialbatch` at ``dest`` and validate it.
 
-        Needs the ``loader`` extra. See :func:`sddb.loader.materialize` for the steps and the parameters, and
-        :mod:`sddb.contract` for what the collection holds.
+        Needs the ``loader`` extra. `role`, `roles` and `mpp_native` default from the catalog: the image role the
+        members have, the element roles of their technology, and each record's ``mpp``, checked against the store.
+        See :func:`sddb.loader.materialize` for the steps and the parameters, and :mod:`sddb.contract` for what the
+        collection holds.
         """
         from sddb.loader import materialize
 
