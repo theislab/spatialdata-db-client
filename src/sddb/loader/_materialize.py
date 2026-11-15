@@ -83,6 +83,7 @@ def materialize(
     workers: int = 1,
     allow_mixed_grids: bool = False,
     slurm: Mapping[str, Any] | None = None,
+    stores: Mapping[str, str | Path] | None = None,
 ) -> Path:
     """Write every member of `cohort` as one dataset of a loader collection at `dest`, and validate it.
 
@@ -168,6 +169,11 @@ def materialize(
         The contract's ``mpp_source`` says which applied.
     obs_columns
         Catalog columns copied into every dataset's ``obs``, as categoricals.
+    stores
+        A local store by uid, opened in place of the member's catalog store, e.g. a copy or a derived store (HD
+        bins aggregated into pseudo-spots). The member stays the catalog record: its catalog columns, defaults and
+        the cohort's release go into the contract. Without an entry a remote store is fetched into the cache with
+        only the elements the roles select (and the elements its table annotates), a local one is opened in place.
     runner
         ``"local"`` runs in this process; ``"snakemake"`` runs the generated workflow with snakemake.
     executor
@@ -226,6 +232,7 @@ def materialize(
         mpp_native=mpp_native,
         obs_columns=obs_columns,
         allow_mixed_grids=allow_mixed_grids,
+        stores=stores,
     )
     if runner == "snakemake":
         del items  # each job opens its member again
@@ -246,6 +253,7 @@ def _prepare(
     mpp_native: Mapping[str, float | None] | None,
     obs_columns: Sequence[str],
     allow_mixed_grids: bool,
+    stores: Mapping[str, str | Path] | None = None,
 ) -> tuple[dict[str, Any], dict[str, LoaderItem]]:
     """Check the cohort against `dest`, open the members not done and fix what every member must agree on.
 
@@ -283,6 +291,11 @@ def _prepare(
 
     for uid in sorted(set(given) - set(uids)):
         logger.warning(f"mpp_native has {uid!r}, which is not a member of the cohort")
+    own = {uid: Path(path).absolute() for uid, path in (stores or {}).items()}
+    if unknown := sorted(set(own) - set(uids)):
+        raise ValueError(f"stores has {unknown}, which are not members of the cohort")
+    if absent := sorted(str(path) for path in own.values() if not path.is_dir()):
+        raise ValueError(f"stores: no zarr store at {absent}")
     todo = [m for m in members if str(m.uid) not in done]
     release = _release(cohort) if todo else None
     # the mpp of a member written before is the one its contract records; the others' is resolved on their store
@@ -295,7 +308,7 @@ def _prepare(
     paths: dict[str, str | None] = {}
     for m in todo:
         uid = str(m.uid)
-        store = m._local_store() if callable(getattr(m, "_local_store", None)) else None
+        store = own.get(uid) or _local_store(m, roles)
         sdata = _read_store(store) if store is not None else m.to_sdata()
         paths[uid] = None if sdata.path is None else str(Path(sdata.path).absolute())
         image = resolve([f"images/{name}" for name in sdata.images], {"image": roles["image"]})["image"]
@@ -348,6 +361,21 @@ def _prepare(
         },
     }
     return json.loads(json.dumps(plan)), items
+
+
+def _local_store(member: Any, roles: Mapping[str, str]) -> Path | None:
+    """The member's store on disk, ``None`` if it has none (it is opened with ``to_sdata``).
+
+    A remote store is fetched with only the elements the roles select, plus the elements its table annotates
+    (``sddb.remote._localize_to_cache``); a local store is opened in place, whole.
+    """
+    local = getattr(member, "_local_store", None)
+    if not callable(local):
+        return None
+    url = str(getattr(member, "zarr_url", "") or "")
+    if callable(getattr(member, "resolve", None)) and url.startswith(("s3://", "http://", "https://")):
+        return Path(local(sorted(member.resolve(dict(roles)).values())))
+    return Path(local())
 
 
 def _plain_value(value: Any, column: str) -> Any:

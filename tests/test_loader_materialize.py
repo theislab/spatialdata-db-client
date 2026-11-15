@@ -924,3 +924,63 @@ def _contract_dict():
         "allow_mixed_grids": False,
         "adapters": [],
     }
+
+
+# -- stores: a local or derived store under a catalog uid; only the role elements fetched --------------------------
+
+
+def test_stores_open_a_local_store_under_the_catalog_record(tmp_path):
+    path = write_member(tmp_path, "local", seed=0)[0]
+    # the catalog's store is not there: the member is opened from `stores` and keeps its record and the release
+    member = FakeMember("uidA", tmp_path / "missing.zarr")
+    dest = materialize(
+        FakeCohort([member]),
+        tmp_path / "c.zarr",
+        adapters=[Rasterize(0.5), Centroids()],
+        role="he",
+        roles=ROLES,
+        mpp_native={"uidA": 0.25},
+        stores={"uidA": path},
+    )
+    contract = _contract(dest, "dataset_0")
+    assert (contract.uid, contract.catalog_release) == ("uidA", "2026-11-01")
+    assert validate(dest) == []
+    with pytest.raises(ValueError, match=r"stores has \['uidZ'\], which are not members"):
+        materialize(
+            FakeCohort([member]),
+            tmp_path / "d.zarr",
+            adapters=[Rasterize(0.5), Centroids()],
+            role="he",
+            roles=ROLES,
+            mpp_native={"uidA": 0.25},
+            stores={"uidZ": path},
+        )
+
+
+class _RemoteMember(FakeMember):
+    """A member with a remote store: it lists its elements, and fetches only those asked for."""
+
+    zarr_url = "s3://bucket/uidA.zarr"
+
+    def resolve(self, roles):
+        return {role: {"image": "images/he", "table": "tables/table"}[role] for role in roles}
+
+    def _local_store(self, elements=None):
+        self.fetched = elements
+        return self._path
+
+
+def test_remote_member_fetches_only_the_role_elements(tmp_path):
+    member = _RemoteMember("uidA", write_member(tmp_path, "uidA", seed=0)[0])
+    plan, _ = _materialize._prepare(
+        FakeCohort([member]),
+        tmp_path / "c.zarr",
+        adapters=[Rasterize(0.5), Centroids()],
+        role="he",
+        roles=ROLES,
+        mpp_native={"uidA": 0.25},
+        obs_columns=(),
+        allow_mixed_grids=False,
+    )
+    assert member.fetched == ["images/he", "tables/table"]
+    assert plan["members"]["uidA"]["path"] == str(member._path.absolute())
