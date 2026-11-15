@@ -65,7 +65,7 @@ Things to know before writing your own loop:
   with `Loader(to="torch")`.
 - `SpatialDatasetCollection(path).var` gives the gene names, and `Loader(genes=[...])` yields only those columns of
   `X`, dense float32.
-- `pin_memory=True` matters: without it the copy to the GPU took 7.7 ms instead of 1.6 ms per batch of 256.
+- Pinned memory matters: `to_torch` turns on `pin_memory` when CUDA is available. Without it the copy to the GPU took 7.7 ms instead of 1.6 ms per batch of 256.
 
 The full script, with the targets (log1p of counts per 10,000 Gene Expression counts, 50 most variable genes of the
 training cells), the model (ResNet18 with ImageNet weights, MSE, AdamW, bf16, channels_last) and the evaluation, is
