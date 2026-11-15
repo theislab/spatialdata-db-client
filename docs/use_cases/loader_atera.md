@@ -67,15 +67,26 @@ python scripts/bench_loader_atera.py <out>/atera-he.zarr <out>/bench_gpu --torch
 The `materialize` step calls
 
 ```python
-cohort.materialize(
-    dest,
-    adapters=default_chain(0.5),
-    role="he",
-    roles={"image": "^images/he_image$", "table": "^tables/table$", "labels": "^labels/cell_labels$"},
-    mpp_native=mpp,
-    runner="snakemake", executor="slurm", workers=1, slurm=slurm,
-)
+cohort.materialize(dest, adapters=default_chain(0.5), runner="snakemake", executor="slurm", workers=1, slurm=slurm)
 ```
+
+`role`, `roles` and `mpp_native` default from the catalog:
+
+- `role="he"`, because every member has an H&E image (`hne_image`);
+- the element roles of 10x Atera: `^images/he_image$`, `^tables/table$` and `^labels/cell_labels$`;
+- each record's `mpp`. It is checked against the pixel size the store records: spatialdata-io's Atera reader stores
+  `pixel_size` (µm per `global` unit), which times the H&E's scale onto `global` gives its µm per pixel. A relative
+  difference above 1e-6 raises. On the four Atera v1 stores the two agree to 4e-16. The two Preview stores record no
+  pixel size, so their catalog value is taken unchecked.
+
+Each dataset's contract says which case applies (`mpp_source`: `"catalog_checked_store"`, `"catalog_unchecked"`, or
+`"given"` for a value passed as `mpp_native={uid: ...}`). The keyword arguments override the defaults: the run above
+passed them explicitly, with the same values.
+
+Each dataset also gets `obs["total_counts"]` (the sum over the Gene Expression features), and `var["mean_counts"]`
+and `var["var_counts"]` (the mean and the variance with `n - 1` degrees of freedom over its cells), flagged by
+`totals` in its contract. The collection on this page was written before that, so it has no `totals`, and its
+`obs["total_counts"]` is the one from the source table.
 
 The controller ran for 4 h 15 min in a 16 GB job. Snakemake submitted one `fit_stain` job (24 GB requested) and
 then the six members one at a time (`workers=1`, 80 GB requested each), and a final `validate` job:
@@ -207,6 +218,75 @@ cells) per setting. It ran as one Slurm job with 16 cores of an Intel Xeon Plati
 
 Eight workers read 2.4 times as fast as the loader in the main process. The H100 job's node differs from the CPU
 job's, so the rows with 0 workers of the two tables are not a CPU/GPU comparison.
+
+### H&E only and with labels
+
+Most of the bytes of a batch above are the label crops (uint32, four times the H&E's uint8). The same loader
+without `labels` reads more cells per second:
+
+| crops | setup | DataLoader workers | cells per second |
+|---|---|---|---|
+| H&E + labels | this page, CPU job, 16 cores, six slides | 0 | 1,319 |
+| H&E + labels | this page, H100 job, 16 cores, six slides, 400 batches | 8 | 4,639 |
+| H&E | 16 cores of a GPU node (the GPU unused), six slides, 400 batches counted from the start of the workers | 8 | 3,749 |
+| H&E | as above, `return_annotations=[]` | 8 | 4,163 |
+| H&E | training use case, one H100, one slide (FFPE breast Preview), 150 steps, data only | 0 | 3,567 |
+| H&E | as above | 8 | 7,680 |
+| H&E | as above, ResNet18 training loop, bf16, `channels_last` | 8 | 7,676 |
+| H&E | training use case, one H100, six slides, 2 epochs of training | 8 | 6,393 |
+
+The last four rows were measured in the training use case ({doc}`loader_training`). It ran on one H100 80 GB with
+crops of 224 px and batches of 256, and it also gives the setup and the time per step. The rows for six slides
+without labels are ours. They count the start of the eight workers and read the
+collection cold from lustre. The rows differ in node, slides and count, so compare them within a setup, not across.
+
+### Reading the collection for training
+
+{doc}`loader_training` trains a model on this collection. What it relies on:
+
+- Open the loader once and iterate it many times. `use_collection` checks every dataset against the contract
+  ({func}`~sddb.contract.validate_dataset`) and reads every dataset's `obs`. On this collection the first open of
+  the six slides took 58 s, of which 39 s was the contract check. spatialbatch then records the pass under a hash
+  of the collection's consolidated metadata, the datasets' contracts (uid and version included) and the sddb
+  version, in the process and in `$SPATIALBATCH_CACHE_DIR` (default `~/.cache/spatialbatch`). A later open, in the
+  same process or a new one, took 14 s, and 7.6 to 9.7 s with `return_annotations=[]`, which skips
+  `obs`. Before the cache a reopen took 62 s.
+- `loader.to_torch(num_workers=8)` returns the torch `DataLoader`. It sets `batch_size=None` (the loader makes the
+  batches), `pin_memory` when CUDA is available, and persistent workers. With several workers annbatch needs the
+  sampler to drop its last incomplete batch, so `to_torch` sets `drop_last` on a sampler the loader built, and each
+  worker then skips at most `batch_size - 1` rows. annbatch refuses several workers for a sampler that does not
+  shuffle.
+- Through a `DataLoader` the arrays of a batch (the crops, `index`, `dataset`, `coords`) arrive as torch tensors with
+  any number of workers. `X` stays a SciPy CSR matrix unless the loader is built with `to="torch"`, which yields a
+  torch sparse tensor.
+- `Loader(genes=[...])` yields only those columns of `X`, dense float32, in the order given, with the matching rows
+  of `batch["var"]`. A name is a var name (here the Ensembl id) or an `original_var_name` (the gene symbol).
+  `SpatialDatasetCollection(path).var` is the collection's var, with `gene_ids`, `feature_types` and
+  `original_var_name`.
+- `loader.set_rows(rows)` switches the rows between epochs, so one loader and its workers serve the training and the
+  validation rows. Persistent workers read the new rows from a shared mask when the next epoch starts.
+
+### Memory
+
+Each worker of a `DataLoader` is a fork of the main process. It shares the main process's pages until it writes to
+them, and Slurm's `MaxRSS` counts those shared pages once per process. On this cluster the accounting
+(`jobacct_gather/linux`, without `UsePss`) sums the RSS of the job's processes, while the memory limit is the
+job's cgroup, which counts a shared page once. One loader over the six slides with eight persistent workers,
+H&E only, 400 batches:
+
+| | per worker | all workers |
+|---|---|---|
+| RSS | 2.92 GB | 23.4 GB |
+| PSS (shared pages split between the processes) | 1.02 GB | 8.2 GB |
+| private, written | 0.77 GB | 6.2 GB |
+
+The main process had an RSS of 2.9 GB, and the job's `MaxRSS` was 26.0 GB: the sum of the RSS. The memory the
+job used was about 9 GB, the sum of the PSS. The 121.6 GB `MaxRSS` of the training use case's three loaders with eight
+workers each is most likely the same sum, which counts the shared pages once per worker; that job was not measured
+this way. The largest part of the loader's own state is `obs` (507 MB for
+the six slides). With `return_annotations=[]` the main process held 0.87 GB, a worker 1.22 GB RSS and 0.80 GB PSS,
+and the sum of the RSS fell to 10.7 GB. Most of a worker's private memory is its batch buffers
+and the libraries it has loaded. Python objects took 0.17 GB (`tracemalloc`).
 
 ```{image} ../_static/loader/atera-batch.png
 :alt: Sixteen 224 px crops of one shuffled batch, H&E with the cell outlines.
