@@ -16,7 +16,10 @@ import sddb
 from sddb.contract import validate
 from sddb.loader import default_chain
 
-cohort = sddb.Catalog(version="2026-11-12").cohort(uids=["jCLxdY1tWKmbfWOB0001"])
+catalog = sddb.Catalog(version="2026-11-12")
+atera = catalog.query(technology="10x_atera").to_df()
+print(atera[["uid", "title", "n_obs"]])  # the uid below is the FFPE breast Preview slide
+cohort = catalog.cohort(uids=["jCLxdY1tWKmbfWOB0001"])
 cohort.materialize(
     "preview-breast.zarr",
     adapters=default_chain(0.5),  # 0.5 µm per pixel, cell labels and centroids, tissue mask, stain normalisation
@@ -27,30 +30,30 @@ assert validate("preview-breast.zarr") == []
 
 The image role, the elements and each slide's pixel size come from the catalog (see {doc}`loader_atera`). Training
 reads the collection with a `Loader`. Within each dataset the rows are sorted along a Morton curve of the cell
-positions, so a range of rows is a compact region of the slide, and `rows=` turns that into a spatial split.
+positions, so a range of rows is a compact region of the slide. `spatial_split` holds out the last share of every
+dataset's rows, and works the same for one dataset or several.
 
 ```python
 import numpy as np
 import torch
-from spatialbatch import Loader, SpatialDatasetCollection
+from spatialbatch import Loader, SpatialDatasetCollection, spatial_split
 
 collection = SpatialDatasetCollection("preview-breast.zarr")
-(group,) = list(collection)  # one dataset here
-n = group["obsm"]["spatial"].shape[0]
-n_train = int(0.8 * n) // 64 * 64  # the last 20% of rows, whole regions, is held out
+train, held_out = spatial_split(collection, 0.2)  # one slice per dataset: its first 80% and its last 20% of rows
 
 loader = Loader(images=["he"], crop_px=224, batch_size=256, shuffle=True, return_index=True,
-                rows=slice(0, n_train)).use_collection(collection)
+                return_annotations=["total_counts"], rows=train).use_collection(collection)
 data = loader.to_torch(num_workers=8)  # batch_size=None, drop_last, persistent workers, pin_memory on CUDA
 
 for epoch in range(2):
-    loader.set_rows(slice(0, n_train))  # train
+    loader.set_rows(train)  # shuffled, each worker drops its last incomplete batch
     for batch in data:
         images = batch["images"]["he"]  # (256, 3, 224, 224) uint8 tensor
         X = batch["X"]                  # (256, n_features) counts, SciPy CSR
-        rows = batch["index"]           # global row of each cell, to look up per-cell values
+        totals = batch["obs"]["total_counts"].to_numpy()  # each cell's Gene Expression counts
+        dataset, row = collection.locate(batch["index"])  # which dataset, and the row in its obs and X
         ...
-    loader.set_rows(slice(n_train, n))  # validate with the same workers
+    loader.set_rows(held_out, evaluate=True)  # every held-out row exactly once, with the same workers
     for batch in data:
         ...
 ```
@@ -59,12 +62,22 @@ Things to know before writing your own loop:
 - Build the loader once and reuse it across epochs. The first open of a collection checks every dataset against the
   contract; spatialbatch caches a passed check, so a later open is faster (on the six slides, 58 s for the first
   open and 14 s after, see {doc}`loader_atera`).
-- `to_torch` sets up the DataLoader the way annbatch needs it. annbatch refuses several workers for a sampler that
-  doesn't shuffle, so the validation rows are shuffled too (the order doesn't matter for the metrics).
+- `to_torch` sets up the DataLoader the way annbatch needs it. With several workers a training pass is shuffled and
+  each worker drops its last incomplete batch, up to `num_workers * (batch_size - 1)` rows per pass.
+  `set_rows(rows, evaluate=True)` turns both off for the next pass, so validation sees every row once.
+- `batch["index"]` is the loader row of each cell. The datasets follow one another, so dataset `d` holds rows
+  `collection.offsets[d]` to `collection.offsets[d + 1]`, and `collection.locate(index)` returns each row's dataset
+  (the same as `batch["dataset"]`) and its row in that dataset's `obs` and `X`. `collection.n_obs` is the total.
+- `obs["total_counts"]` is each cell's sum over the Gene Expression features, written by `materialize`;
+  `return_annotations=["total_counts"]` puts it in `batch["obs"]`. When the collection mixes chemistries, a feature
+  one slide did not measure is 0 there, so a slide with a larger panel gets a larger total. To normalise across
+  them, divide by the sum over the genes every dataset measured (`var["present"]` True in each dataset) instead.
 - Through the DataLoader, images and indices arrive as torch tensors. `X` stays SciPy CSR, or a torch sparse tensor
   with `Loader(to="torch")`.
 - `SpatialDatasetCollection(path).var` gives the gene names, and `Loader(genes=[...])` yields only those columns of
   `X`, dense float32.
+- One epoch over the six slides of {doc}`loader_atera` takes about 30 minutes at the loader's 1,300 cells per second
+  on CPU, so run training as a job.
 - Pinned memory matters: `to_torch` turns on `pin_memory` when CUDA is available. Without it the copy to the GPU took 7.7 ms instead of 1.6 ms per batch of 256.
 
 The full script, with the targets (log1p of counts per 10,000 Gene Expression counts, 50 most variable genes of the

@@ -26,7 +26,8 @@
 ## Loader collections
 
 {mod}`sddb.loader` writes a cohort as a collection for the spatialbatch loader, and {mod}`sddb.contract` defines and
-checks what the collection holds. Both need the `loader` extra.
+checks what the collection holds. Both need the `loader` extra and spatialbatch, installed as in
+{doc}`../use_cases/loader_atera` (section "Install").
 
 ```{eval-rst}
 .. autosummary::

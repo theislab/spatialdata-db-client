@@ -6,6 +6,21 @@ GPU. The collection follows the loader contract ({mod}`sddb.contract`). Every sl
 pixel, every cell keeps its label id and gets a centroid, the tissue is masked, and the H&E stains are normalised
 to one reference fitted on all slides. The run needs a shared filesystem, a Slurm cluster and the `loader` extra.
 
+## Install
+
+The `loader` extra installs squidpy, dask-image, pydantic and snakemake. spatialbatch is not on PyPI yet, so it is
+installed from git, and annbatch comes from PyPI. With `uv pip install`, pass `--no-sources`: spatialbatch's own
+`pyproject.toml` points annbatch at a local checkout (`../annbatch`), which uv would otherwise try to follow.
+
+```bash
+pip install "spatialdata-db[loader]" "annbatch>=0.3.1" \
+    "spatialbatch @ git+https://github.com/timtreis/spatialbatch@feat/loader-api"
+# or: uv pip install --no-sources "spatialdata-db[loader]" "annbatch>=0.3.1" "spatialbatch @ git+..."
+python -c "import sddb.loader, spatialbatch, annbatch; print(annbatch.__version__)"  # 0.3.1 here
+```
+
+The runs on this page used annbatch 0.3.1, zarr 3.4.2, torch 2.15.0 and Python 3.12.
+
 ## Slides
 
 The cohort is every record of the release with technology `10x_atera`, and each one has an H&E image
@@ -45,8 +60,10 @@ int32 counts.
 ## Commands
 
 Both steps run as Slurm jobs, and the scripts are in `scripts/` of the client repository. `SDDB_CACHE_DIR` must be
-on the shared filesystem: `materialize` copies each member's whole store from the release into
-`$SDDB_CACHE_DIR/stores/<uid>.zarr` once, and the Slurm jobs open it from there.
+on the shared filesystem, because `materialize` copies each member's store from the release into it once, and the
+Slurm jobs open the copy from there. It copies only the elements the roles select (here the H&E, the table and the
+cell labels) and the elements the table annotates, under `$SDDB_CACHE_DIR/elements/<uid>/`. The run on this page was
+made before that change and copied the whole stores (306 GB) into `$SDDB_CACHE_DIR/stores/<uid>.zarr`.
 
 ```bash
 export SDDB_CACHE_DIR=<shared dir>/cache
@@ -64,6 +81,25 @@ python scripts/bench_loader_atera.py <out>/atera-he.zarr <out>/bench --epochs 2
 python scripts/bench_loader_atera.py <out>/atera-he.zarr <out>/bench_gpu --torch-workers 0,2,4,8 --max-batches 400
 ```
 
+The `--slurm-json` keys are snakemake resources, which the snakemake Slurm executor plugin turns into `sbatch` flags
+(plugin 2.8.0, `submit_string.py`):
+
+| key | `sbatch` flag |
+|---|---|
+| `slurm_partition` | `-p` |
+| `slurm_account` | `-A` |
+| `qos` | `--qos` |
+| `runtime` (minutes) | `-t` |
+| `mem_mb`, `mem_mb_per_cpu` | `--mem`, `--mem-per-cpu` |
+| `slurm_extra` | added as given, e.g. `"'--qos=cpu_normal'"` |
+
+`fit_stain` holds the resources of that one job. The partition and the QOS names are this cluster's, so replace
+them with yours. Where the cluster requires a QOS and none is given, every job fails at submission with
+`sbatch: error: Batch job submission failed: Invalid qos specification`. Without `slurm_account` the plugin logs
+"No SLURM account given, trying to guess" and asks `sacct`; pass the account where the cluster needs one. Run the
+controller itself as a job (or in a terminal that stays open), because it waits for all the jobs it submits: on this
+page that took 4 h 15 min.
+
 The `materialize` step calls
 
 ```python
@@ -79,9 +115,16 @@ cohort.materialize(dest, adapters=default_chain(0.5), runner="snakemake", execut
   difference above 1e-6 raises. On the four Atera v1 stores the two agree to 4e-16. The two Preview stores record no
   pixel size, so their catalog value is taken unchecked.
 
-Each dataset's contract says which case applies (`mpp_source`: `"catalog_checked_store"`, `"catalog_unchecked"`, or
-`"given"` for a value passed as `mpp_native={uid: ...}`). The keyword arguments override the defaults: the run above
-passed them explicitly, with the same values.
+Each dataset's contract says which case applies (`mpp_source`: `"catalog_checked_store"`, `"catalog_unchecked"`,
+`"store_pitch_fit"` for Visium, see "Visium slides" below, or `"given"` for a value passed as
+`mpp_native={uid: ...}`). The keyword arguments override the defaults: the run above passed them explicitly, with the
+same values.
+
+With `role="he"` every member's image must be 3 channels of uint8. A few IF slides carry `hne_image` in the catalog,
+and for those `materialize` stops before it writes anything, with
+`ValueError: <uid>: role 'he' needs a 3-channel (RGB) uint8 image, but '<image>' has 4 channels of uint8`, or
+`3 channels of uint16`. Pass `role="if"` for them, or leave them out of an H&E cohort. An RGBA H&E (4 channels of
+uint8) is refused the same way.
 
 Each dataset also gets `obs["total_counts"]` (the sum over the Gene Expression features), and `var["mean_counts"]`
 and `var["var_counts"]` (the mean and the variance with `n - 1` degrees of freedom over its cells), flagged by
@@ -199,6 +242,9 @@ on a node with two Intel Xeon Gold 6136 CPUs, reading the collection from lustre
 | 1 (cold) | 2,310,946 | 1,752 s | 1,319 | 494 | 0.68 s |
 | 2 (warm) | 2,310,946 | 1,757 s | 1,315 | 493 | 0.48 s |
 
+At about 1,300 cells per second one epoch over the six slides takes about 30 minutes, so run it as a job, not in an
+interactive session.
+
 MB per second counts the bytes of the arrays the loader returns (866 GB per epoch, mostly the label crops), so it is
 the rate of decoded data, not the rate read from disk. Opening the collection took 67 s. The second pass is no
 faster than the first, so the page cache does not help here; we have not profiled whether decoding, cropping or
@@ -264,7 +310,11 @@ collection cold from lustre. The rows differ in node, slides and count, so compa
   `SpatialDatasetCollection(path).var` is the collection's var, with `gene_ids`, `feature_types` and
   `original_var_name`.
 - `loader.set_rows(rows)` switches the rows between epochs, so one loader and its workers serve the training and the
-  validation rows. Persistent workers read the new rows from a shared mask when the next epoch starts.
+  validation rows. Persistent workers read the new rows from a shared mask when the next epoch starts. For
+  validation, pass `evaluate=True`. The pass then yields every row exactly once with any number of workers: each
+  worker reads a contiguous share of the rows in order, and nothing is shuffled or dropped, so some batches are
+  shorter than `batch_size`. Without it, a pass with 8 workers and batches of 256 skips up to 8 × 255 = 2,040 rows,
+  a different set each time.
 
 ### Memory
 
@@ -287,6 +337,41 @@ this way. The largest part of the loader's own state is `obs` (507 MB for
 the six slides). With `return_annotations=[]` the main process held 0.87 GB, a worker 1.22 GB RSS and 0.80 GB PSS,
 and the sum of the RSS fell to 10.7 GB. Most of a worker's private memory is its batch buffers
 and the libraries it has loaded. Python objects took 0.17 GB (`tracemalloc`).
+
+## Visium slides
+
+The same path works for Visium v1/v2 slides, with three differences.
+
+- There are no default roles for Visium, so pass them. spatialdata-io's visium reader names the hires image
+  `<id>_hires_image` and the full-resolution image, when the bundle has one, `<id>_full_image`. Use one of them:
+  `roles={"image": "^images/.*_hires_image$", "table": "^tables/table$"}`, or `.*_full_image$`. There are no labels.
+  The table annotates the spot circles, and `Rasterize` draws each circle into `labels/cells`.
+- The µm per pixel is fitted on the store's own spots: a least-squares fit of the spot centres on their array
+  positions, with 100 µm between neighbouring spots of a row (one `array_col` step is 50 µm), as spatialdata-io's
+  visium reader does. `mpp_source` is `"store_pitch_fit"`. The fit raises when the spots are not on a v1/v2 array or
+  fit it to worse than 5 µm (median). The catalog `mpp` of Visium records up to release 2026-11-12 is
+  55 µm / `spot_diameter_fullres`, and `spot_diameter_fullres` is a display size of the spot (about 65 to 70 µm), not
+  the 55 µm spot. So the catalog value is 1.18 to 1.27 times too small, and `materialize` never uses it for those
+  releases. In later releases a catalog value more than 2% off the fit raises. A Visium store without
+  `array_col`/`array_row` in its table gets no mpp (native grid) unless you pass `mpp_native`.
+- The fit is for technology `10x_visium` only. The catalog `mpp` of a Visium HD record (Space Ranger's
+  `microns_per_pixel`, within 0.1% of the array fit on the slides checked) is taken as is (`"catalog_unchecked"`).
+
+```python
+cohort = sddb.Catalog(version="2026-11-12").query(technology="10x_visium")
+cohort.materialize(
+    "visium-he.zarr",
+    adapters=default_chain(1.0),
+    roles={"image": "^images/.*_hires_image$", "table": "^tables/table$"},
+)
+```
+
+## Local or derived stores
+
+`materialize(..., stores={uid: path})` opens a local store in place of a member's catalog store, for example a copy
+on a faster disk or a store derived from it (Visium HD bins summed into spots). The member stays the catalog record,
+so its catalog columns, the defaults and the cohort's release still go into the contract (`catalog_release`). Each
+uid must be a member of the cohort.
 
 ```{image} ../_static/loader/atera-batch.png
 :alt: Sixteen 224 px crops of one shuffled batch, H&E with the cell outlines.
