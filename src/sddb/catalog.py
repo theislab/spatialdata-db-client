@@ -80,6 +80,11 @@ def _facet_isin(series: pd.Series, values: list[Any]) -> pd.Series:
     return series.isin(values)
 
 
+# Vendor prefixes of the schema-3 technology ids (technology.json vendor_id); ids without one (dbit_seq,
+# slide_seq, maldi_msi, ...) keep their full id as the only alias, so "seq" never matches several platforms.
+_VENDOR_PREFIXES = frozenset({"10x", "vizgen", "akoya", "bruker", "ionpath", "sbt", "stomics"})
+
+
 def _norm(value: Any) -> str:
     """Alias key for a facet value: lowercase, with spaces, hyphens and underscores removed."""
     return re.sub(r"[\s_-]+", "", str(value).lower())
@@ -100,8 +105,10 @@ def resolve_facet_values(df: pd.DataFrame, col: str, values: list[Any]) -> list[
 
     A value present as given is kept. Otherwise it resolves through aliases: values that are equal
     after :func:`_norm` (case, spaces, hyphens and underscores ignored), and, for ``technology``, the
-    catalog's own ``assay`` display values (``"10x Xenium"`` resolves to ``"Xenium"``; an assay shared
-    by several technologies resolves to all of them). Boolean facets take ``True`` or ``False`` only.
+    catalog's own ``assay`` display values (``"10x Xenium"`` resolves to ``"10x_xenium"``; an assay shared
+    by several technologies resolves to all of them) and a schema-3 id without its vendor prefix, which is
+    the schema-2 token (``"Visium"`` and ``"VisiumHD"`` resolve to ``"10x_visium"`` and ``"10x_visium_hd"``,
+    ``"Merscope"`` to ``"vizgen_merscope"``). Boolean facets take ``True`` or ``False`` only.
 
     Raises
     ------
@@ -122,6 +129,11 @@ def resolve_facet_values(df: pd.DataFrame, col: str, values: list[Any]) -> list[
         pairs = df[["technology", "assay"]].dropna().drop_duplicates()
         for tech, assay in pairs.itertuples(index=False):
             labels.setdefault(_norm(assay), set()).add(str(tech))
+    if col == "technology":  # schema 3: "<vendor>_<platform>" ids; the platform part is the schema-2 token
+        for v in known:
+            vendor, _, platform = str(v).partition("_")
+            if platform and vendor in _VENDOR_PREFIXES:
+                labels.setdefault(_norm(platform), set()).add(str(v))
     known_set = set(known)
     out: list[Any] = []
     for v in values:
@@ -233,7 +245,7 @@ class Catalog:
         if ver is not None and ver > schema.SUPPORTED_CATALOG_SCHEMA:
             raise ValueError(
                 f"catalog at {url} declares schema version {ver}, but this sddb client supports up to "
-                f"{schema.SUPPORTED_CATALOG_SCHEMA}. Upgrade with `pip install -U spatialdata-db-client`."
+                f'{schema.SUPPORTED_CATALOG_SCHEMA}. Upgrade with `pip install -U "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client"`.'
             )
         self._sha256 = _file_sha256(self._path)  # recorded in every cohort's Source, checked by verify()
         # The dated release behind this file: catalog-latest is an alias of the newest one, whose date is the
@@ -291,7 +303,7 @@ class Catalog:
             if major > schema.SUPPORTED_CATALOG_SCHEMA:
                 raise ValueError(
                     f"technology.json at {url} has schema version {vocab['schema_version']}, but this sddb client "
-                    f"supports up to {schema.SUPPORTED_CATALOG_SCHEMA}. Upgrade with `pip install -U spatialdata-db-client`."
+                    f'supports up to {schema.SUPPORTED_CATALOG_SCHEMA}. Upgrade with `pip install -U "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client"`.'
                 )
             self._technologies = vocab
         return self._technologies
@@ -411,7 +423,7 @@ class Catalog:
             String facets compare a value against that column of the whole catalog first. A value that is
             not there resolves through aliases: case, spaces, hyphens and underscores are ignored, and a
             ``technology`` value may be an ``assay`` display value (``technology="10x Xenium"`` keeps
-            ``"Xenium"``). A value that still does not resolve raises ``ValueError`` with a "did you mean"
+            ``"10x_xenium"``) or the id without its vendor prefix (``technology="Visium"`` keeps ``"10x_visium"``). A value that still does not resolve raises ``ValueError`` with a "did you mean"
             hint. A known value that matches nothing after the other filters gives an empty cohort.
             ``hne_image`` and ``if_image`` take True or False. Null means unknown and matches neither.
             ``source`` is derived on load as the lowercased ``study_id`` prefix before ``":"``; rows

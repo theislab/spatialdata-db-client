@@ -201,7 +201,12 @@ def viewer_url(uid: str, catalog: _CatalogOpt = None) -> None:
 def genes(
     genes: Annotated[list[str], typer.Argument(help="Gene symbol(s) or Ensembl id(s), case-insensitive.")],
     limit: Annotated[int, typer.Option(help="Max datasets to list.")] = 20,
-    validation: Annotated[str, typer.Option(help="'all' (default, includes bronze) or 'pass'.")] = "all",
+    validation: Annotated[
+        str,
+        typer.Option(
+            help="'all' (default: any validation status) or 'pass' (validation_status == 'pass'); not a tier filter."
+        ),
+    ] = "all",
     catalog: _CatalogOpt = None,
 ) -> None:
     """List datasets expressing all GENES (one gene: ranked by fraction of observations detected).
