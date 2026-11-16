@@ -105,7 +105,9 @@ def test_primer_notebook_runs_on_cpu_and_writes_the_bundle(tmp_path, fixture_coh
         cell = next(c for c in code_cells if marker in c.source)
         return sum("image/png" in o.get("data", {}) for o in cell.outputs)
 
-    assert pngs(".pl.render_shapes") >= 2  # one section per technology
+    spatial = next(c for c in code_cells if ".pl.render_shapes" in c.source)
+    said = "\n".join(_output_text(o) for o in spatial.outputs)  # why a section drew nothing, for the CI log
+    assert pngs(".pl.render_shapes") >= 2, f"one section per technology; the cell said:\n{said}"
     assert pngs("sc.pl.dotplot(m") >= 1
 
 
