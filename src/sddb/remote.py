@@ -36,12 +36,19 @@ def storage_options(url: str) -> dict[str, Any]:
     return {"anon": True} if url.startswith("s3://") else {}
 
 
-_PROXY = "https://lamin.ai/storage/s3/"
+_PROXY = "https://aws.eu-central-1.lamin.ai/storage/s3/"
 
 
 def proxy_url(url: str) -> str:
-    """Rewrite ``s3://bucket/key`` to the LaminHub CORS proxy URL; other URLs pass through."""
-    return _PROXY + url[len("s3://") :] if url.startswith("s3://") else url
+    """Rewrite ``s3://bucket/key`` to the LaminHub CORS proxy URL; other URLs pass through.
+
+    The proxy wants the bucket followed by an encoded slash (``bucket%2F/key``); a plain ``bucket/key`` gets
+    400 "No path provided".
+    """
+    if not url.startswith("s3://"):
+        return url
+    bucket, _, key = url[len("s3://") :].partition("/")
+    return f"{_PROXY}{bucket}%2F/{key}"
 
 
 def _is_remote(url: str) -> bool:

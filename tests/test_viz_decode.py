@@ -43,4 +43,4 @@ def test_view_interactive_inlined_and_fallback(monkeypatch):
     assert Dataset(row).view_interactive(mode="config") == "w"
     assert isinstance(seen[0], dict)
     Dataset(make_fixture_catalog().iloc[0]).view_interactive(mode="config")
-    assert seen[1].startswith("https://lamin.ai/storage/s3/")
+    assert seen[1].startswith("https://aws.eu-central-1.lamin.ai/storage/s3/")

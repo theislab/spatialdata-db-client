@@ -37,6 +37,7 @@ exclude_patterns = [
     "**/.pixi",
     "reference/_catalog_columns.md",
     "reference/_cli.md",
+    "primers/*/STORY_DRAFT.md",  # the page text and its sources, read by export_hero.py, not a docs page
 ]
 smartquotes = False  # keep straight quotes, and `--flag` in the CLI reference instead of an en dash
 
@@ -62,6 +63,13 @@ def setup(app):
 
 intersphinx_mapping = intersphinx()
 ogp_social_cards = {"enable": False}  # needs matplotlib, and the pages have no card artwork
+# Link previews (Slack, X): the site's PNG social card, since previews don't render the SVG logo, and descriptions
+# sized for previews. twitter:card isn't emitted by sphinxext-opengraph, so it goes in as a custom tag.
+ogp_site_url = "https://spatialdata-db.readthedocs.io/en/latest/"
+ogp_image = f"{SITE_URL}/og.png"  # the site's card; on www once SITE_URL moves there
+ogp_image_alt = "The SpatialData-DB logo and name"
+ogp_description_length = 150
+ogp_custom_meta_tags = ['<meta name="twitter:card" content="summary_large_image" />']
 xref_overrides = {"pandas.core.series.Series": "pandas.Series"}
 nitpick_ignore = [
     # Internal classes that appear in signatures but are not exported from `sddb`.
@@ -73,9 +81,29 @@ nitpick_ignore = [
     # The docstrings of `count` and `index`, inherited from `collections.abc.Sequence`, read as return types.
     ("py:class", "integer -- return number of occurrences of value"),
     ("py:class", "integer -- return first index of value."),
+    ("py:class", "integer -- return first index of"),
+    # Internal names in the signatures of the loader API (sddb.loader, sddb.contract).
+    ("py:class", "sddb.loader._adapters._Adapter"),
+    ("py:class", "sddb.loader._item._Source"),
+    # xarray and zarr classes under their defining module path, as dataclass field types resolve them.
+    ("py:class", "xarray.core.dataarray.DataArray"),
+    ("py:class", "zarr.core.group.Group"),
+    # squidpy's stain reference, a type hint only; squidpy's experimental API is not in its intersphinx inventory.
+    ("py:class", "StainFit"),
+    # pydantic field constraints in the contract models' signatures.
+    ("py:class", "annotated_types.Ge"),
+    ("py:class", "annotated_types.Gt"),
+    ("py:class", "annotated_types.Le"),
+    ("py:class", "pydantic.types.Strict"),
+]
+nitpick_ignore_regex = [
+    # spatialbatch, the loader the collections are written for, publishes no API docs to link to.
+    (r"py:.*", r"spatialbatch(\..*)?"),
 ]
 
-html_logo = "_static/logo.svg"  # og:image and the fallback; the sidebar shows the wordmarks below
+html_logo = (
+    "_static/logo.svg"  # the sidebar fallback (og:image is ogp_image above); the sidebar shows the wordmarks below
+)
 html_favicon = "_static/logo.svg"
 html_static_path = ["_static"]
 html_css_files = ["css/sddb.css"]

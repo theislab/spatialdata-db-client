@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import warnings
 import webbrowser
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -67,6 +67,7 @@ class Source:
     version: str | None = None
     refresh: bool = False
     sha256: str | None = None
+    release: str | None = None  # the dated release the catalog resolved to (also for catalog-latest), if known
 
 
 _ATTRS = (
@@ -92,8 +93,9 @@ def _clean(value: Any) -> Any:
 class Dataset:
     """One catalog row: a published dataset. Column values are exposed as attributes."""
 
-    def __init__(self, row: pd.Series) -> None:
+    def __init__(self, row: pd.Series, source: Source | None = None) -> None:
         self._row = row
+        self._source = source  # the catalog it came from, recorded in a dest manifest
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
@@ -116,7 +118,19 @@ class Dataset:
         """
         from sddb.cohort import SpatialDataCohort
 
-        return SpatialDataCohort(self._row.to_frame().T).to_list(elements=elements, dest=dest, workers=1)[0]
+        cohort = SpatialDataCohort(self._row.to_frame().T, source=self._source)
+        return cohort.to_list(elements=elements, dest=dest, workers=1)[0]
+
+    def _local_store(self, elements: Sequence[str] | None = None) -> Path:
+        """The local path of the store, fetched into the cache like :meth:`to_sdata` if remote, not read.
+
+        `elements` (``"kind/name"``) fetches only those, plus the elements their tables annotate; ``None`` the whole
+        store.
+        """
+        from sddb.cohort import SpatialDataCohort
+
+        cohort = SpatialDataCohort(self._row.to_frame().T, source=self._source)
+        return cohort._local_stores(None if elements is None else list(elements), None, 1)[0]
 
     def elements(self) -> dict[str, dict[str, Any]]:
         """Return element shapes/dtypes without loading data."""
@@ -131,7 +145,7 @@ class Dataset:
 
         If ``vitessce_url`` is already a vitessce.io viewer link (as in the published catalog) it is
         returned unchanged. Otherwise it is treated as a config-sidecar URL: an ``s3://bucket/key`` URL is
-        rewritten to the LaminHub CORS proxy ``https://lamin.ai/storage/s3/bucket/key`` and wrapped as
+        rewritten to the LaminHub CORS proxy ``https://aws.eu-central-1.lamin.ai/storage/s3/bucket%2F/key`` and wrapped as
         ``https://vitessce.io/?url=<proxied>``.
 
         Some published links load another dataset's store (333 of 6087 rows in the 2026-10-28 catalog). The

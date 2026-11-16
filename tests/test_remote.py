@@ -4,7 +4,7 @@ import pytest
 from tests._fixtures import make_tiny_sdata_zarr
 
 from sddb._cache import cache_dir
-from sddb.remote import elements, open_sdata, storage_options
+from sddb.remote import elements, open_sdata, proxy_url, storage_options
 
 PUBLIC_URL = "s3://scverse-spatial-eu-central-1/.lamindb/0EQmsj25jtIQuFUT.zarr"
 
@@ -13,6 +13,15 @@ def test_storage_options():
     assert storage_options("s3://b/k") == {"anon": True}
     assert storage_options("https://x") == {}
     assert storage_options("/local/p") == {}
+
+
+def test_proxy_url_encodes_the_bucket_slash():
+    # LaminHub's proxy answers 400 "No path provided" for a plain bucket/key path
+    assert (
+        proxy_url("s3://scverse-spatial-eu-central-1/.lamindb/x.zarr/zarr.json")
+        == "https://aws.eu-central-1.lamin.ai/storage/s3/scverse-spatial-eu-central-1%2F/.lamindb/x.zarr/zarr.json"
+    )
+    assert proxy_url("https://example.org/a") == "https://example.org/a"
 
 
 def test_elements(tmp_path):

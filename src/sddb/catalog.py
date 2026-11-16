@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import operator
 import os
 import re
@@ -79,6 +80,11 @@ def _facet_isin(series: pd.Series, values: list[Any]) -> pd.Series:
     return series.isin(values)
 
 
+# Vendor prefixes of the schema-3 technology ids (technology.json vendor_id); ids without one (dbit_seq,
+# slide_seq, maldi_msi, ...) keep their full id as the only alias, so "seq" never matches several platforms.
+_VENDOR_PREFIXES = frozenset({"10x", "vizgen", "akoya", "bruker", "ionpath", "sbt", "stomics"})
+
+
 def _norm(value: Any) -> str:
     """Alias key for a facet value: lowercase, with spaces, hyphens and underscores removed."""
     return re.sub(r"[\s_-]+", "", str(value).lower())
@@ -99,8 +105,10 @@ def resolve_facet_values(df: pd.DataFrame, col: str, values: list[Any]) -> list[
 
     A value present as given is kept. Otherwise it resolves through aliases: values that are equal
     after :func:`_norm` (case, spaces, hyphens and underscores ignored), and, for ``technology``, the
-    catalog's own ``assay`` display values (``"10x Xenium"`` resolves to ``"Xenium"``; an assay shared
-    by several technologies resolves to all of them). Boolean facets take ``True`` or ``False`` only.
+    catalog's own ``assay`` display values (``"10x Xenium"`` resolves to ``"10x_xenium"``; an assay shared
+    by several technologies resolves to all of them) and a schema-3 id without its vendor prefix, which is
+    the schema-2 token (``"Visium"`` and ``"VisiumHD"`` resolve to ``"10x_visium"`` and ``"10x_visium_hd"``,
+    ``"Merscope"`` to ``"vizgen_merscope"``). Boolean facets take ``True`` or ``False`` only.
 
     Raises
     ------
@@ -121,6 +129,11 @@ def resolve_facet_values(df: pd.DataFrame, col: str, values: list[Any]) -> list[
         pairs = df[["technology", "assay"]].dropna().drop_duplicates()
         for tech, assay in pairs.itertuples(index=False):
             labels.setdefault(_norm(assay), set()).add(str(tech))
+    if col == "technology":  # schema 3: "<vendor>_<platform>" ids; the platform part is the schema-2 token
+        for v in known:
+            vendor, _, platform = str(v).partition("_")
+            if platform and vendor in _VENDOR_PREFIXES:
+                labels.setdefault(_norm(platform), set()).add(str(v))
     known_set = set(known)
     out: list[Any] = []
     for v in values:
@@ -150,6 +163,38 @@ def facet_values(df: pd.DataFrame, field: str | None = None) -> list[str]:
     if field not in schema.FACETS or field not in df.columns:
         raise ValueError(f"unknown facet {field!r}; valid facets: {list(schema.FACETS)}")
     return _distinct(df[field])
+
+
+def _catalog_schema_version(path: Path) -> int | None:
+    """The catalog's declared ``catalog_schema_version``, or ``None`` for a legacy catalog without one.
+
+    Read from the parquet ``sddb_release_info`` metadata — a JSON copy of release_info.json that the
+    producer embeds in the parquet so it travels with the file (through both remote download and the
+    local-copy cache, exactly like ``sddb_generated_at``).
+
+    Fail closed on broken provenance: a release that ships a corrupt ``sddb_release_info`` or a
+    non-integer ``catalog_schema_version`` is a bug, so both raise ``ValueError``. Only genuine absence
+    is legacy — no ``sddb_release_info`` at all, or provenance that declares no ``catalog_schema_version``
+    — and returns ``None`` (the caller treats ``None`` as supported).
+    """
+    try:
+        raw = (pq.read_metadata(path).metadata or {}).get(b"sddb_release_info")
+    except Exception:  # an unreadable parquet is reported with a clear message by read_parquet
+        return None
+    if raw is None:
+        return None  # no provenance at all -> legacy
+    try:
+        info = json.loads(raw.decode())
+    except Exception as err:
+        raise ValueError(
+            f"catalog sddb_release_info is not valid JSON; a release with broken provenance must not load: {err}"
+        ) from err
+    if "catalog_schema_version" not in info:
+        return None  # provenance present, version absent -> legacy
+    ver = info["catalog_schema_version"]
+    if not isinstance(ver, int) or isinstance(ver, bool):
+        raise ValueError(f"catalog_schema_version must be an integer, got {ver!r}")
+    return ver
 
 
 class Catalog:
@@ -194,8 +239,20 @@ class Catalog:
         self._refresh = refresh
         self._genes: GeneIndex | None = None
         self._features: FeatureIndex | None = None
+        self._technologies: dict[str, Any] | None = None
         self._path = fetch_catalog(url, cache_dir=cache_dir, refresh=refresh)
+        ver = _catalog_schema_version(self._path)
+        if ver is not None and ver > schema.SUPPORTED_CATALOG_SCHEMA:
+            raise ValueError(
+                f"catalog at {url} declares schema version {ver}, but this sddb client supports up to "
+                f'{schema.SUPPORTED_CATALOG_SCHEMA}. Upgrade with `pip install -U "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client"`.'
+            )
         self._sha256 = _file_sha256(self._path)  # recorded in every cohort's Source, checked by verify()
+        # The dated release behind this file: catalog-latest is an alias of the newest one, whose date is the
+        # parquet's sddb_generated_at. Only the default release URLs have a release.
+        self.release = version if version_applied else None
+        if url.endswith(_ROLLING_SUFFIX):
+            self.release = (self.generated_at or "")[:10] or None
         try:
             df = pd.read_parquet(self._path)
         except Exception as err:
@@ -208,6 +265,8 @@ class Catalog:
                     pass  # left for validate() to report
         try:
             schema.validate(df)
+            if ver is not None and ver >= 3 and "vendor" not in df.columns:
+                raise schema.SchemaError("a schema-3 catalog needs a 'vendor' column")
         except schema.SchemaError as err:
             raise schema.SchemaError(f"catalog at {url} is invalid: {err}") from err
         if "study_id" in df.columns and "source" not in df.columns:
@@ -227,6 +286,28 @@ class Catalog:
         """
         return cls(str(path), cache_dir=cache_dir)
 
+    def technologies(self) -> dict[str, Any]:
+        """The release's technology vocabulary (``technology.json`` beside the catalog).
+
+        ``{"schema_version", "release", "readouts", "vendors", "technologies"}``: each technology has its ``id`` (the
+        catalog's ``technology``), ``label``, ``vendor_id``, ``readout``, ``modality``, ``variants`` (``id`` and
+        ``label``, the catalog's ``variant``) and the ``legacy_assay`` labels it replaces. Raises ``ValueError`` for a
+        file whose schema major version is newer than this client supports.
+        """
+        if self._technologies is None:
+            from sddb.features import sibling_url
+
+            url = sibling_url(self.url, "technology.json")
+            vocab = json.loads(fetch_catalog(url, cache_dir=self._cache_dir, refresh=self._refresh).read_text())
+            major = int(str(vocab.get("schema_version", "0")).split(".")[0])
+            if major > schema.SUPPORTED_CATALOG_SCHEMA:
+                raise ValueError(
+                    f"technology.json at {url} has schema version {vocab['schema_version']}, but this sddb client "
+                    f'supports up to {schema.SUPPORTED_CATALOG_SCHEMA}. Upgrade with `pip install -U "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client"`.'
+                )
+            self._technologies = vocab
+        return self._technologies
+
     @property
     def generated_at(self) -> str | None:
         """Generation timestamp from the parquet metadata, if present."""
@@ -235,7 +316,7 @@ class Catalog:
         return value.decode() if value else None
 
     def _source(self) -> Source:
-        return Source(self.url, self._cache_dir, self.version, self._refresh, self._sha256)
+        return Source(self.url, self._cache_dir, self.version, self._refresh, self._sha256, self.release)
 
     @property
     def genes(self) -> GeneIndex:
@@ -342,7 +423,7 @@ class Catalog:
             String facets compare a value against that column of the whole catalog first. A value that is
             not there resolves through aliases: case, spaces, hyphens and underscores are ignored, and a
             ``technology`` value may be an ``assay`` display value (``technology="10x Xenium"`` keeps
-            ``"Xenium"``). A value that still does not resolve raises ``ValueError`` with a "did you mean"
+            ``"10x_xenium"``) or the id without its vendor prefix (``technology="Visium"`` keeps ``"10x_visium"``). A value that still does not resolve raises ``ValueError`` with a "did you mean"
             hint. A known value that matches nothing after the other filters gives an empty cohort.
             ``hne_image`` and ``if_image`` take True or False. Null means unknown and matches neither.
             ``source`` is derived on load as the lowercased ``study_id`` prefix before ``":"``; rows
@@ -487,7 +568,7 @@ class Catalog:
                 raise KeyError(f"canonical_key {uid!r} matches several uids: {sorted(hit['uid'])}; pass the full uid")
         if hit.empty:
             raise KeyError(f"uid not in catalog: {uid!r}")
-        return Dataset(hit.iloc[0])
+        return Dataset(hit.iloc[0], self._source())
 
     def collection(self, slug: str) -> SpatialDataCohort:
         """The members of one collection as a cohort, by its slug (the last part of its web page URL).

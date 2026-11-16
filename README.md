@@ -7,10 +7,10 @@ Lean read client for the spatialdata-db spatial-omics collection: query the cata
 ## Install
 
 ```bash
-pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.3"
+pip install "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client@v0.1.4"
 ```
 
-This installs the alpha release, v0.1.3. The `main` branch may be ahead of it, and you get the newest code if you leave out `@v0.1.3`.
+This installs the alpha release, v0.1.4. The `main` branch may be ahead of it, and you get the newest code if you leave out `@v0.1.4`.
 
 ## Usage
 
@@ -33,6 +33,8 @@ cat.query(organism="human")
 ```
 
 `from_file` accepts absolute or relative paths and `file://` URLs, and validates the file against the catalog schema.
+
+Catalog schema version: the client loads any catalog up to schema version `3`; a catalog cut under a newer schema is refused with a clear error asking you to upgrade (`pip install -U "spatialdata-db @ git+https://github.com/theislab/spatialdata-db-client"`; the distribution is `spatialdata-db`, not on PyPI). A legacy catalog that declares no version loads unchanged.
 
 Remote datasets: query the catalog, inspect with `elements()` (no download), or load it with `to_sdata()` (copies the store to the cache). Lazy/partial remote open is not supported yet (spatialdata upstream limitation); local stores open lazily.
 

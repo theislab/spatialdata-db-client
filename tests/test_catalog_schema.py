@@ -138,6 +138,12 @@ def test_new_producer_columns_present_and_typed():
     assert "database_version" not in cs.FACETS
 
 
+def test_low_obs_column_present_and_typed():
+    # low_obs: a nullable boolean low-N review flag the cut computes from n_obs (< 100).
+    assert cs.CATALOG_COLUMNS["low_obs"] == "boolean"
+    assert "low_obs" not in cs.REQUIRED_COLUMNS
+
+
 def test_new_producer_columns_validate_populated_and_null(tmp_path):
     df = make_fixture_catalog()
     df["donor_id"] = ["donor-1"] * len(df)
@@ -215,6 +221,28 @@ def test_obs_unit_and_segmentation_columns_present():
         "same_section_group",
         "same_section_relation",
         "same_section_release",
+        "observation_unit",
+        "observation_unit_source",
+    ):
+        assert schema.CATALOG_COLUMNS[col] == "string"
+        assert col not in schema.REQUIRED_COLUMNS
+    assert schema.CATALOG_COLUMNS["unit_size_um"] == "Float64"
+
+
+def test_facet_hierarchy_columns_present():
+    # tissue_system/organ + disease_class/group (+ UBERON/MONDO ids) the cut computes from the pinned
+    # ontology node graphs + anchor tables; nullable strings, not required.
+    from sddb import _catalog_schema as schema
+
+    for col in (
+        "tissue_system",
+        "tissue_system_id",
+        "tissue_organ",
+        "tissue_organ_id",
+        "disease_class",
+        "disease_class_id",
+        "disease_group",
+        "disease_group_id",
     ):
         assert schema.CATALOG_COLUMNS[col] == "string"
         assert col not in schema.REQUIRED_COLUMNS

@@ -68,7 +68,7 @@ def test_query_bad_validation(cat_url):
 def test_viewer_url(cat_url):
     r = runner.invoke(app, ["viewer-url", "uid0001", "--catalog", cat_url])
     assert r.exit_code == 0
-    assert r.output.strip().startswith("https://vitessce.io/?url=https://lamin.ai/storage/s3/")
+    assert r.output.strip().startswith("https://vitessce.io/?url=https://aws.eu-central-1.lamin.ai/storage/s3/")
     assert runner.invoke(app, ["viewer-url", "nope", "--catalog", cat_url]).exit_code == 1
 
 

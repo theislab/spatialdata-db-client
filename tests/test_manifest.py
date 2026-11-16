@@ -118,3 +118,13 @@ def test_plan_sizes_local_store(tmp_path):
     assert len(sizes) == 1
     assert sizes[0][0] == "uidX"
     assert sizes[0][1] > 0
+
+
+def test_unpinned_download_records_the_release_without_pinning(tmp_path, cohort):
+    """catalog_release is written from an unpinned catalog, and a rerun after a new release still works."""
+    d = tmp_path / "out"
+    SpatialDataCohort(cohort.members, source=Source(release="2026-11-01")).download(d)
+    m = Manifest.read(d / "manifest.json")
+    assert (m.catalog_version, m.catalog_release) == (None, "2026-11-01")
+    SpatialDataCohort(cohort.members, source=Source(release="2026-11-08")).download(d)  # no ManifestVersionMismatch
+    assert Manifest.read(d / "manifest.json").catalog_release == "2026-11-08"

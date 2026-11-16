@@ -14,7 +14,6 @@ CATALOG_COLUMNS: dict[str, str] = {
     "canonical_key": "string",
     "study_id": "string",
     "collection_name": "string",
-    "issue_url": "string",
     # biology
     "organism": "string",
     "organism_id": "string",
@@ -23,10 +22,25 @@ CATALOG_COLUMNS: dict[str, str] = {
     "disease": "string",
     "disease_id": "string",
     "development_stage": "string",
+    # Facet hierarchy, computed at the cut from the pinned UBERON/MONDO node graphs + the hub's ordered
+    # anchor tables (first anchor by id over the term + its ancestors wins; self-anchor is its own organ).
+    # Unmapped tissue -> system "other tissues"; unmapped disease -> "other conditions"; unknown stays null.
+    "tissue_system": "string",
+    "tissue_system_id": "string",
+    "tissue_organ": "string",
+    "tissue_organ_id": "string",
+    "disease_class": "string",
+    "disease_class_id": "string",
+    "disease_group": "string",
+    "disease_group_id": "string",
     # technology
+    # From schema 3: ``technology`` is the vocabulary id (e.g. "10x_visium"), ``vendor`` its vendor id (required in a
+    # schema-3 catalog) and ``variant`` one of the technology's variant ids or null; labels are in technology.json.
+    # ``assay`` stays as the legacy label.
     "technology": "string",
+    "vendor": "string",
+    "variant": "string",
     "assay": "string",
-    "technology_version": "string",
     "panel_size": "Int64",
     # validation
     "validation_status": "string",
@@ -37,6 +51,7 @@ CATALOG_COLUMNS: dict[str, str] = {
     "license_noncommercial": "boolean",
     "license_redistributable": "boolean",
     "license_unknown": "boolean",
+    "non_integer_counts": "boolean",
     # headline stats
     "n_obs": "Int64",
     "n_features": "Int64",
@@ -47,15 +62,36 @@ CATALOG_COLUMNS: dict[str, str] = {
     "vitessce_url": "string",
     "size_bytes": "Int64",
     # provenance
-    "container_tag": "string",
-    "sddb_version": "string",
     "published_at": "string",
     # presentation / curation superset — consumed by the website build; the pip
     # client carries them through to_df() but does not require them. chemistry_version
-    # (reagent-kit version) is a SEPARATE attribute from technology_version above.
+    # below is the reagent-kit version (a distinct attribute).
     "slug": "string",
     "title": "string",
     "pathological": "boolean",
+    # True when the primary table has < 100 observations (spots/cells/bins) — a low-N review flag
+    # (null when n_obs is unknown). Computed by the cut from n_obs, not a per-dataset stored field.
+    "low_obs": "boolean",
+    # "under_review" when the dataset is live but flagged for a substantive metadata-correctness
+    # question (disease/tissue/organism/panel/TMA/relabel/…); null otherwise. Derived by the cut from
+    # the candidate's current review reasons (a frozen rule), so clearing the reason drops the marker at
+    # the next cut. review_reason carries the human-readable reason text. Bare needs_review flags and
+    # provenance-only notes get no marker.
+    "review_status": "string",
+    "review_reason": "string",
+    # the same reasons as a list (empty when none): one reason can itself contain "; " (hub #535)
+    "review_reasons": "list[string]",
+    # each reason's user-facing class description (curation tools/review_reason_classes.tsv), same order; optional
+    "review_classes": "list[string]",
+    # 10x run metrics from the deposit's summary (Atera / Xenium; hub publish/atera_metadata.py
+    # EXTRA_CATALOG_COLUMNS, in releases since catalog-2026-11-12); null for other technologies
+    "n_cells": "Int64",
+    "median_transcripts_per_cell": "Float64",
+    "median_genes_per_cell": "Float64",
+    "decoded_transcripts": "Int64",
+    "imaged_area": "Float64",  # imaged region area in µm²
+    "onboard_version": "string",
+    "panel": "string",
     "product": "string",
     "modality": "string",
     # All modalities present in the dataset (multimodal); scalar `modality` kept for back-compat.
@@ -77,6 +113,8 @@ CATALOG_COLUMNS: dict[str, str] = {
     "n_transcripts": "Int64",
     # Visium HD capture-area size ("6.5 mm" / "11 mm"); fixes the bin grid (838² vs 1381² at 8 µm).
     "capture_area": "string",
+    # the source release date (when the repository made the data public), NOT the paper's date: cite with
+    # publication_year (docs/reference/catalog-columns.md "Dates"); the name stays until a schema bump
     "publication_date": "string",
     # Publication verification (set by the engine's publication-verification gate): the resolved
     # paper identifiers + the verify status (verified / provisional / no_associated_publication).
@@ -91,7 +129,6 @@ CATALOG_COLUMNS: dict[str, str] = {
     "disease_details": "string",
     "default_table": "string",
     "dataset_url": "string",
-    "thumbnail_url": "string",
     "collections": "list[string]",
     # Per-sample study / condition metadata (optional; null when the source has none).
     "sample_title": "string",
@@ -105,6 +142,12 @@ CATALOG_COLUMNS: dict[str, str] = {
     # segmented them: depositor / vendor / spatialdata-db (null without cells). segmentation_method is set
     # only for spatialdata-db segmentation, e.g. "Cellpose-SAM (cellpose 4.2.1, cpsam)".
     "obs_unit": "string",
+    # The same in spatialdata-io's vocabulary (spot_or_bin / cell / subcellular_bin / region), the spot diameter or
+    # bin side in µm (null for cells and when unknown), and where they came from: "table" (the reader's
+    # uns["spatialdata_io"]) or "technology_map" (zarrs written before the reader recorded them).
+    "observation_unit": "string",
+    "unit_size_um": "Float64",
+    "observation_unit_source": "string",
     "segmentation_source": "string",
     "segmentation_method": "string",
     # Re-releases of one 10x library (curation's source_metadata.same_section): group id (newest member),
@@ -165,9 +208,16 @@ FACETS: tuple[str, ...] = (
     "doi",
     "organism",
     "tissue",
+    # Ontology roll-ups the hub cut writes: each row has its anchor, so equality includes everything under it.
+    "tissue_system",
+    "tissue_organ",
     "disease",
+    "disease_class",
+    "disease_group",
     "development_stage",
     "technology",
+    "vendor",
+    "variant",
     "assay",
     "modalities",
     "tier",
@@ -182,6 +232,12 @@ FACETS: tuple[str, ...] = (
     "magnification",
     "collections",
 )
+
+# The newest catalog schema version this client understands. A catalog that declares a higher
+# ``catalog_schema_version`` (in release_info.json / the parquet metadata) is refused on load; a
+# catalog that declares none is a legacy (<= 2) catalog and loads. Bump when the client learns a
+# new schema's columns.
+SUPPORTED_CATALOG_SCHEMA = 3
 
 # Columns the client derives on load (not in the published parquet): ``source`` is the lowercased
 # ``study_id`` prefix before ":" (geo, hest, 10x, ...), null for rows without a study_id.
