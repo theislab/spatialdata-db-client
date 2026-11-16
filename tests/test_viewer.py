@@ -11,7 +11,7 @@ from sddb.cohort import SpatialDataCohort
 def test_viewer_url():
     d = SpatialDataCohort(make_fixture_catalog())[0]
     assert d.viewer_url() == (
-        "https://vitessce.io/?url=https://lamin.ai/storage/s3/scverse-spatial-eu-central-1/.lamindb/uid0001_vitessce.json"
+        "https://vitessce.io/?url=https://aws.eu-central-1.lamin.ai/storage/s3/scverse-spatial-eu-central-1/.lamindb/uid0001_vitessce.json"
     )
 
 
@@ -44,7 +44,7 @@ def _link(store_id, times=2):
     """A published-style viewer link whose data: config names ``store_id``, URL-encoded ``times`` times."""
     from urllib.parse import quote
 
-    config = f'{{"datasets": [{{"files": [{{"url": "https://lamin.ai/storage/s3/b/.lamindb/{store_id}.zarr"}}]}}]}}'
+    config = f'{{"datasets": [{{"files": [{{"url": "https://aws.eu-central-1.lamin.ai/storage/s3/b/.lamindb/{store_id}.zarr"}}]}}]}}'
     for _ in range(times):
         config = quote(config, safe="")
     return "https://vitessce.io#?edit=false&url=data:," + config

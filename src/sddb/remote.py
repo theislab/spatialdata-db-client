@@ -36,7 +36,7 @@ def storage_options(url: str) -> dict[str, Any]:
     return {"anon": True} if url.startswith("s3://") else {}
 
 
-_PROXY = "https://lamin.ai/storage/s3/"
+_PROXY = "https://aws.eu-central-1.lamin.ai/storage/s3/"
 
 
 def proxy_url(url: str) -> str:

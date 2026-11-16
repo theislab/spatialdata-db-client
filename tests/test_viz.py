@@ -50,7 +50,7 @@ def test_view_interactive_config(monkeypatch):
     monkeypatch.setattr(viz, "render_config", fake)
     ds = Dataset(make_fixture_catalog().iloc[0])
     assert isinstance(ds.view_interactive(mode="config"), VitessceConfig)
-    assert seen[0].startswith("https://lamin.ai/storage/s3/")
+    assert seen[0].startswith("https://aws.eu-central-1.lamin.ai/storage/s3/")
     with pytest.raises(ValueError, match="mode"):
         ds.view_interactive(mode="bogus")
 
