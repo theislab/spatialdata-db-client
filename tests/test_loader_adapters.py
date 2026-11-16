@@ -683,7 +683,7 @@ def _rasterized(img, role="he", **kwargs):
 @pytest.mark.parametrize(
     ("img", "found"),
     [
-        (np.zeros((4, 16, 16), np.uint8), "4 channels of uint8"),  # an IF slide with hne_image, RGBA-shaped
+        (np.zeros((4, 16, 16), np.uint16), "4 channels of uint16"),  # 4-channel IF with hne_image (g5Hv...)
         (np.zeros((3, 16, 16), np.uint16), "3 channels of uint16"),  # 3-channel IF (CytAssist, HD)
         (np.zeros((1, 16, 16), np.uint8), "1 channels of uint8"),
         (np.zeros((3, 16, 16), np.float32), "3 channels of float32"),
@@ -696,6 +696,22 @@ def test_he_role_needs_three_channels_of_uint8(img, found):
     ):
         item_of(sdata)
     item_of(sdata, role="if")  # the same image is accepted as IF
+
+
+def test_he_role_drops_a_constant_alpha_only():
+    rgb = he_image(16, 16, seed=3)
+    item = item_of(make_sdata(np.concatenate([rgb, np.full((1, 16, 16), 255, np.uint8)]), shapes=squares([(8, 8)], 4)))
+    assert item.he_alpha_dropped == 255
+    assert item.image.sizes["c"] == 3
+    np.testing.assert_array_equal(Rasterize(None).build(item).image.values, rgb)
+    assert item_of(make_sdata(rgb, shapes=squares([(8, 8)], 4))).he_alpha_dropped is None
+
+    alpha = np.full((1, 16, 16), 255, np.uint8)
+    alpha[0, 0, 0] = 254
+    with pytest.raises(
+        ValueError, match=r"uid0001: .* the alpha of 'he' ranges from 254 to 255 on a downsampled level"
+    ):
+        item_of(make_sdata(np.concatenate([rgb, alpha]), shapes=squares([(8, 8)], 4)))
 
 
 def test_dtype_float_if_needs_value_range():

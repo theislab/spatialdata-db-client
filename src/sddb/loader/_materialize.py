@@ -867,6 +867,7 @@ def _write(group: Any, key: str, item: LoaderItem, plan: Mapping[str, Any]) -> N
         n_features_filled=int((~present).sum()),
         mpp_source=plan["members"][item.uid].get("mpp_source"),
         totals=True,
+        he_alpha_dropped=item.he_alpha_dropped,
     )
     target = item.grid == "target"
     entry = SpatialEntry.model_validate(

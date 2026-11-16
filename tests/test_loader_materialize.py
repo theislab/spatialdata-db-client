@@ -60,13 +60,17 @@ class FakeCohort(list):
     _source = SimpleNamespace(release="2026-11-01")
 
 
-def write_member(tmp_path, uid, *, seed, extra_gene=False, tiny=False, labels=False, dup_id=False, pixel_size=None):
+def write_member(
+    tmp_path, uid, *, seed, extra_gene=False, tiny=False, labels=False, dup_id=False, pixel_size=None, alpha=None
+):
     """A member store: H&E tissue disc, square cells, a table keyed by symbol with Ensembl ids and controls.
 
     `dup_id` adds a Gene Expression row ``GENE1B`` with GENE1's Ensembl id. `pixel_size` is recorded in the store's
     attrs as spatialdata-io's Atera reader does (microns per ``global`` unit; the image is the identity onto it).
+    `alpha` (``(SIZE, SIZE)`` uint8) stores the H&E as RGBA; the returned image is the RGB part.
     """
     img = he_image(SIZE, SIZE, seed=seed, disk=(SIZE / 2, SIZE / 2, SIZE * 0.4))
+    rgb, img = img, img if alpha is None else np.concatenate([img, alpha[None]])
     xy = [(x, y) for x in range(20, 80, 12) for y in range(20, 80, 12)]
     shapes = squares(xy, 6)
     if tiny:  # a cell between the squares that covers no pixel centre, on the source grid or the written one
@@ -102,7 +106,7 @@ def write_member(tmp_path, uid, *, seed, extra_gene=False, tiny=False, labels=Fa
         sdata.attrs["pixel_size"] = pixel_size
     path = tmp_path / f"{uid}.zarr"
     sdata.write(path)
-    return path, img, counts, var
+    return path, rgb, counts, var
 
 
 @pytest.fixture
@@ -910,6 +914,16 @@ def test_mpp_source_needs_an_mpp():
         DatasetContract.model_validate({**base, "mpp_source": "guessed"})
 
 
+def test_he_alpha_dropped_is_an_he_alpha():
+    base = _contract_dict()
+    assert DatasetContract.model_validate({**base, "he_alpha_dropped": 255}).he_alpha_dropped == 255
+    assert DatasetContract.model_validate(base).he_alpha_dropped is None  # a dataset written before the field
+    with pytest.raises(ValueError, match="he_alpha_dropped requires role 'he'"):
+        DatasetContract.model_validate({**base, "role": "if", "channels": ["DAPI"], "he_alpha_dropped": 255})
+    with pytest.raises(ValueError, match="he_alpha_dropped"):
+        DatasetContract.model_validate({**base, "he_alpha_dropped": 256})
+
+
 def _contract_dict():
     return {
         "version": "0.1.0",
@@ -956,6 +970,25 @@ def test_stores_open_a_local_store_under_the_catalog_record(tmp_path):
             mpp_native={"uidA": 0.25},
             stores={"uidZ": path},
         )
+
+
+# -- an RGBA H&E: a constant alpha is dropped and recorded, any other alpha raises -----------------------------------
+
+
+def test_rgba_he_with_a_constant_alpha_is_written_as_rgb(tmp_path):
+    path, rgb, _, _ = write_member(tmp_path, "uidA", seed=0, alpha=np.full((SIZE, SIZE), 255, np.uint8))
+    kwargs = {"adapters": [Rasterize(0.25), Centroids()], "role": "he", "roles": ROLES, "mpp_native": {"uidA": 0.25}}
+    dest = materialize(FakeCohort([FakeMember("uidA", path)]), tmp_path / "c.zarr", **kwargs)
+    assert _contract(dest, "dataset_0").he_alpha_dropped == 255
+    np.testing.assert_array_equal(zarr.open_group(dest, mode="r")["dataset_0"]["images"]["he"][...], rgb)
+    assert validate(dest) == []
+
+    alpha = np.full((SIZE, SIZE), 255, np.uint8)
+    alpha[:8, :8] = 0  # a transparent corner: not a constant alpha, so not an H&E the loader can take as RGB
+    path, *_ = write_member(tmp_path / "varying", "uidA", seed=0, alpha=alpha)
+    with pytest.raises(ValueError, match=r"uidA: .* the alpha of 'he' ranges from 0 to 255 on a downsampled level"):
+        materialize(FakeCohort([FakeMember("uidA", path)]), tmp_path / "d.zarr", **kwargs)
+    assert not (tmp_path / "d.zarr").exists()
 
 
 class _RemoteMember(FakeMember):

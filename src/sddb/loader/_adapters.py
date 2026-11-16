@@ -94,8 +94,8 @@ class Rasterize(_Adapter):
 
     The image is resampled (order 1) from the coarsest multiscale level whose mpp is still at most `mpp`, and
     converted to the role's dtype by a rule recorded in ``item.dtype_rule`` (see `value_range`). An H&E source is
-    already 3-channel uint8 (:meth:`LoaderItem.from_sdata` refuses anything else), so only an IF source is converted
-    to uint16. Outside the image's footprint the written image is glass (255) for H&E and 0 for IF. Existing labels
+    already 3-channel uint8 (:meth:`LoaderItem.from_sdata` drops a constant alpha and refuses anything else), so only
+    an IF source is converted to uint16. Outside the image's footprint the written image is glass (255) for H&E and 0 for IF. Existing labels
     are resampled with order 0; otherwise the shapes the table annotates are rasterised once, filled, with each
     row's ``obs["label_id"]``, one tile of ``tile x tile`` pixels at a time.
 

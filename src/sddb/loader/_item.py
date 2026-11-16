@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+import dask.array as da
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -59,7 +61,8 @@ class LoaderItem:
     uid, study_id
         The catalog member.
     role
-        ``"he"`` or ``"if"``. An ``"he"`` image is 3-channel (RGB) uint8.
+        ``"he"`` or ``"if"``. An ``"he"`` image is 3-channel (RGB) uint8; an RGBA uint8 source with a constant alpha
+        loses the alpha (`he_alpha_dropped`).
     table
         The cells, one row per cell of the annotated element. ``obs["label_id"]`` holds each row's value in
         ``labels["cells"]`` (see :meth:`from_sdata`); :class:`~sddb.loader.Centroids` adds ``obsm["spatial"]``.
@@ -115,6 +118,8 @@ class LoaderItem:
         The tissue mask on `source_coarse`, set by :class:`~sddb.loader.TissueMask`.
     label_rule
         Where ``obs["label_id"]`` came from (see :meth:`from_sdata`).
+    he_alpha_dropped
+        For an RGBA H&E source, the constant alpha value that :meth:`from_sdata` dropped, ``None`` otherwise.
     """
 
     uid: str
@@ -142,6 +147,7 @@ class LoaderItem:
     image_footprint: np.ndarray | None = field(default=None, repr=False)
     n_outside_image: int = 0
     label_rule: str = ""
+    he_alpha_dropped: int | None = None
     source_coarse: Any = field(default=None, repr=False)
     source_tissue: np.ndarray | None = field(default=None, repr=False)
     source: _Source | None = field(default=None, repr=False)
@@ -199,8 +205,9 @@ class LoaderItem:
         ValueError
             If a role is unknown or names the wrong kind of element, the table does not annotate exactly one
             labels or shapes element, the image and the cells share no coordinate system, the label ids cannot
-            be inferred or are invalid, or `role` is ``"he"`` and the image is not 3 channels of uint8 (an IF slide
-            the catalog marks with ``hne_image``, for example).
+            be inferred or are invalid, or `role` is ``"he"`` and the image is neither 3 channels of uint8 (an IF slide
+            the catalog marks with ``hne_image``, for example) nor 4 of uint8 whose alpha is constant on a downsampled
+            level.
         """
         import anndata as ad
         from spatialdata.models import get_table_keys
@@ -265,8 +272,9 @@ class LoaderItem:
             table_centroids = np.asarray(source_table.obsm["spatial"], dtype=np.float64)[:, :2]
         annotated_el = sdata.labels[region] if region in sdata.labels else sdata.shapes[region]
         levels = _levels(image_el)
-        if role == "he":
-            _check_he(levels[0], uid, names["image"])
+        he_alpha = _check_he(levels, uid, names["image"]) if role == "he" else None
+        if he_alpha is not None:
+            levels = [lv.isel(c=slice(0, 3)) for lv in levels]
         channels = [str(c) for c in levels[0].coords["c"].values] if role == "if" else None
         cells = _levels(cells_el)[0] if cells_kind == "labels" else cells_el
         source = _Source(
@@ -296,19 +304,39 @@ class LoaderItem:
             channels=channels,
             label_rule=rule,
             source=source,
+            he_alpha_dropped=he_alpha,
         )
 
 
-def _check_he(image: xr.DataArray, uid: str, name: str) -> None:
-    """Raise unless `image` is an H&E: 3 channels (RGB) of uint8. Reads only its metadata."""
-    n, dtype = image.sizes.get("c", 1), np.dtype(image.dtype)
-    if n != 3 or dtype != np.uint8:
+def _check_he(levels: list[xr.DataArray], uid: str, name: str) -> int | None:
+    """Raise unless the image is an H&E: 3 channels (RGB) of uint8, or 4 (RGBA) of uint8 with a constant alpha.
+
+    Reads the metadata of scale 0, and for RGBA the alpha of a downsampled level (the coarsest, at most
+    `_ALPHA_SIDE` pixels a side). Returns that alpha value for RGBA, ``None`` for RGB.
+    """
+    n, dtype = levels[0].sizes.get("c", 1), np.dtype(levels[0].dtype)
+    if dtype == np.uint8 and n == 3:
+        return None
+    if dtype == np.uint8 and n == 4:
+        coarse = levels[-1]
+        step = max(1, math.ceil(max(coarse.sizes["y"], coarse.sizes["x"]) / _ALPHA_SIDE))
+        alpha = coarse.isel(c=3, y=slice(None, None, step), x=slice(None, None, step)).data
+        lo, hi = (int(v) for v in da.compute(alpha.min(), alpha.max()))
+        if lo == hi:
+            return lo
         raise ValueError(
-            f"{uid}: role 'he' needs a 3-channel (RGB) uint8 image, but {name!r} has {n} channels of {dtype}. A "
-            "fluorescence image is not an H&E, even where the catalog's hne_image says so: pass role='if', or "
-            "roles={'image': ...} naming the member's H&E image"
+            f"{uid}: role 'he' needs a 3-channel (RGB) uint8 image, or an RGBA one with a constant alpha, but the "
+            f"alpha of {name!r} ranges from {lo} to {hi} on a downsampled level. Pass role='if', or roles={{'image': "
+            "...}} naming the member's H&E image"
         )
+    raise ValueError(
+        f"{uid}: role 'he' needs a 3-channel (RGB) uint8 image, but {name!r} has {n} channels of {dtype}. A "
+        "fluorescence image is not an H&E, even where the catalog's hne_image says so: pass role='if', or "
+        "roles={'image': ...} naming the member's H&E image"
+    )
 
+
+_ALPHA_SIDE = 1024  # longest side of the level read for the RGBA alpha check
 
 _CHECK_ROWS = 200  # rows sampled to check that obs["label_id"] holds the labels' values
 _CHECK_SHARE = 0.95  # share that must match; a concave cell's centroid can lie outside its own label

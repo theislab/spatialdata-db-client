@@ -73,6 +73,9 @@ class DatasetContract(BaseModel):
         ``mpp``, which agrees with the pixel size the store records), ``"catalog_unchecked"`` (the catalog's, from a
         store that records none), ``"store_pitch_fit"`` (fitted on the Visium array pitch of the store's own spots,
         not the catalog's). ``None`` when `mpp_native` is unknown, or for a dataset written before the field.
+    he_alpha_dropped
+        For role ``"he"`` from an RGBA uint8 source, the alpha value that was dropped: it was constant on a
+        downsampled level of the source. ``None`` for an RGB source, an IF dataset, or one written before the field.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -98,6 +101,7 @@ class DatasetContract(BaseModel):
     n_features_filled: StrictInt = Field(default=0, ge=0)
     totals: bool = False
     mpp_source: Literal["given", "catalog_checked_store", "catalog_unchecked", "store_pitch_fit"] | None = None
+    he_alpha_dropped: StrictInt | None = Field(default=None, ge=0, le=255)
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
@@ -111,6 +115,8 @@ class DatasetContract(BaseModel):
             raise ValueError("role 'if' requires channels")
         if self.mpp_source is not None and self.mpp_native is None:
             raise ValueError("mpp_source is set but mpp_native is unknown")
+        if self.he_alpha_dropped is not None and self.role != "he":
+            raise ValueError("he_alpha_dropped requires role 'he'")
         return self
 
     def to_uns(self) -> dict[str, Any]:

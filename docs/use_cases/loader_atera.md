@@ -122,9 +122,12 @@ same values.
 
 With `role="he"` every member's image must be 3 channels of uint8. A few IF slides carry `hne_image` in the catalog,
 and for those `materialize` stops before it writes anything, with
-`ValueError: <uid>: role 'he' needs a 3-channel (RGB) uint8 image, but '<image>' has 4 channels of uint8`, or
-`3 channels of uint16`. Pass `role="if"` for them, or leave them out of an H&E cohort. An RGBA H&E (4 channels of
-uint8) is refused the same way.
+`ValueError: <uid>: role 'he' needs a 3-channel (RGB) uint8 image, but '<image>' has 4 channels of uint16`, or
+`3 channels of uint16`. Pass `role="if"` for them, or leave them out of an H&E cohort. Some Visium stores of release
+2026-11-12 hold their H&E as RGBA (4 channels of uint8). `materialize` reads the alpha of a downsampled level: when
+it is constant, the alpha is dropped and its value recorded in the contract (`he_alpha_dropped`); otherwise it
+raises. An IF image saved as RGBA with a constant alpha passes this check, so look at the images of a cohort before
+you train on it.
 
 Each dataset also gets `obs["total_counts"]` (the sum over the Gene Expression features), and `var["mean_counts"]`
 and `var["var_counts"]` (the mean and the variance with `n - 1` degrees of freedom over its cells), flagged by
