@@ -90,6 +90,7 @@ def _open(config: Mapping[str, Any], uid: str) -> LoaderItem:
         role=config["role"],
         roles=config["roles"],
         mpp_native=m["mpp_native"],
+        include_out_of_tissue=config["include_out_of_tissue"],
     )
     return _rekey(item, config["genes"], config["var"])
 

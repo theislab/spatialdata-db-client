@@ -20,7 +20,7 @@ import pandas as pd
 import xarray as xr
 
 from sddb.contract import AdapterRecord
-from sddb.loader._item import LoaderItem
+from sddb.loader._item import IN_TISSUE_RECORD, LoaderItem
 
 if TYPE_CHECKING:
     from squidpy.experimental.im import StainFit
@@ -708,7 +708,9 @@ class TissueMask(_Adapter):
     int32 array per slide. squidpy downscales further above ``auto_max_pixels`` itself. The mask, at that level, is
     kept on the item for :class:`StainNormalize` and resampled (order 0, the affine :class:`Rasterize` used for the
     image) onto the written grid as ``labels["tissue"]`` (uint8, 1 = tissue, 0 off the image).
-    ``obs["in_tissue"]`` is the mask at each cell's centroid, so the step runs after :class:`Centroids`.
+    ``obs["in_tissue"]`` is the mask at each cell's centroid, so the step runs after :class:`Centroids`. A source
+    ``obs["in_tissue"]`` (e.g. Space Ranger's, by which :meth:`~sddb.loader.LoaderItem.from_sdata` filters the rows)
+    is kept as ``obs["in_tissue_source"]``.
 
     The default is squidpy's ``"weka"`` method (a random forest trained on corner pixels as glass and the pixels
     least like them as tissue, squidpy ``_detect_tissue.py`` ``_segment_weka``) with ``method_params={"rng": 0}``,
@@ -736,7 +738,8 @@ class TissueMask(_Adapter):
 
     name = "TissueMask"
     # 0.2.0: squidpy runs on the source's coarsest level instead of an overview of the written grid
-    version: ClassVar[str] = "0.2.0"
+    # 0.3.0: a source obs["in_tissue"] is kept as obs["in_tissue_source"] instead of being overwritten
+    version: ClassVar[str] = "0.3.0"
     _RESERVED: ClassVar[set[str]] = {"image_key", "scale", "inplace", "new_labels_key"}
 
     def __init__(self, **detect_tissue_kwargs: Any) -> None:
@@ -769,7 +772,7 @@ class TissueMask(_Adapter):
         return issues
 
     def build(self, sdata: LoaderItem) -> LoaderItem:
-        """Return the item with ``labels["tissue"]`` and ``obs["in_tissue"]``."""
+        """Return the item with ``labels["tissue"]`` and ``obs["in_tissue"]`` (a source one as ``in_tissue_source``)."""
         import spatialdata as sd
         from spatialdata.models import Image2DModel
         from squidpy.experimental.im import detect_tissue
@@ -797,7 +800,9 @@ class TissueMask(_Adapter):
         in_tissue = tissue.vindex[py, px].compute() > 0 if len(xy) else np.zeros(0, bool)
         if "outside_image" in item.table.obs:  # off the image, so not on its tissue
             in_tissue &= ~item.table.obs["outside_image"].to_numpy(dtype=bool)
-        table = _with_obs(item.table, in_tissue=np.asarray(in_tissue, dtype=bool))
+        # the source's own obs["in_tissue"] (e.g. Space Ranger's) is kept under a new name, not overwritten
+        own = {"in_tissue_source": item.table.obs["in_tissue"]} if "in_tissue" in item.table.obs else {}
+        table = _with_obs(item.table, **own, in_tissue=np.asarray(in_tissue, dtype=bool))
         return self._done(
             item,
             table=table,
@@ -977,8 +982,9 @@ def _reference_dict(ref: StainFit) -> dict[str, Any]:
 ADAPTERS: dict[str, type[_Adapter]] = {a.name: a for a in (Rasterize, Centroids, TissueMask, StainNormalize)}
 GENE_KEY = "GeneKey"
 #: Records that :func:`~sddb.loader.materialize` writes for its own steps, not for an adapter, so they are not rebuilt
-#: by :func:`adapter_from_record`: ``GeneKey`` is the re-keying of var to the shared Ensembl index.
-MATERIALIZE_RECORDS = (GENE_KEY,)
+#: by :func:`adapter_from_record`: ``GeneKey`` is the re-keying of var to the shared Ensembl index, ``InTissue`` the
+#: row filter on the source's ``obs["in_tissue"]`` (:meth:`~sddb.loader.LoaderItem.from_sdata`).
+MATERIALIZE_RECORDS = (GENE_KEY, IN_TISSUE_RECORD)
 
 
 def adapter_from_record(rec: AdapterRecord) -> _Adapter:

@@ -203,6 +203,23 @@ def test_n_transcripts_column_present():
     assert "n_transcripts" in schema.RANGE_COLUMNS
 
 
+def test_n_obs_in_tissue_column_present_and_rangeable(tmp_path):
+    from sddb import Catalog
+    from sddb import _catalog_schema as schema
+
+    assert schema.CATALOG_COLUMNS["n_obs_in_tissue"] == "Int64"
+    assert "n_obs_in_tissue" not in schema.REQUIRED_COLUMNS
+    assert "n_obs_in_tissue" in schema.RANGE_COLUMNS
+    df = make_fixture_catalog()
+    df["n_obs_in_tissue"] = pd.array([46_971] + [None] * (len(df) - 1), dtype="Int64")
+    df.to_parquet(tmp_path / "catalog.parquet")
+    cat = Catalog.from_file(tmp_path / "catalog.parquet")
+    assert len(cat.query(n_obs_in_tissue__gte=40_000)) == 1
+    old = make_fixture_catalog().drop(columns="n_obs_in_tissue")  # a release without the column still loads
+    old.to_parquet(tmp_path / "old.parquet")
+    assert len(Catalog.from_file(tmp_path / "old.parquet").to_df()) == len(old)
+
+
 def test_capture_area_column_present():
     from sddb import _catalog_schema as schema
 

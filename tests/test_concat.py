@@ -464,3 +464,94 @@ def test_spatial_labels_region_counts_as_no_source(tmp_path):
     with pytest.warns(UserWarning, match=r"'l' \(no obsm\['spatial'\] and region 'seg' is a labels element\)"):
         adata = concat_tables(_one(str(tmp_path / "l.zarr"), "l"))
     assert "spatial" not in adata.obsm
+
+
+# -- in_tissue ---------------------------------------------------------------------------------------------------------
+
+
+def _tissue_store(path, in_tissue):
+    """A table whose ``X`` (sparse) row ``i`` is ``[3i, 3i + 1, 3i + 2]`` and whose ``obs["in_tissue"]`` is given."""
+    import scipy.sparse as sp
+
+    n = len(in_tissue)
+    obs = pd.DataFrame({"in_tissue": in_tissue}, index=[f"c{i}" for i in range(n)])
+    X = sp.csr_matrix(np.arange(n * 3, dtype="float32").reshape(n, 3))
+    SpatialData(tables={"table": ad.AnnData(X=X, obs=obs)}).write(path)
+    return str(path)
+
+
+@pytest.mark.parametrize(
+    "values", [[True, False, True, False], [1, 0, 1, 0], ["1", "0", "1", "0"]], ids=["bool", "int", "str"]
+)
+def test_to_anndata_keeps_in_tissue_rows_and_records_the_filter(tmp_path, values):
+    import scipy.sparse as sp
+
+    members = pd.DataFrame(
+        {"uid": ["a", "b"], "zarr_url": [_tissue_store(tmp_path / "a.zarr", values), _store(tmp_path / "b.zarr", 3)]}
+    )
+    adata = concat_tables(members)
+    assert adata.obs["uid"].value_counts().to_dict() == {"b": 3, "a": 2}  # b has no column: all its rows stay
+    a = adata[adata.obs["uid"] == "a"]
+    assert list(a.obs_names) == ["c0-a", "c2-a"]
+    assert sp.issparse(adata.X)
+    np.testing.assert_array_equal(a.X.toarray(), [[0, 1, 2], [6, 7, 8]])
+    assert adata.uns["sddb"] == {
+        "in_tissue_filter": {"kept": 2, "dropped": 2, "by_uid": {"a": {"kept": 2, "dropped": 2}}}
+    }
+
+
+def test_to_anndata_include_out_of_tissue_keeps_all_rows(tmp_path):
+    from sddb.cohort import SpatialDataCohort
+
+    df = pd.DataFrame({"uid": ["a"], "zarr_url": [_tissue_store(tmp_path / "a.zarr", [1, 0, 0])], "fingerprint": ["x"]})
+    adata = SpatialDataCohort(df).to_anndata(include_out_of_tissue=True)
+    assert adata.n_obs == 3
+    assert "sddb" not in adata.uns
+    assert SpatialDataCohort(df).to_anndata().n_obs == 1
+
+
+def test_to_anndata_without_in_tissue_keeps_all_rows(tmp_path):
+    adata = concat_tables(pd.DataFrame({"uid": ["a"], "zarr_url": [_store(tmp_path / "a.zarr", 4)]}))
+    assert adata.n_obs == 4
+    assert "sddb" not in adata.uns
+
+
+def test_in_tissue_is_read_from_the_store_when_obs_is_not_an_element(tmp_path):
+    members = pd.DataFrame({"uid": ["a"], "zarr_url": [_tissue_store(tmp_path / "a.zarr", [0, 1, 1])]})
+    adata = concat_tables(members, elements=("X", "var"))
+    assert adata.n_obs == 2
+    assert adata.uns["sddb"]["in_tissue_filter"]["dropped"] == 1
+
+
+def test_in_tissue_filter_runs_before_the_adapter(tmp_path):
+    seen = []
+
+    class Count:
+        name, version = "count", "0"
+
+        def requirements(self):
+            return {}
+
+        def validate_meta(self, meta):
+            return []
+
+        def validate(self, adata, meta):
+            seen.append(adata.n_obs)
+            return []
+
+        def build(self, adata, meta):
+            return adata
+
+    members = pd.DataFrame({"uid": ["a"], "zarr_url": [_tissue_store(tmp_path / "a.zarr", [1, 0, 1, 1])]})
+    adata = concat_tables(members, adapter=Count())
+    assert seen == [3]
+    assert adata.uns["sddb"]["adapter"] == "count"
+    assert adata.uns["sddb"]["in_tissue_filter"]["kept"] == 3
+
+
+@pytest.mark.parametrize("values", [[1, 2], [1.0, np.nan], ["yes", "no"]], ids=["two", "nan", "words"])
+def test_in_tissue_values_other_than_0_1_raise(tmp_path, values):
+    members = pd.DataFrame({"uid": ["a"], "zarr_url": [_tissue_store(tmp_path / "a.zarr", values)]})
+    with pytest.raises(ValueError, match=r"member 'a': obs\['in_tissue'\] holds values other than"):
+        concat_tables(members)
+    assert concat_tables(members, include_out_of_tissue=True).n_obs == 2

@@ -131,6 +131,32 @@ def he_image(height, width, *, seed=0, disk=None, stains=(RUIFROK_H, RUIFROK_E))
     return np.clip(np.round(rgb), 0, 255).astype(np.uint8).transpose(2, 0, 1)
 
 
+# -- in_tissue ---------------------------------------------------------------------------------------------------------
+
+
+def test_from_sdata_drops_out_of_tissue_rows_and_records_it():
+    centres = [(8, 8), (24, 8), (8, 24), (24, 24)]
+    sdata = make_sdata(np.zeros((3, 32, 32), np.uint8), shapes=squares(centres, 6), obs={"in_tissue": [1, 0, 1, 0]})
+    sdata.tables["table"].obsm["spatial"] = np.array(centres, float)
+    item = item_of(sdata)
+    assert item.table.obs["cell_id"].tolist() == ["cell-0", "cell-2"]
+    params = {"include_out_of_tissue": False, "n_kept": 2, "n_dropped": 2}
+    assert item.records == [AdapterRecord(name="InTissue", version="0.1.0", params=params)]
+    np.testing.assert_array_equal(item.source.table_centroids, [[8, 8], [8, 24]])
+    labels = Rasterize(None, tile=16).build(item).labels["cells"].values
+    assert set(np.unique(labels)) - {0} == set(item.table.obs["label_id"])  # the dropped cells are not drawn
+
+    everything = item_of(sdata, include_out_of_tissue=True)
+    assert everything.table.n_obs == 4
+    assert everything.records[0].params == {"include_out_of_tissue": True, "n_kept": 4, "n_dropped": 0}
+
+
+def test_from_sdata_without_in_tissue_has_no_record():
+    item = item_of(make_sdata(np.zeros((3, 32, 32), np.uint8), shapes=squares([(8, 8)], 6)))
+    assert item.table.n_obs == 1
+    assert item.records == []
+
+
 # -- Rasterize ---------------------------------------------------------------------------------------------------------
 
 
@@ -487,6 +513,17 @@ def test_tissue_mask_flags_cells_outside():
     assert item.records[-1].name == "TissueMask"
     params = {"method": "otsu", "corner_size_pct": 0.05, "corners_are_background": "auto", "auto_max_pixels": 1024}
     assert item.records[-1].params == params
+
+
+def test_tissue_mask_keeps_the_source_in_tissue_column():
+    img = he_image(128, 128, disk=(64, 64, 40))
+    # the source says the opposite of the image, so the two columns differ
+    sdata = make_sdata(img, shapes=squares([(64, 64), (10, 10)], 5), obs={"in_tissue": [0, 1]}, image_chunks=32)
+    item = Rasterize(None, tile=32).build(item_of(sdata, include_out_of_tissue=True))
+    item = TissueMask(method="otsu", auto_max_pixels=1024).build(Centroids().build(item))
+    assert item.table.obs["in_tissue"].tolist() == [True, False]
+    assert item.table.obs["in_tissue_source"].tolist() == [0, 1]
+    assert item.records[-1].version == "0.3.0"
 
 
 def _pale_tissue(size=512, seed=0):

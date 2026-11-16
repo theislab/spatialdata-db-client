@@ -29,6 +29,7 @@ _ENSEMBL = r"ENS[A-Z]*G\d{11}(\.\d+)?"
 _ENSEMBL_COLUMNS = ("gene_ids", "gene_id", "ensembl_id", "gene_id_raw", "feature_id")
 _SYMBOL_COLUMNS = ("symbol", "gene_symbols", "gene_symbol", "gene_name", "feature_name")
 _MIN_OVERLAP = 0.5
+IN_TISSUE = "in_tissue"
 
 
 def _looks_ensembl(values: Any) -> bool:
@@ -101,6 +102,40 @@ def _warn_low_overlap(kept: list[tuple[str, ad.AnnData]], gene_key: GeneKey | No
             UserWarning,
             stacklevel=3,
         )
+
+
+def in_tissue_mask(values: Any, where: str) -> np.ndarray:
+    """The rows that ``obs["in_tissue"]`` marks as in tissue: ``True`` or ``1``, also as text (``"1"``, ``"true"``).
+
+    ``False`` and ``0`` (``"0"``, ``"false"``) are out of tissue. Any other value, a missing one included, raises a
+    ``ValueError`` that names `where`.
+    """
+    s = pd.Series(np.asarray(values))
+    if s.dtype == bool:
+        return s.to_numpy()
+    text = s.astype("string").str.strip().str.lower()
+    on = text.isin(["1", "1.0", "true"]).to_numpy(dtype=bool, na_value=False)
+    off = text.isin(["0", "0.0", "false"]).to_numpy(dtype=bool, na_value=False)
+    if not (on | off).all():
+        bad = sorted(set(text[~(on | off)].fillna("<NA>")))
+        raise ValueError(f"{where}: obs[{IN_TISSUE!r}] holds values other than True/False or 1/0: {bad[:5]}")
+    return on
+
+
+def _in_tissue_rows(adata: ad.AnnData, table_url: str, uid: str) -> np.ndarray | None:
+    """The in-tissue rows of a member's table, ``None`` if it has no ``obs["in_tissue"]``.
+
+    The column is read from the store when `elements` left ``obs`` out.
+    """
+    values: Any
+    if IN_TISSUE in adata.obs.columns:
+        values = adata.obs[IN_TISSUE]
+    else:
+        table = _open_group(table_url)
+        if f"obs/{IN_TISSUE}" not in table:
+            return None
+        values = read_elem(table[f"obs/{IN_TISSUE}"])
+    return in_tissue_mask(values, f"member {uid!r}")
 
 
 def _table_name(row: Any) -> str:
@@ -189,6 +224,7 @@ def concat_tables(
     gene_key: GeneKey | None = None,
     spatial: Spatial = "auto",
     max_workers: int = 8,
+    include_out_of_tissue: bool = False,
 ) -> ad.AnnData:
     """Concatenate one table per member into one AnnData (outer join).
 
@@ -239,6 +275,13 @@ def concat_tables(
         one array is read, not the rest of ``obsm``.
     max_workers
         Number of members read concurrently.
+    include_out_of_tissue
+        Keep the rows that a member's ``obs["in_tissue"]`` marks as out of tissue. By default (``False``) only the
+        rows marked ``True`` or ``1`` are kept (see ``in_tissue_mask``); a member without the column keeps all
+        rows. Rows are dropped right after a member is read, before the adapter sees it. The counts go into
+        ``uns["sddb"]["in_tissue_filter"]``: ``kept`` and ``dropped`` over all members that have the column, and
+        the same per member in ``by_uid``. The stores keep every row: Visium HD bins rebuilt from GEO files, for
+        example, keep the bins off the tissue.
 
     Warns
     -----
@@ -255,8 +298,9 @@ def concat_tables(
         If a member's table is absent or unreadable (the message names the member uid), or an
         ``obs_columns`` entry is not a column of ``members``.
     ValueError
-        If the adapter drops every member, ``gene_key`` or ``spatial`` is not a known value, or a member has no source for
-        ``gene_key`` (the message names the member uid and its var columns).
+        If the adapter drops every member, ``gene_key`` or ``spatial`` is not a known value, a member has no source for
+        ``gene_key`` (the message names the member uid and its var columns), or a member's ``obs["in_tissue"]`` holds
+        a value other than True/False or 1/0 and `include_out_of_tissue` is ``False``.
     """
     if missing := [c for c in obs_columns if c not in members.columns]:
         raise KeyError(f"obs_columns not in members: {missing}")
@@ -273,6 +317,7 @@ def concat_tables(
     rekeyed: dict[str, tuple[int, int]] = {}  # uid -> (dropped, duplicate) features under gene_key
     repeated: dict[str, tuple[int, int]] = {}  # uid -> (blank dropped, repeats made unique) (gene_key=None)
     no_xy: dict[str, str] = {}  # uid -> why some or all rows have no coordinates
+    in_tissue: dict[str, tuple[int, int]] = {}  # uid -> (kept, dropped) rows by obs["in_tissue"]
 
     def read(row: pd.Series) -> ad.AnnData | None:
         uid = str(row["uid"])
@@ -287,6 +332,10 @@ def concat_tables(
             raise KeyError(f"member {row['uid']!r}: table {name!r} not readable at {url}: {e}") from e
         if spatial != "obsm" and (why := _fill_spatial(adata, str(row["zarr_url"]), url, spatial)):
             no_xy[uid] = why
+        if not include_out_of_tissue and (keep := _in_tissue_rows(adata, url, uid)) is not None:
+            in_tissue[uid] = (int(keep.sum()), int((~keep).sum()))
+            if not keep.all():
+                adata = adata[keep].copy()
         if adapter is not None:
             if issues := adapter.validate(adata, row):
                 dropped[uid] = "; ".join(issues)
@@ -361,6 +410,15 @@ def concat_tables(
                 .map(dict(zip(members["uid"].astype("string"), members[col], strict=True)))
                 .astype("category")
             )
+    uns: dict[str, Any] = {}
     if adapter is not None:
-        out.uns["sddb"] = {"adapter": adapter.name, "adapter_version": adapter.version, "dropped": dropped}
+        uns = {"adapter": adapter.name, "adapter_version": adapter.version, "dropped": dropped}
+    if in_tissue := {u: c for u, c in in_tissue.items() if u not in dropped}:
+        uns["in_tissue_filter"] = {
+            "kept": sum(k for k, _ in in_tissue.values()),
+            "dropped": sum(d for _, d in in_tissue.values()),
+            "by_uid": {u: {"kept": k, "dropped": d} for u, (k, d) in sorted(in_tissue.items())},
+        }
+    if uns:
+        out.uns["sddb"] = uns
     return out
