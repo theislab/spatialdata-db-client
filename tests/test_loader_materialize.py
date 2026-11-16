@@ -696,6 +696,7 @@ def test_null_catalog_mpp_keeps_the_native_grid(catalog_cohort, tmp_path):
 
 VISIUM_MPP = 8.0  # µm per pixel of the synthetic Visium image: one array_col step (50 µm) is 6.25 px
 VISIUM_ROLES = {"image": "^images/he$", "table": "^tables/table$"}
+# the tests rasterise to 10 µm/px: the fit gives 8.0 only to about 1e-15, and Rasterize refuses a finer target
 
 
 def _visium_spots(mpp=VISIUM_MPP, *, jitter=0.0, odd=False, seed=0):
@@ -743,7 +744,7 @@ def test_visium_mpp_is_the_pitch_fit_not_the_stale_catalog(tmp_path):
     member = FakeMember("uidV", write_visium_member(tmp_path, "uidV"), technology="10x_visium", hne_image=True)
     member.mpp = VISIUM_MPP / 1.1818
     dest = materialize(
-        FakeCohort([member]), tmp_path / "c.zarr", adapters=[Rasterize(8.0), Centroids()], roles=VISIUM_ROLES
+        FakeCohort([member]), tmp_path / "c.zarr", adapters=[Rasterize(10.0), Centroids()], roles=VISIUM_ROLES
     )
     contract = _contract(dest, "dataset_0")
     assert contract.mpp_native == pytest.approx(VISIUM_MPP, rel=1e-9)
@@ -756,11 +757,11 @@ def test_visium_catalog_mpp_off_the_fit_raises_after_the_stale_releases(tmp_path
     member = FakeMember("uidV", path, technology="10x_visium", hne_image=True, mpp=VISIUM_MPP / 1.1818)
     with pytest.raises(ValueError, match=r"uidV: the catalog's mpp .* differs from the pitch fit .* by more than 0.02"):
         materialize(
-            _LaterCohort([member]), tmp_path / "c.zarr", adapters=[Rasterize(8.0), Centroids()], roles=VISIUM_ROLES
+            _LaterCohort([member]), tmp_path / "c.zarr", adapters=[Rasterize(10.0), Centroids()], roles=VISIUM_ROLES
         )
     member.mpp = VISIUM_MPP * 1.01  # within PITCH_RTOL: the fit is still the value
     dest = materialize(
-        _LaterCohort([member]), tmp_path / "d.zarr", adapters=[Rasterize(8.0), Centroids()], roles=VISIUM_ROLES
+        _LaterCohort([member]), tmp_path / "d.zarr", adapters=[Rasterize(10.0), Centroids()], roles=VISIUM_ROLES
     )
     assert _contract(dest, "dataset_0").mpp_native == pytest.approx(VISIUM_MPP, rel=1e-9)
 

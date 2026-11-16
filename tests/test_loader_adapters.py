@@ -833,17 +833,17 @@ def _tf(m):
 
 
 def _paint(value_at_cs):
-    """A float H&E image in [0, 1] through the SHEAR affine, computed at each pixel centre's cs position.
+    """A uint8 H&E image through the SHEAR affine, computed at each pixel centre's cs position.
 
-    Channel 0 is f(cell) = (id mod 251 + 1) / 255, constant per cell. Channels 1 and 2 are linear ramps in cs x and
-    y over the footprint, which bilinear resampling reproduces exactly, so they locate the image to a fraction of a
-    pixel.
+    Channel 0 is f(cell) = id mod 251 + 1, constant per cell. Channels 1 and 2 are linear ramps from 0 to 255 in cs x
+    and y over the footprint, rounded to uint8. Bilinear resampling reproduces a ramp exactly, so they locate the image
+    to a fraction of a pixel.
     """
     yy, xx = np.mgrid[:H0, :W0] + 0.5
     cs = SHEAR @ np.stack([xx.ravel(), yy.ravel(), np.ones(xx.size)])
     cell = value_at_cs(cs[0], cs[1]) % 251 + 1
     channels = [cell / 255, (cs[0] - X0) / (X1 - X0), (cs[1] - Y0) / (Y1 - Y0)]
-    return np.stack([c.reshape(H0, W0) for c in channels])
+    return np.clip(np.round(255 * np.stack([c.reshape(H0, W0) for c in channels])), 0, 255).astype(np.uint8)
 
 
 def _grid_cs(item, ratio):
