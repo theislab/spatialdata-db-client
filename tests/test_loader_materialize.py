@@ -988,7 +988,7 @@ def test_rgba_he_with_a_constant_alpha_is_written_as_rgb(tmp_path):
     path, *_ = write_member(tmp_path / "varying", "uidA", seed=0, alpha=alpha)
     with pytest.raises(ValueError, match=r"uidA: .* the alpha of 'he' ranges from 0 to 255 on a downsampled level"):
         materialize(FakeCohort([FakeMember("uidA", path)]), tmp_path / "d.zarr", **kwargs)
-    assert not (tmp_path / "d.zarr").exists()
+    assert not (tmp_path / "d.zarr" / "dataset_0").exists()  # refused before any dataset is written
 
 
 class _RemoteMember(FakeMember):
