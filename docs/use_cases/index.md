@@ -12,10 +12,16 @@ from a question, builds a cohort for it and runs the analysis to a result.
 - {doc}`visium_atlas/visium-atlas` integrates every Visium section in the catalog, about 4,000 of them, into one
   atlas and asks whether the spots group by species or by organ. It needs a large GPU node and has its own
   environment.
+- {doc}`loader_atera` writes the six whole Atera H&E slides of a catalog release as a loader collection on a Slurm
+  cluster and measures how fast the spatialbatch loader reads 224 px training crops from it, on CPU and into a GPU.
+- {doc}`loader_training` trains a model on H&E crops from those slides in PyTorch, with a spatial split and one
+  slide held out.
 
 ```{toctree}
 :hidden:
 
 training_cohort
 visium_atlas/visium-atlas
+loader_atera
+loader_training
 ```

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import warnings
 import webbrowser
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -120,6 +120,17 @@ class Dataset:
 
         cohort = SpatialDataCohort(self._row.to_frame().T, source=self._source)
         return cohort.to_list(elements=elements, dest=dest, workers=1)[0]
+
+    def _local_store(self, elements: Sequence[str] | None = None) -> Path:
+        """The local path of the store, fetched into the cache like :meth:`to_sdata` if remote, not read.
+
+        `elements` (``"kind/name"``) fetches only those, plus the elements their tables annotate; ``None`` the whole
+        store.
+        """
+        from sddb.cohort import SpatialDataCohort
+
+        cohort = SpatialDataCohort(self._row.to_frame().T, source=self._source)
+        return cohort._local_stores(None if elements is None else list(elements), None, 1)[0]
 
     def elements(self) -> dict[str, dict[str, Any]]:
         """Return element shapes/dtypes without loading data."""
