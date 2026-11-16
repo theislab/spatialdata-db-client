@@ -66,9 +66,13 @@ def fixture_cohort(tmp_path, make_catalog):
     return catalog, cohorts
 
 
-def test_primer_notebook_runs_on_cpu_and_writes_the_bundle(tmp_path, fixture_cohort):
+def test_primer_notebook_runs_on_cpu_and_writes_the_bundle(tmp_path, fixture_cohort, monkeypatch):
     """The notebook runs on the fixture cohort and writes every bundle file of the contract."""
     import papermill as pm
+
+    # the kernel inherits the environment, and CI sets MPLBACKEND=agg for the other jobs, which keeps every figure out
+    # of the notebook; the notebook itself may not touch matplotlib (test_notebook_plots_only_with_scanpy_...)
+    monkeypatch.delenv("MPLBACKEND", raising=False)
 
     catalog, cohorts = fixture_cohort
     out_dir = tmp_path / "bundles"

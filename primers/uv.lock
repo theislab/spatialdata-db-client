@@ -4130,22 +4130,30 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "anndata", marker = "extra == 'viz'", specifier = "<0.13" },
+    { name = "dask-image", marker = "extra == 'loader'" },
     { name = "easy-vitessce", marker = "extra == 'viz'" },
     { name = "fsspec" },
     { name = "mcp", marker = "extra == 'mcp'" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "platformdirs" },
     { name = "pyarrow" },
+    { name = "pydantic", marker = "extra == 'loader'", specifier = ">=2" },
     { name = "rapidfuzz" },
     { name = "s3fs" },
+    { name = "scikit-image", marker = "extra == 'loader'" },
+    { name = "snakemake", marker = "extra == 'loader'", specifier = ">=9" },
+    { name = "snakemake-executor-plugin-slurm", marker = "extra == 'loader'" },
+    { name = "spatialbatch", marker = "extra == 'loader'", git = "https://github.com/timtreis/spatialbatch?rev=cb23d0630ee5ce4f7411545a13326bfa9f0b5cac" },
     { name = "spatialdata" },
     { name = "spatialdata-plot", marker = "extra == 'viz'" },
+    { name = "squidpy", marker = "extra == 'loader'", specifier = ">=1.8.2" },
+    { name = "threadpoolctl", marker = "extra == 'loader'" },
     { name = "typer" },
     { name = "universal-pathlib" },
     { name = "vitessce", marker = "extra == 'viz'" },
     { name = "zarr", specifier = ">=3" },
 ]
-provides-extras = ["llm", "mcp", "viz"]
+provides-extras = ["llm", "loader", "mcp", "viz"]
 
 [package.metadata.requires-dev]
 doc = [
