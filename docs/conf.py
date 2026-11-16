@@ -92,6 +92,7 @@ nitpick_ignore = [
     # pydantic field constraints in the contract models' signatures.
     ("py:class", "annotated_types.Ge"),
     ("py:class", "annotated_types.Gt"),
+    ("py:class", "annotated_types.Le"),
     ("py:class", "pydantic.types.Strict"),
 ]
 nitpick_ignore_regex = [
