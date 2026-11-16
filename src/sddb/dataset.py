@@ -134,7 +134,7 @@ class Dataset:
 
         If ``vitessce_url`` is already a vitessce.io viewer link (as in the published catalog) it is
         returned unchanged. Otherwise it is treated as a config-sidecar URL: an ``s3://bucket/key`` URL is
-        rewritten to the LaminHub CORS proxy ``https://aws.eu-central-1.lamin.ai/storage/s3/bucket/key`` and wrapped as
+        rewritten to the LaminHub CORS proxy ``https://aws.eu-central-1.lamin.ai/storage/s3/bucket%2F/key`` and wrapped as
         ``https://vitessce.io/?url=<proxied>``.
 
         Some published links load another dataset's store (333 of 6087 rows in the 2026-10-28 catalog). The
