@@ -20,6 +20,12 @@ Every column of the catalog schema. "Facet" columns are categorical filters (`Ca
 | `tier` | Curation tier: `gold`, `silver` or `bronze`, from most to least curated. Some datasets have no tier yet. |
 | `non_integer_counts` | True when a count table is stored as deposited with fractional values (mostly x.5 or x.25). The values aren't rounded, and the depositor doesn't state the cause. |
 
+## Dates
+
+- `publication_date` is the source release date: the day the repository (GEO, Zenodo, BioImage Archive, ...) made the data public. It isn't the paper's date, and for a GEO series it is often a year earlier.
+- `publication_year` is the year of the paper that describes the dataset (null when no paper is linked). Use it to cite, and `doi`/`pmid` for the paper itself.
+- The names stay until the next catalog schema version.
+
 ## Study and condition columns
 
 All optional: older catalogs without them still load, and they are null when the source has no such metadata.

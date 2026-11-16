@@ -119,3 +119,8 @@ def test_release_metric_columns_are_known_and_rangeable(schema3_catalog):
         assert col in CATALOG_COLUMNS, col
     assert "n_cells" in RANGE_COLUMNS
     assert len(schema3_catalog.query(n_cells__gte=100_000)) == 1
+
+
+def test_dates_section_says_publication_date_is_the_release_date():
+    text = (_ROOT / "docs" / "reference" / "catalog-columns.md").read_text()
+    assert "## Dates" in text and "source release date" in text and "`publication_year`" in text

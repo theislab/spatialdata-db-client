@@ -113,6 +113,8 @@ CATALOG_COLUMNS: dict[str, str] = {
     "n_transcripts": "Int64",
     # Visium HD capture-area size ("6.5 mm" / "11 mm"); fixes the bin grid (838² vs 1381² at 8 µm).
     "capture_area": "string",
+    # the source release date (when the repository made the data public), NOT the paper's date: cite with
+    # publication_year (docs/reference/catalog-columns.md "Dates"); the name stays until a schema bump
     "publication_date": "string",
     # Publication verification (set by the engine's publication-verification gate): the resolved
     # paper identifiers + the verify status (verified / provisional / no_associated_publication).
