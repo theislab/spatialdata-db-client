@@ -86,6 +86,8 @@ def make_fixture_catalog() -> pd.DataFrame:
             "n_transcripts": [None] * n,
             "n_obs_in_tissue": [None] * n,
             "capture_area": [None] * n,
+            "capture_area_source": [None] * n,
+            "image_channels": [None] * n,
             # study + per-sample condition columns (optional; null in the base fixture)
             **{
                 c: [None] * n

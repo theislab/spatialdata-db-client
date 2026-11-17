@@ -116,6 +116,10 @@ CATALOG_COLUMNS: dict[str, str] = {
     "n_transcripts": "Int64",
     # Visium HD capture-area size ("6.5 mm" / "11 mm"); fixes the bin grid (838² vs 1381² at 8 µm).
     "capture_area": "string",
+    # where capture_area came from: "stated" (the vendor's text) or "inferred" (from the array extent)
+    "capture_area_source": "string",
+    # channel names across the dataset's images: "R", "G", "B" for H&E, marker names for IF / multiplexed
+    "image_channels": "list[string]",
     # the source release date (when the repository made the data public), NOT the paper's date: cite with
     # publication_year (docs/reference/catalog-columns.md "Dates"); the name stays until a schema bump
     "publication_date": "string",
