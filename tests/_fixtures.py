@@ -84,6 +84,7 @@ def make_fixture_catalog() -> pd.DataFrame:
             "magnification": [None] * n,
             "sdata_repr": [None] * n,
             "n_transcripts": [None] * n,
+            "n_obs_in_tissue": [None] * n,
             "capture_area": [None] * n,
             # study + per-sample condition columns (optional; null in the base fixture)
             **{

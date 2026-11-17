@@ -37,7 +37,7 @@ from sddb.contract import (
 from sddb.loader import _defaults
 from sddb.loader._adapters import GENE_KEY as _GENE_KEY
 from sddb.loader._adapters import MATERIALIZE_RECORDS, Rasterize, StainNormalize
-from sddb.loader._item import LoaderItem
+from sddb.loader._item import IN_TISSUE_RECORD, LoaderItem
 from sddb.roles import resolve
 
 if TYPE_CHECKING:
@@ -84,12 +84,15 @@ def materialize(
     allow_mixed_grids: bool = False,
     slurm: Mapping[str, Any] | None = None,
     stores: Mapping[str, str | Path] | None = None,
+    include_out_of_tissue: bool = False,
 ) -> Path:
     """Write every member of `cohort` as one dataset of a loader collection at `dest`, and validate it.
 
     Members are opened lazily (``to_sdata``) and written in uid order as ``dataset_0``, ``dataset_1``, ... The run
     state lives beside the collection, in ``<dest>.sddb/`` (``done/<uid>`` markers and ``scratch/``), so that `dest`
-    holds only zarr groups. Per member:
+    holds only zarr groups. A member's rows that its table's ``obs["in_tissue"]`` marks as out of tissue are left out
+    unless `include_out_of_tissue` (:meth:`~sddb.loader.LoaderItem.from_sdata`; the ``InTissue`` record has the
+    counts). Per member:
 
     1. its table is put on the collection's var, the union of the members' features, sorted: the outer join of
        :meth:`~sddb.SpatialDataCohort.to_anndata` (``ad.concat(join="outer")`` in ``sddb/concat.py``). The
@@ -174,6 +177,10 @@ def materialize(
         bins aggregated into pseudo-spots). The member stays the catalog record: its catalog columns, defaults and
         the cohort's release go into the contract. Without an entry a remote store is fetched into the cache with
         only the elements the roles select (and the elements its table annotates), a local one is opened in place.
+    include_out_of_tissue
+        Keep the rows that a member's ``obs["in_tissue"]`` marks as out of tissue (``False`` or ``0``). By default
+        they are left out, as in :meth:`~sddb.SpatialDataCohort.to_anndata`; a member without the column keeps every
+        row. A rerun must pass the value the written datasets ran with.
     runner
         ``"local"`` runs in this process; ``"snakemake"`` runs the generated workflow with snakemake.
     executor
@@ -233,6 +240,7 @@ def materialize(
         obs_columns=obs_columns,
         allow_mixed_grids=allow_mixed_grids,
         stores=stores,
+        include_out_of_tissue=include_out_of_tissue,
     )
     if runner == "snakemake":
         del items  # each job opens its member again
@@ -254,6 +262,7 @@ def _prepare(
     obs_columns: Sequence[str],
     allow_mixed_grids: bool,
     stores: Mapping[str, str | Path] | None = None,
+    include_out_of_tissue: bool = False,
 ) -> tuple[dict[str, Any], dict[str, LoaderItem]]:
     """Check the cohort against `dest`, open the members not done and fix what every member must agree on.
 
@@ -288,6 +297,13 @@ def _prepare(
 
     written = [keys[u] for u in uids if u in done]
     _check_chain(adapters, root, written)
+    for key in written:
+        for rec in _contract(root[key]).adapters:
+            if rec.name == IN_TISSUE_RECORD and rec.params["include_out_of_tissue"] != include_out_of_tissue:
+                raise ValueError(
+                    f"{key} was written with include_out_of_tissue={rec.params['include_out_of_tissue']}, this run has "
+                    f"{include_out_of_tissue}; use the same value or a new dest"
+                )
 
     for uid in sorted(set(given) - set(uids)):
         logger.warning(f"mpp_native has {uid!r}, which is not a member of the cohort")
@@ -331,7 +347,13 @@ def _prepare(
     for m in todo:
         uid = str(m.uid)
         items[uid] = LoaderItem.from_sdata(
-            opened[uid], uid=uid, study_id=str(m.study_id), role=role, roles=roles, mpp_native=mpps.get(uid)
+            opened[uid],
+            uid=uid,
+            study_id=str(m.study_id),
+            role=role,
+            roles=roles,
+            mpp_native=mpps.get(uid),
+            include_out_of_tissue=include_out_of_tissue,
         )
     shared, columns = _shared_features(items, root, written) if items else ([], {c: [] for c in _VAR_COLUMNS})
     items = {uid: _rekey(item, shared, columns) for uid, item in items.items()}
@@ -342,6 +364,7 @@ def _prepare(
         "roles": dict(roles),
         "release": release,
         "allow_mixed_grids": allow_mixed_grids,
+        "include_out_of_tissue": include_out_of_tissue,
         "obs_columns": list(obs_columns),
         "genes": shared,
         "var": columns,

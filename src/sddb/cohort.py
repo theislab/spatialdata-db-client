@@ -369,6 +369,7 @@ class SpatialDataCohort(Sequence[Dataset]):
         gene_key: Literal["ensembl", "symbol"] | None = None,
         spatial: Literal["auto", "obsm", "centroids"] = "auto",
         max_workers: int = 8,
+        include_out_of_tissue: bool = False,
     ) -> AnnData:
         """Concatenate each member's table into one AnnData (outer join, obs[uid]+obs[study_id]).
 
@@ -381,8 +382,12 @@ class SpatialDataCohort(Sequence[Dataset]):
         annotates when a member stores no coordinates (e.g. Allen MERSCOPE and MERFISH tables), matched by
         ``instance_key``. ``"centroids"`` always uses the centroids, ``"obsm"`` keeps ``obsm`` as stored.
 
+        Rows that a member's ``obs["in_tissue"]`` marks as out of tissue (``False`` or ``0``) are dropped, and the
+        counts go into ``uns["sddb"]["in_tissue_filter"]``; ``include_out_of_tissue=True`` keeps them. Members
+        without the column keep every row.
+
         See ``sddb.concat.concat_tables`` for ``obs_columns``, ``elements``, ``adapter``, ``gene_key``,
-        ``spatial`` and ``max_workers``.
+        ``spatial``, ``max_workers`` and ``include_out_of_tissue``.
         """
         from sddb.concat import concat_tables
 
@@ -395,6 +400,7 @@ class SpatialDataCohort(Sequence[Dataset]):
             gene_key=gene_key,
             spatial=spatial,
             max_workers=max_workers,
+            include_out_of_tissue=include_out_of_tissue,
         )
 
     def materialize(
@@ -412,6 +418,7 @@ class SpatialDataCohort(Sequence[Dataset]):
         allow_mixed_grids: bool = False,
         slurm: Mapping[str, Any] | None = None,
         stores: Mapping[str, str | Path] | None = None,
+        include_out_of_tissue: bool = False,
     ) -> Path:
         """Write the cohort as a loader collection for :mod:`spatialbatch` at ``dest`` and validate it.
 
@@ -436,6 +443,7 @@ class SpatialDataCohort(Sequence[Dataset]):
             allow_mixed_grids=allow_mixed_grids,
             slurm=slurm,
             stores=stores,
+            include_out_of_tissue=include_out_of_tissue,
         )
 
     def to_df(self) -> pd.DataFrame:

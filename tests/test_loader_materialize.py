@@ -394,7 +394,7 @@ def test_materialize_records_are_not_rebuilt(cohort, tmp_path):
     chain = [Rasterize(0.5), Centroids()]
     materialize(members, dest, adapters=chain, role="he", roles=ROLES, mpp_native={"uidA": 0.25, "uidB": 0.25})
     records = _contract(dest, "dataset_0").adapters
-    assert MATERIALIZE_RECORDS == ("GeneKey",)
+    assert MATERIALIZE_RECORDS == ("GeneKey", "InTissue")
     assert records[0].name in MATERIALIZE_RECORDS
     with pytest.raises(ValueError, match="step of materialize.*MATERIALIZE_RECORDS"):
         adapter_from_record(records[0])
@@ -901,6 +901,32 @@ def test_source_total_counts_is_kept_under_a_new_name(tmp_path):
     obs = _table(dest, "dataset_0").obs
     assert (obs["total_counts_source"] == 7.0).all()
     assert validate(dest) == []
+
+
+@pytest.mark.parametrize("runner", ["local", "snakemake"])
+def test_out_of_tissue_rows_are_left_out_and_recorded(tmp_path, runner):
+    path, *_ = write_member(tmp_path, "uidA", seed=0)
+    sdata = sd.read_zarr(path)
+    n = sdata.tables["table"].n_obs
+    keep = np.arange(n) % 3 != 0
+    sdata.tables["table"].obs["in_tissue"] = keep.astype(int)
+    path2 = tmp_path / "with_in_tissue.zarr"
+    sdata.write(path2)
+    members = FakeCohort([FakeMember("uidA", path2)])
+    kwargs = {"adapters": [Rasterize(0.5), Centroids()], "role": "he", "roles": ROLES, "mpp_native": {"uidA": 0.25}}
+    dest = materialize(members, tmp_path / "c.zarr", runner=runner, **kwargs)
+    assert validate(dest) == []
+    table = _table(dest, "dataset_0")
+    assert table.n_obs == keep.sum()
+    assert (table.obs["in_tissue"] == 1).all()
+    record = _contract(dest, "dataset_0").adapters[1]
+    assert record.name == "InTissue"
+    assert record.params == {"include_out_of_tissue": False, "n_kept": int(keep.sum()), "n_dropped": int((~keep).sum())}
+    with pytest.raises(ValueError, match="written with include_out_of_tissue=False, this run has True"):
+        materialize(members, dest, include_out_of_tissue=True, runner=runner, **kwargs)
+    everything = materialize(members, tmp_path / "all.zarr", include_out_of_tissue=True, runner=runner, **kwargs)
+    assert _table(everything, "dataset_0").n_obs == n
+    assert _contract(everything, "dataset_0").adapters[1].params["n_dropped"] == 0
 
 
 def test_mpp_source_needs_an_mpp():

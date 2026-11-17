@@ -54,6 +54,9 @@ CATALOG_COLUMNS: dict[str, str] = {
     "non_integer_counts": "boolean",
     # headline stats
     "n_obs": "Int64",
+    # rows of the primary table with obs["in_tissue"] True or 1, the rows that to_anndata and materialize keep by
+    # default; null when the table has no in_tissue column or the release predates the column
+    "n_obs_in_tissue": "Int64",
     "n_features": "Int64",
     "total_counts": "Float64",
     # access

@@ -12,19 +12,22 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from sddb.concat import IN_TISSUE, in_tissue_mask
+from sddb.contract import AdapterRecord
 from sddb.roles import resolve
 
 if TYPE_CHECKING:
     from anndata import AnnData
     from spatialdata import SpatialData
 
-    from sddb.contract import AdapterRecord
-
 _ROLES = {"image": "images", "table": "tables", "labels": "labels"}
 _MAX_LABEL = 2**32 - 1  # labels/cells is written as uint32
 # obs columns that spatialdata-io fills with each row's value in the cell labels when the table annotates shapes:
 # atera's "label_id" (readers/atera.py) and xenium's "cell_labels" (readers/xenium.py:473, cells_as_circles=True)
 _LABEL_COLUMNS = ("label_id", "cell_labels")
+#: The record of the in-tissue row filter of :meth:`LoaderItem.from_sdata`, a step of the loader, not an adapter.
+IN_TISSUE_RECORD = "InTissue"
+_IN_TISSUE_VERSION = "0.1.0"
 
 
 @dataclass(frozen=True)
@@ -163,6 +166,7 @@ class LoaderItem:
         roles: Mapping[str, str],
         mpp_native: float | None,
         label_column: str | None = None,
+        include_out_of_tissue: bool = False,
     ) -> LoaderItem:
         """Resolve the image, the table and the cells of one member.
 
@@ -179,9 +183,18 @@ class LoaderItem:
             Microns per scale-0 pixel of the image, ``None`` if unknown (the item then keeps its native grid).
         label_column
             The ``obs`` column holding each row's value in the cell raster; by default it is inferred, see below.
+        include_out_of_tissue
+            Keep the rows that the table's ``obs["in_tissue"]`` marks as out of tissue. By default (``False``) only
+            the rows marked ``True`` or ``1`` are kept (``sddb.concat.in_tissue_mask``), as in
+            :meth:`~sddb.SpatialDataCohort.to_anndata`. A table without the column keeps every row.
 
         Notes
         -----
+        With ``obs["in_tissue"]`` in the table, the item starts with an ``InTissue`` record
+        (``sddb.loader.MATERIALIZE_RECORDS``) whose params are `include_out_of_tissue`, ``n_kept`` and ``n_dropped``.
+        The rows are dropped before anything else, so shapes cells of a dropped row are not drawn. An existing cell
+        raster (role ``"labels"``) is resampled whole and keeps the dropped cells' pixels, which then have no row.
+
         ``obs["label_id"]``, the value of each row's cell in ``labels["cells"]``, is taken from the first that applies:
 
         1. `label_column`;
@@ -223,6 +236,18 @@ class LoaderItem:
         names = {r: p.split("/", 1)[1] for r, p in paths.items()}
 
         source_table = sdata.tables[names["table"]]
+        records: list[AdapterRecord] = []
+        if IN_TISSUE in source_table.obs.columns:
+            n = source_table.n_obs
+            if include_out_of_tissue:
+                n_kept = n
+            else:
+                keep = in_tissue_mask(source_table.obs[IN_TISSUE], f"{uid}: table {names['table']!r}")
+                n_kept = int(keep.sum())
+                if n_kept < n:
+                    source_table = source_table[keep]
+            params = {"include_out_of_tissue": include_out_of_tissue, "n_kept": n_kept, "n_dropped": n - n_kept}
+            records.append(AdapterRecord(name=IN_TISSUE_RECORD, version=_IN_TISSUE_VERSION, params=params))
         region, _, instance_key = get_table_keys(source_table)
         regions = [region] if isinstance(region, str) else list(region)
         if len(regions) != 1 or not (regions[0] in sdata.labels or regions[0] in sdata.shapes):
@@ -301,6 +326,7 @@ class LoaderItem:
             image=levels[0],
             labels={},
             mpp_native=mpp_native,
+            records=records,
             channels=channels,
             label_rule=rule,
             source=source,
