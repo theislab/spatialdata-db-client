@@ -728,6 +728,11 @@ class TissueMask(_Adapter):
     256 x 256 synthetic image (boxes of 2 x 2 pixels) as all tissue and found the tissue at 512 x 512. The unit
     tests run otsu, downscaled by squidpy to 32 x 32, for that reason.
 
+    ``min_specimen_area_frac`` defaults to ``1e-4`` instead of squidpy's ``0.01``. squidpy drops regions smaller than
+    that fraction of the level, and each of the 165 cores of the Visium HD 11 mm breast TMA covers under 0.2% of it,
+    so 0.01 gave an empty mask and 1e-4 gave 145 regions and 18.4% tissue (paper repo
+    ``manuscript/analysis/loader_uc/tma_mask.py``). An empty mask is logged as a warning.
+
     Parameters
     ----------
     **detect_tissue_kwargs
@@ -739,7 +744,8 @@ class TissueMask(_Adapter):
     name = "TissueMask"
     # 0.2.0: squidpy runs on the source's coarsest level instead of an overview of the written grid
     # 0.3.0: a source obs["in_tissue"] is kept as obs["in_tissue_source"] instead of being overwritten
-    version: ClassVar[str] = "0.3.0"
+    # 0.4.0: min_specimen_area_frac defaults to 1e-4 (TMA cores)
+    version: ClassVar[str] = "0.4.0"
     _RESERVED: ClassVar[set[str]] = {"image_key", "scale", "inplace", "new_labels_key"}
 
     def __init__(self, **detect_tissue_kwargs: Any) -> None:
@@ -750,6 +756,7 @@ class TissueMask(_Adapter):
             "method": "weka",
             "corner_size_pct": 0.05,
             "corners_are_background": "auto",
+            "min_specimen_area_frac": 1e-4,
             **detect_tissue_kwargs,
         }
         if config["method"] == "weka" and "method_params" not in config:
@@ -793,6 +800,10 @@ class TissueMask(_Adapter):
         with threadpool_limits(limits=1):
             mask = (np.asarray(detect_tissue(tmp, image_key="image", inplace=False, **kwargs)) > 0).astype(np.uint8)
         logger.info(f"{item.uid}: TissueMask ran on source level {coarse.level} {list(mask.shape)}")
+        if not mask.any():
+            logger.warning(
+                f"{item.uid}: TissueMask found no tissue (min_specimen_area_frac={kwargs['min_specimen_area_frac']})"
+            )
         tissue = _onto_grid(mask, coarse, (h, w), _dask(item.labels["cells"]).chunksize)
         xy = np.floor(item.table.obsm["spatial"] + 0.5).astype(np.int64)
         px = np.clip(xy[:, 0], 0, w - 1)
@@ -856,6 +867,9 @@ class StainNormalize(_Adapter):
         The squidpy method; ``"macenko"``.
     reference
         A fitted reference to apply instead of fitting one.
+    max_angle_deg
+        Passed to :func:`~squidpy.experimental.im.fit_stain_reference` in :meth:`fit`: how far a fitted stain vector
+        may deviate from its canonical one, in degrees. ``None`` keeps squidpy's default.
 
     Raises
     ------
@@ -870,17 +884,26 @@ class StainNormalize(_Adapter):
     #: The params a fit adds to the record.
     FITTED: ClassVar[tuple[str, ...]] = ("reference", "fit_inputs")
 
-    def __init__(self, method: Literal["macenko"] = "macenko", *, reference: StainFit | None = None) -> None:
+    def __init__(
+        self,
+        method: Literal["macenko"] = "macenko",
+        *,
+        reference: StainFit | None = None,
+        max_angle_deg: float | None = None,
+    ) -> None:
         if method != "macenko":
             raise ValueError(f"method must be 'macenko'; got {method!r}")
         self.method = method
         self.reference = reference
+        self.max_angle_deg = max_angle_deg
         self.fit_inputs: dict[str, dict[str, Any]] | None = None
 
     @property
     def config(self) -> dict[str, Any]:  # type: ignore[override]
         """The constructor kwargs, with the reference as plain lists and, after :meth:`fit`, what it read per item."""
         out: dict[str, Any] = {"method": self.method}
+        if self.max_angle_deg is not None:
+            out["max_angle_deg"] = self.max_angle_deg
         if self.reference is not None:
             out["reference"] = _reference_dict(self.reference)
         if self.fit_inputs is not None:
@@ -930,8 +953,9 @@ class StainNormalize(_Adapter):
             inputs[item.uid] = {"level": coarse.level, "level_shape": [int(n) for n in coarse.image.shape[-2:]]}
             logger.info(f"{item.uid}: {self.name} fits on source level {inputs[item.uid]}")
         tmp = sd.SpatialData(images=images, labels=labels)
+        kwargs = {} if self.max_angle_deg is None else {"max_angle_deg": self.max_angle_deg}
         self.reference = sqim.fit_stain_reference(
-            tmp, image_key=list(images), method=self.method, scale="auto", tissue_mask_key=list(labels)
+            tmp, image_key=list(images), method=self.method, scale="auto", tissue_mask_key=list(labels), **kwargs
         )
         self.fit_inputs = inputs
         return self.reference

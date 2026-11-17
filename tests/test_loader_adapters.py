@@ -511,8 +511,34 @@ def test_tissue_mask_flags_cells_outside():
     assert item.table.obs["in_tissue"].dtype == bool
     assert item.table.obs["in_tissue"].tolist() == [True] * 3 + [False] * 4
     assert item.records[-1].name == "TissueMask"
-    params = {"method": "otsu", "corner_size_pct": 0.05, "corners_are_background": "auto", "auto_max_pixels": 1024}
+    params = {
+        "method": "otsu",
+        "corner_size_pct": 0.05,
+        "corners_are_background": "auto",
+        "min_specimen_area_frac": 1e-4,
+        "auto_max_pixels": 1024,
+    }
     assert item.records[-1].params == params
+
+
+def _tma_item():
+    """A 256 x 256 H&E-like image with 16 cores of radius 6 px, each 0.17% of the image, like a TMA's."""
+    centres = [(32 + 64 * i, 32 + 64 * j) for i in range(4) for j in range(4)]
+    img = np.minimum.reduce([he_image(256, 256, seed=k, disk=(cy, cx, 6)) for k, (cy, cx) in enumerate(centres)])
+    sdata = make_sdata(img, shapes=squares(centres, 3), image_chunks=64)
+    return Centroids().build(Rasterize(None, tile=64).build(item_of(sdata)))
+
+
+def test_tissue_mask_default_keeps_tma_cores():
+    item = TissueMask(method="otsu", auto_max_pixels=256 * 256).build(_tma_item())
+    assert item.table.obs["in_tissue"].any()  # with squidpy's 0.01 the mask is empty (next test)
+
+
+def test_tissue_mask_empty_mask_warns(caplog):
+    with caplog.at_level(logging.WARNING, logger="sddb.loader"):
+        item = TissueMask(method="otsu", auto_max_pixels=256 * 256, min_specimen_area_frac=0.01).build(_tma_item())
+    assert not item.table.obs["in_tissue"].any()
+    assert "TissueMask found no tissue (min_specimen_area_frac=0.01)" in caplog.text
 
 
 def test_tissue_mask_keeps_the_source_in_tissue_column():
@@ -523,7 +549,7 @@ def test_tissue_mask_keeps_the_source_in_tissue_column():
     item = TissueMask(method="otsu", auto_max_pixels=1024).build(Centroids().build(item))
     assert item.table.obs["in_tissue"].tolist() == [True, False]
     assert item.table.obs["in_tissue_source"].tolist() == [0, 1]
-    assert item.records[-1].version == "0.3.0"
+    assert item.records[-1].version == "0.4.0"
 
 
 def _pale_tissue(size=512, seed=0):
@@ -552,7 +578,13 @@ def test_tissue_mask_default_finds_pale_tissue():
     mask = np.asarray(out.labels["tissue"]) > 0
     assert (mask & truth).sum() / (mask | truth).sum() > 0.9
     assert out.table.obs["in_tissue"].tolist() == [True, False, True]
-    params = {"method": "weka", "corner_size_pct": 0.05, "corners_are_background": "auto", "method_params": {"rng": 0}}
+    params = {
+        "method": "weka",
+        "corner_size_pct": 0.05,
+        "corners_are_background": "auto",
+        "min_specimen_area_frac": 1e-4,
+        "method_params": {"rng": 0},
+    }
     assert out.records[-1].params == params
     np.testing.assert_array_equal(np.asarray(TissueMask().build(item).labels["tissue"]), mask)  # seeded: same mask
     # squidpy's default: otsu keeps only the nuclei, and its area filter then drops them
@@ -588,6 +620,7 @@ def test_stain_pooled_fit_one_reference(monkeypatch):
     assert len(calls) == 1
     assert len(calls[0]["image_key"]) == 2
     assert step.reference is reference
+    assert "max_angle_deg" not in calls[0]
 
     out = [step.build(item) for item in items]
     for item in out:
@@ -599,6 +632,18 @@ def test_stain_pooled_fit_one_reference(monkeypatch):
     assert out[0].stain_reference == out[1].stain_reference
     assert out[0].records[-1] == out[1].records[-1]
     np.testing.assert_allclose(out[0].stain_reference["stain_matrix"], reference.stain_matrix)
+
+
+def test_stain_fit_passes_max_angle_deg_and_records_it(monkeypatch):
+    import squidpy.experimental.im as sqim
+
+    calls = []
+    fit = sqim.fit_stain_reference
+    monkeypatch.setattr(sqim, "fit_stain_reference", lambda *a, **k: calls.append(k) or fit(*a, **k))
+    step = StainNormalize(max_angle_deg=50.0)
+    step.fit([_he_item(0), _he_item(1)])
+    assert calls[0]["max_angle_deg"] == 50.0
+    assert step.config["max_angle_deg"] == 50.0
 
 
 def test_stain_normalisation_changes_pixels_only_when_the_staining_differs():
