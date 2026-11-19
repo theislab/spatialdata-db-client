@@ -42,7 +42,7 @@ typer = "*"
 [pypi-dependencies]
 rapids-singlecell-cu13 = "*"
 spatialdata-plot = "*"
-spatialdata-db = { git = "https://github.com/theislab/spatialdata-db-client.git", tag = "v0.1.4" }  # the pinned client release
+spatialdata-db = { git = "https://github.com/theislab/spatialdata-db-client.git", tag = "v0.1.5" }  # the pinned client release
 
 [activation.env]
 PYTHONNOUSERSITE = "1"  # keep ~/.local pip installs (e.g. stray nvidia-* wheels) from shadowing the env's CUDA libs

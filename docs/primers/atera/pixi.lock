@@ -527,7 +527,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/a8/c0/2dfab7b319dabe23f5a7b515a797c74b501d15c72e7a03837cf0cf779b9e/matplotlib_scalebar-0.9.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/f3/b4/b855a08195794af6cc6c5106b0ce136b72de889ec0ae4ccc94c479f568d2/rapids_singlecell_cu13-0.18.1-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/45/3c/b9034bf92e1af05475bf6b186b22efaf551a9993364b141aab89ca9c3357/scikit_misc-0.5.3-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl
-      - pypi: git+https://github.com/theislab/spatialdata-db-client.git?tag=v0.1.4#66dc3b398430c9a0ddeb512ffbec042ea3223165
+      - pypi: git+https://github.com/theislab/spatialdata-db-client.git?tag=v0.1.5#c9a71d361358c64d84be58a0869b6277b2a4b0ae
       - pypi: https://files.pythonhosted.org/packages/6e/a7/99a9a4397111dd497f8cae506c6100c5058f6c1ddc73e18affd9f5ae7f2a/spatialdata_plot-0.4.3-py3-none-any.whl
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-8_kmp_llvm.conda
@@ -7343,9 +7343,9 @@ packages:
   - pkg:pypi/spatialdata?source=hash-mapping
   size: 153755
   timestamp: 1783420938275
-- pypi: git+https://github.com/theislab/spatialdata-db-client.git?tag=v0.1.4#66dc3b398430c9a0ddeb512ffbec042ea3223165
+- pypi: git+https://github.com/theislab/spatialdata-db-client.git?tag=v0.1.5#c9a71d361358c64d84be58a0869b6277b2a4b0ae
   name: spatialdata-db
-  version: 0.1.4
+  version: 0.1.5
   requires_dist:
   - fsspec
   - pandas>=2.2
@@ -7357,6 +7357,14 @@ packages:
   - typer
   - universal-pathlib
   - zarr>=3
+  - dask-image ; extra == 'loader'
+  - pydantic>=2 ; extra == 'loader'
+  - scikit-image ; extra == 'loader'
+  - snakemake>=9 ; extra == 'loader'
+  - snakemake-executor-plugin-slurm ; extra == 'loader'
+  - spatialbatch ; extra == 'loader'
+  - squidpy>=1.8.2 ; extra == 'loader'
+  - threadpoolctl ; extra == 'loader'
   - mcp ; extra == 'mcp'
   - anndata<0.13 ; extra == 'viz'
   - easy-vitessce ; extra == 'viz'
