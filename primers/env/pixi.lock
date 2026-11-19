@@ -525,7 +525,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/44/8e/250fab1cafeea43f4eb11f1d64cd6313f639965ff62cb0d9da3883655781/docrep-0.3.2.tar.gz
       - pypi: https://files.pythonhosted.org/packages/f3/b4/b855a08195794af6cc6c5106b0ce136b72de889ec0ae4ccc94c479f568d2/rapids_singlecell_cu13-0.18.1-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/45/3c/b9034bf92e1af05475bf6b186b22efaf551a9993364b141aab89ca9c3357/scikit_misc-0.5.3-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl
-      - pypi: git+https://github.com/theislab/spatialdata-db-client?tag=v0.1.3#e044e35a4febad2ca63c549c7945f35e84712bcc
+      - pypi: git+https://github.com/theislab/spatialdata-db-client?tag=v0.1.5#c9a71d361358c64d84be58a0869b6277b2a4b0ae
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-8_kmp_llvm.conda
   build_number: 8
@@ -7299,9 +7299,9 @@ packages:
   - pkg:pypi/spatialdata?source=hash-mapping
   size: 153755
   timestamp: 1783420938275
-- pypi: git+https://github.com/theislab/spatialdata-db-client?tag=v0.1.3#e044e35a4febad2ca63c549c7945f35e84712bcc
+- pypi: git+https://github.com/theislab/spatialdata-db-client?tag=v0.1.5#c9a71d361358c64d84be58a0869b6277b2a4b0ae
   name: spatialdata-db
-  version: 0.1.3
+  version: 0.1.5
   requires_dist:
   - fsspec
   - pandas>=2.2
@@ -7313,6 +7313,14 @@ packages:
   - typer
   - universal-pathlib
   - zarr>=3
+  - dask-image ; extra == 'loader'
+  - pydantic>=2 ; extra == 'loader'
+  - scikit-image ; extra == 'loader'
+  - snakemake>=9 ; extra == 'loader'
+  - snakemake-executor-plugin-slurm ; extra == 'loader'
+  - spatialbatch ; extra == 'loader'
+  - squidpy>=1.8.2 ; extra == 'loader'
+  - threadpoolctl ; extra == 'loader'
   - mcp ; extra == 'mcp'
   - anndata<0.13 ; extra == 'viz'
   - easy-vitessce ; extra == 'viz'
