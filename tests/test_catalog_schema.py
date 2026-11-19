@@ -227,6 +227,14 @@ def test_capture_area_column_present():
     assert "capture_area" not in schema.REQUIRED_COLUMNS
 
 
+def test_capture_area_source_and_image_channels_columns_present():
+    from sddb import _catalog_schema as schema
+
+    assert schema.CATALOG_COLUMNS["capture_area_source"] == "string"
+    assert schema.CATALOG_COLUMNS["image_channels"] == "list[string]"
+    assert not {"capture_area_source", "image_channels"} & set(schema.REQUIRED_COLUMNS)
+
+
 def test_obs_unit_and_segmentation_columns_present():
     from sddb import _catalog_schema as schema
 
