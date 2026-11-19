@@ -1,0 +1,66 @@
+name: Release
+
+# From the scverse cookiecutter (scverse/cookiecutter-scverse@f46993f, .github/workflows/release.yaml).
+# Only code releases (tags v*, pre-releases such as v0.2.0rc1 included) publish; catalog-*, primers-* and
+# tech-primers-* data releases never do. The TestPyPI job is for a dry run before the first PyPI release:
+# run it from the Actions tab ("Run workflow") on a v* tag.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Use "trusted publishing", see https://docs.pypi.org/trusted-publishers/
+permissions: {}
+
+jobs:
+  release:
+    name: Upload release to PyPI
+    if: github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/spatialdata-db
+    permissions:
+      contents: read
+      id-token: write # IMPORTANT: this permission is mandatory for trusted publishing
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          filter: blob:none
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: false
+      - name: Build package
+        run: uv build
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+
+  testpypi:
+    name: Upload to TestPyPI
+    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref_name, 'v')
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/spatialdata-db
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          filter: blob:none
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: false
+      - name: Build package
+        run: uv build
+      - name: Publish package distributions to TestPyPI
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          repository-url: https://test.pypi.org/legacy/
