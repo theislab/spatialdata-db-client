@@ -118,7 +118,8 @@ CATALOG_COLUMNS: dict[str, str] = {
     "capture_area": "string",
     # where capture_area came from: "stated" (the vendor's text) or "inferred" (from the array extent)
     "capture_area_source": "string",
-    # channel names across the dataset's images: "R", "G", "B" for H&E, marker names for IF / multiplexed
+    # channel names across the dataset's images: one "RGB" for an H&E or brightfield image, marker names for IF
+    # and multiplexed images (the hub's catalog_image_channels)
     "image_channels": "list[string]",
     # the source release date (when the repository made the data public), NOT the paper's date: cite with
     # publication_year (docs/reference/catalog-columns.md "Dates"); the name stays until a schema bump
