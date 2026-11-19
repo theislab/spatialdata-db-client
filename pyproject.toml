@@ -7,6 +7,8 @@ name = "spatialdata-db"
 description = "Lean read client for the spatialdata-db spatial-omics collection."
 readme = "README.md"
 license = "BSD-3-Clause"
+authors = [ { name = "Tim Treis", email = "tim.treis@helmholtz-munich.de" }, { name = "Theis Lab" } ]
+maintainers = [ { name = "Tim Treis", email = "tim.treis@helmholtz-munich.de" } ]
 requires-python = ">=3.12"
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
@@ -28,10 +30,14 @@ dependencies = [
   "typer",
 ]
 
+urls.Documentation = "https://spatialdata-db.readthedocs.io/en/latest/"
+urls.Homepage = "https://www.spatialdata-db.com"
+urls.Issues = "https://github.com/theislab/spatialdata-db-client/issues"
+urls.Source = "https://github.com/theislab/spatialdata-db-client"
+
 [project.optional-dependencies]
 viz = [ "vitessce", "easy_vitessce", "spatialdata-plot", "anndata<0.13" ]
 mcp = [ "mcp" ]
-llm = [ ]
 loader = [
   "pydantic>=2",
   "squidpy>=1.8.2",
