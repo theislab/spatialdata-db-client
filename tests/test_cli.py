@@ -68,18 +68,8 @@ def test_query_bad_validation(cat_url):
 def test_viewer_url(cat_url):
     r = runner.invoke(app, ["viewer-url", "uid0001", "--catalog", cat_url])
     assert r.exit_code == 0
-    assert r.output.strip().startswith("https://vitessce.io/?url=https://aws.eu-central-1.lamin.ai/storage/s3/")
+    assert r.output.strip().startswith("https://www.merfisheyes.com/spatialdata-viewer/from-s3?url=https%3A%2F%2F")
     assert runner.invoke(app, ["viewer-url", "nope", "--catalog", cat_url]).exit_code == 1
-
-
-def test_viewer_url_fails_on_another_datasets_store(tmp_path):
-    df = make_fixture_catalog()
-    df["vitessce_url"] = "https://vitessce.io#?edit=false&url=data:,%252E.lamindb%252FotherStore000000.zarr"
-    (p := tmp_path / "cat.parquet").write_bytes(df.to_parquet())
-    with pytest.warns(UserWarning, match="another dataset's store"):
-        r = runner.invoke(app, ["viewer-url", "uid0001", "--catalog", p.as_uri()])
-    assert r.exit_code == 1
-    assert "no usable viewer link" in r.output
 
 
 def test_download(tmp_path):

@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import re
-import warnings
 import webbrowser
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import unquote
+from urllib.parse import quote
 
 import numpy as np
 import pandas as pd
@@ -20,39 +18,9 @@ from sddb.roles import resolve as _resolve_roles
 if TYPE_CHECKING:
     from spatialdata import SpatialData
 
-_VITESSCE = "https://vitessce.io/?url="
-_STORE_ID = re.compile(r"\.lamindb/([A-Za-z0-9]+)\.zarr")
-
-
-def _loads_other_store(vitessce_url: str, zarr_url: str | None) -> bool:
-    """True when a viewer link loads a ``.lamindb/<id>.zarr`` store other than the one in ``zarr_url``.
-
-    Published links embed the Vitessce config URL-encoded twice, so the link is decoded twice before the
-    store ids are read. A link or ``zarr_url`` without a store id is not checked.
-    """
-    linked = set(_STORE_ID.findall(unquote(unquote(vitessce_url))))
-    own = set(_STORE_ID.findall(zarr_url or ""))
-    return bool(linked and own) and linked != own
-
-
-def usable_vitessce_url(uid: Any, vitessce_url: Any, zarr_url: Any, *, warn: bool = True) -> str | None:
-    """``vitessce_url``, or None when it is missing or loads another dataset's store.
-
-    Every path that returns or renders a ``vitessce_url`` goes through this check, as the website does.
-    A hidden link gives a warning unless ``warn`` is False, for callers that report many rows at once.
-    """
-    url = _clean(vitessce_url)
-    if not url:
-        return None
-    if _loads_other_store(str(url), _clean(zarr_url)):
-        if warn:
-            warnings.warn(
-                f"the viewer link for {uid} loads another dataset's store; it is hidden until the catalog is fixed",
-                UserWarning,
-                stacklevel=3,
-            )
-        return None
-    return str(url)
+# The public buckets' https origins, as the website builds them (src/lib/inventory-core.mjs httpsUrl).
+_S3_HTTPS = {"scverse-spatial-eu-central-1": "https://scverse-spatial-eu-central-1.s3.eu-central-1.amazonaws.com"}
+_MERFISHEYES = "https://www.merfisheyes.com/spatialdata-viewer/from-s3?url="
 
 
 @dataclass(frozen=True)
@@ -141,35 +109,14 @@ class Dataset:
         return _resolve_roles(self.elements().keys(), roles)
 
     def viewer_url(self) -> str | None:
-        """Build a vitessce.io viewer link from this row's ``vitessce_url`` (pure string transform).
+        """The dataset in MERFISHEYES, the website's viewer, which reads the store straight from S3.
 
-        If ``vitessce_url`` is already a vitessce.io viewer link (as in the published catalog) it is
-        returned unchanged. Otherwise it is treated as a config-sidecar URL: an ``s3://bucket/key`` URL is
-        rewritten to the LaminHub CORS proxy ``https://aws.eu-central-1.lamin.ai/storage/s3/bucket%2F/key`` and wrapped as
-        ``https://vitessce.io/?url=<proxied>``.
-
-        Some published links load another dataset's store (333 of 6087 rows in the 2026-10-28 catalog). The
-        store id in the link (``.lamindb/<id>.zarr``) is compared with the one in ``zarr_url``, and on a
-        mismatch the link is hidden: this returns ``None`` with a warning, as the website does.
-
-        Warns
-        -----
-        UserWarning
-            If the link loads another dataset's store.
-
-        Raises
-        ------
-        ValueError
-            If the row has no ``vitessce_url``.
+        The link is the one the dataset page's "Open in MERFISHEYES" button opens. ``None`` when the store is not in
+        a public bucket.
         """
-        if not self.vitessce_url:
-            raise ValueError(f"dataset {self.uid} has no vitessce_url")
-        url = usable_vitessce_url(self.uid, self.vitessce_url, self.zarr_url)
-        if url is None:
-            return None
-        if url.startswith("https://vitessce.io"):
-            return url
-        return _VITESSCE + remote.proxy_url(url)
+        bucket, _, key = str(self.zarr_url or "").removeprefix("s3://").partition("/")
+        origin = _S3_HTTPS.get(bucket) if str(self.zarr_url or "").startswith("s3://") else None
+        return f"{_MERFISHEYES}{quote(f'{origin}/{key}', safe='')}" if origin else None
 
     def view(self) -> None:
         """Open :meth:`viewer_url` in the default browser.
@@ -177,37 +124,12 @@ class Dataset:
         Raises
         ------
         ValueError
-            If the row has no ``vitessce_url``, or its link loads another dataset's store (with the warning
-            from :meth:`viewer_url`).
+            If the store is not in a public bucket, so there is no viewer link.
         """
         url = self.viewer_url()
         if url is None:
-            raise ValueError(f"dataset {self.uid} has no usable viewer link")
+            raise ValueError(f"dataset {self.uid} has no viewer link")
         webbrowser.open(url)
-
-    def view_interactive(self, *, mode: str = "config") -> Any:
-        """In-notebook interactive view; requires the ``[viz]`` extra.
-
-        ``mode="config"`` renders the published Vitessce config (``vitessce_url``); ``mode="sdata"``
-        loads the store and renders it via easy_vitessce.
-
-        Raises
-        ------
-        ValueError
-            With ``mode="config"``, if the row has no ``vitessce_url`` or its link loads another dataset's
-            store (with the warning from :meth:`viewer_url`).
-        """
-        from sddb import viz
-
-        if mode == "sdata":
-            return viz.render_sdata(self.to_sdata())
-        if mode != "config":
-            raise ValueError(f"mode must be 'config' or 'sdata', got {mode!r}")
-        url = usable_vitessce_url(self.uid, self.vitessce_url, self.zarr_url)
-        if url is None:
-            raise ValueError(f"dataset {self.uid} has no usable vitessce_url")
-        inlined = viz.config_from_vitessce_url(url)
-        return viz.render_config(inlined if inlined is not None else remote.proxy_url(url))
 
     def __repr__(self) -> str:
         return f"<Dataset {self.uid} technology={self.technology} organism={self.organism}>"

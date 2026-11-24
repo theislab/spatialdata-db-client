@@ -45,6 +45,7 @@ tool/MCP surface and a stable catalog contract rank above heavy ML affordances.
 | D62 | The **client takes the public name**: PyPI `spatialdata-db`, import `sddb`. The **engine is renamed** (package + its `sddb` CLI) as a separate migration of this repo. |
 | D63 | **MCP server ships in v1** as an optional `[mcp]` extra (agents are the #1 audience). |
 | D64 | Interactive viz is an optional `[viz]` extra that **reuses the Vitessce configs we already publish** (+ `easy_vitessce`); the base install stays viz-dependency-free. |
+| D64a | Superseded 2026-11-24 (Tim): Vitessce is retired. `viewer_url()` returns the MERFISHEYES link the website shows, `view_interactive()` and the published Vitessce configs are gone, and `[viz]` keeps only the plotting packages. |
 | — | License **BSD-3-Clause**; develop under **theislab**, donate to **scverse** once listed/stable; **scverse ecosystem listing targeted for v1**. |
 
 **D61 evidence** (probe, 2026-10-05, from a laptop on a normal network): anonymous S3 data access

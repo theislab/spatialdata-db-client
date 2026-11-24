@@ -36,7 +36,7 @@ urls.Issues = "https://github.com/theislab/spatialdata-db-client/issues"
 urls.Source = "https://github.com/theislab/spatialdata-db-client"
 
 [project.optional-dependencies]
-viz = [ "vitessce", "easy_vitessce", "spatialdata-plot", "anndata<0.13" ]
+viz = [ "spatialdata-plot", "anndata<0.13" ]  # the tutorials' plots; the viewer is MERFISHEYES (Dataset.viewer_url)
 mcp = [ "mcp" ]
 loader = [
   "pydantic>=2",
