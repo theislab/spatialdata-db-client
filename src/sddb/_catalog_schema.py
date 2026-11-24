@@ -62,7 +62,6 @@ CATALOG_COLUMNS: dict[str, str] = {
     # access
     "zarr_url": "string",
     "card_url": "string",
-    "vitessce_url": "string",
     "size_bytes": "Int64",
     # provenance
     "published_at": "string",

@@ -80,11 +80,12 @@ Pass uids or `--collection`, not both. `--workers` sets the number of parallel d
 
 ### viewer-url
 
-Print the browser viewer link for one dataset. Nothing is downloaded.
+Print the dataset's MERFISHEYES viewer link, the one the website's "Open in MERFISHEYES" button opens. Nothing is
+downloaded.
 
 ```
 $ sddb-cli viewer-url xVK6T0rajFTgOKci0000
-https://vitessce.io#?edit=false&url=data:,%257B%2522version%2522...
+https://www.merfisheyes.com/spatialdata-viewer/from-s3?url=https%3A%2F%2Fscverse-spatial-eu-central-1.s3.eu-central-1.amazonaws.com%2F.lamindb%2FxVK6T0rajFTgOKci.zarr
 ```
 Dataset: [`xVK6T0rajFTgOKci0000`](https://spatialdata-db-web.pages.dev/datasets/visium-hd-bone-element-xvk6t0rajftgokci0000/).
 

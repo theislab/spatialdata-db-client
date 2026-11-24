@@ -2,7 +2,7 @@
 
 The grids show one dataset for each of the 12 largest technologies, picked the way the website's front page
 picks them: group the catalog by its ``assay`` display family, take the 12 largest families (ties broken by
-name) and, in each, the first row with a Vitessce view (else the first row). The tiles are the website's card
+name) and, in each, the first row. The tiles are the website's card
 thumbnails, labelled like its cards. A family whose pick has no thumbnail, or a blank one, falls back to its
 next row with a usable one.
 
@@ -72,7 +72,6 @@ def picks(n: int = N_TILES) -> list[tuple[str, Image.Image]]:
     out = []
     for fam in families:
         rows = df[df["family"] == fam]
-        rows = rows.iloc[rows["vitessce_url"].isna().argsort(kind="stable")]  # rows with a Vitessce view first
         img = next((im for im in map(thumbnail, rows["slug"]) if im is not None), None)
         if img is None:
             raise RuntimeError(f"no thumbnail for any {fam} dataset")
