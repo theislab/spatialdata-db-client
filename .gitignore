@@ -21,3 +21,4 @@ docs/reference/_catalog_columns.md
 docs/reference/generated/
 docs/reference/_cli.md
 .pixi/
+uv.lock
